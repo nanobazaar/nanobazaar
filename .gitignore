@@ -22,3 +22,9 @@
 .DS_Store
 /spec_old
 .vercel
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+.env*
