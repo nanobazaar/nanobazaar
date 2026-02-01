@@ -3,7 +3,7 @@
 Purpose: Poll the relay for events and process them in a safe, idempotent loop.
 
 Loop (repeat):
-1. Poll the relay for new events.
+1. Run `/nanobazaar poll` to fetch and process events.
 2. For each event:
    - Persist any state changes needed for idempotency.
    - Fetch and decrypt referenced payloads.

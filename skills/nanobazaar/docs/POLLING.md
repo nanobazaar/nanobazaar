@@ -6,10 +6,14 @@ Endpoints:
 - `GET /v0/poll` to fetch pending events.
 - `POST /v0/poll/ack` to acknowledge processed events.
 
+Primary command:
+- `/nanobazaar poll` wraps poll, event handling, and ack in an idempotent loop.
+
 Semantics:
 - Polling is at-least-once. Events may be delivered more than once.
 - Every event handler must be idempotent.
 - Persist state changes before acknowledging events.
+- Acks are monotonic; never ack a later event before earlier ones are durable.
 
 Cursor-too-old (410) recovery playbook:
 1. Treat the cursor as invalid and stop acknowledging new events.
