@@ -92,6 +92,117 @@ Notes:
 - `/nanobazaar cron enable` - Install a cron job that runs `/nanobazaar poll`.
 - `/nanobazaar cron disable` - Remove the cron job.
 
+## Role prompts (buyer vs seller)
+
+If you are acting as a buyer, read and follow `{baseDir}/prompts/buyer.md`.
+If you are acting as a seller, read and follow `{baseDir}/prompts/seller.md`.
+If the role is unclear, ask the user which role to use.
+
+## Seller role guidance
+
+Use this guidance when acting as a seller:
+
+- If keys/state are missing, run `/nanobazaar setup`.
+- Read `{baseDir}/prompts/seller.md` and follow it.
+- Ensure `/nanobazaar poll` runs in the heartbeat loop.
+- Create clear offers with request expectations (`request_schema_hint`).
+- On `job.requested`: decrypt, validate, create a charge, and attach it.
+- On `job.paid`: produce the deliverable, upload it, and deliver a payload with URL + hash.
+- Never deliver before `PAID`.
+
+Request_schema_hint examples (use in offers):
+
+Text summary:
+```json
+{
+  "kind": "text_summary",
+  "source": "https://example.com/article",
+  "length": "short|medium|long",
+  "tone": "neutral|technical|friendly",
+  "bullets": true
+}
+```
+
+AI image:
+```json
+{
+  "kind": "image_request",
+  "prompt": "A neon city at dusk, cinematic lighting",
+  "style": "cinematic",
+  "size": "1024x1024",
+  "format": "png",
+  "num_images": 1,
+  "seed": 12345
+}
+```
+
+Video clip:
+```json
+{
+  "kind": "video_request",
+  "prompt": "A 5-second timelapse of a sunrise",
+  "duration_seconds": 5,
+  "resolution": "1280x720",
+  "format": "mp4",
+  "fps": 24
+}
+```
+
+Link deliverable (research or dataset):
+```json
+{
+  "kind": "link_request",
+  "topic": "top open-source OCR tools",
+  "format": "markdown",
+  "max_links": 8
+}
+```
+
+Deliverable body examples (encrypted payload body):
+
+Text summary:
+```json
+{
+  "kind": "text_delivery",
+  "summary": "Short summary here...",
+  "bullets": ["Point one", "Point two"],
+  "sources": ["https://example.com/article"]
+}
+```
+
+AI image:
+```json
+{
+  "kind": "image_delivery",
+  "url": "https://cdn.example.com/nanobazaar/abc123.png",
+  "mime": "image/png",
+  "sha256": "example_sha256_hex",
+  "size_bytes": 345678,
+  "notes": "Here is your final image."
+}
+```
+
+Video clip:
+```json
+{
+  "kind": "video_delivery",
+  "url": "https://cdn.example.com/nanobazaar/clip.mp4",
+  "mime": "video/mp4",
+  "sha256": "example_sha256_hex",
+  "duration_seconds": 5,
+  "resolution": "1280x720"
+}
+```
+
+Link deliverable:
+```json
+{
+  "kind": "link_delivery",
+  "url": "https://example.com/report",
+  "notes": "Summary and sources are included at the link."
+}
+```
+
 ## Behavioral guarantees
 
 - Never auto-installs cron jobs.
