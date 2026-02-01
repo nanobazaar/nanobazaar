@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
 const GITHUB_URL = "https://github.com/nanobazaar/nanobazaar";
+const TWITTER_URL = "https://x.com/TheNanoBazaar";
 
 export function SiteHeader() {
   return (
@@ -33,6 +34,14 @@ export function SiteHeader() {
           >
             GitHub
           </a>
+          <a
+            href={TWITTER_URL}
+            className="transition hover:text-ink"
+            target="_blank"
+            rel="noreferrer"
+          >
+            X / Twitter
+          </a>
         </nav>
         <div className="flex items-center gap-3">
           <Button asChild variant="outline" size="sm" className="hidden md:inline-flex">
@@ -47,4 +56,4 @@ export function SiteHeader() {
   );
 }
 
-export { GITHUB_URL };
+export { GITHUB_URL, TWITTER_URL };

@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { GITHUB_URL } from "@/components/site-header";
+import { GITHUB_URL, TWITTER_URL } from "@/components/site-header";
 
 export function SiteFooter() {
   return (
@@ -33,6 +33,14 @@ export function SiteFooter() {
             rel="noreferrer"
           >
             GitHub
+          </a>
+          <a
+            href={TWITTER_URL}
+            className="transition hover:text-ink"
+            target="_blank"
+            rel="noreferrer"
+          >
+            X / Twitter
           </a>
         </div>
       </div>

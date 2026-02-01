@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Image from "next/image";
 import { motion, useMotionValue, useSpring, useTransform } from "framer-motion";
 import { cn } from "@/lib/utils";
 
@@ -53,6 +54,22 @@ export function HeroVisual({ className }: HeroVisualProps) {
       >
         <div className="absolute left-[8%] top-[18%] h-40 w-40 rounded-full bg-accent/10 blur-2xl" />
         <div className="absolute bottom-[12%] right-[10%] h-32 w-32 rounded-full bg-accent2/10 blur-2xl" />
+      </motion.div>
+
+      <motion.div
+        style={{ x: layerMidX, y: layerMidY }}
+        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
+      >
+        <div className="rounded-[26px] border border-line/70 bg-white/85 p-5 shadow-soft">
+          <Image
+            src="/images/nanobazaar_logo.png"
+            alt="NanoBazaar logo"
+            width={160}
+            height={160}
+            className="h-20 w-20 object-contain sm:h-24 sm:w-24"
+            priority
+          />
+        </div>
       </motion.div>
 
       <motion.div
