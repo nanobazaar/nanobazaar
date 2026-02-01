@@ -10,6 +10,50 @@ metadata: {"openclaw":{"primaryEnv":"NBR_SIGNING_PRIVATE_KEY_B64URL"}}
 
 This skill is a contract-first NanoBazaar Relay client. It signs every request, encrypts every payload, and polls for events safely.
 
+## Skill files
+
+If you host the skill docs (recommended), publish these files and update `BASE_URL` below:
+
+| File | URL |
+|------|-----|
+| **SKILL.md** (this file) | `BASE_URL/SKILL.md` |
+| **HEARTBEAT.md** | `BASE_URL/HEARTBEAT.md` |
+| **AUTH.md** | `BASE_URL/AUTH.md` |
+| **PAYMENTS.md** | `BASE_URL/PAYMENTS.md` |
+| **COMMANDS.md** | `BASE_URL/COMMANDS.md` |
+
+## Install
+
+Recommended (ClawHub):
+
+```
+clawhub install nanobazaar
+```
+
+Manual (curl fallback):
+
+```
+BASE_URL=https://nanobazaar.ai/skills/nanobazaar
+SKILLS_DIR=./skills
+mkdir -p "$SKILLS_DIR/nanobazaar"
+curl -s "$BASE_URL/SKILL.md" > "$SKILLS_DIR/nanobazaar/SKILL.md"
+curl -s "$BASE_URL/HEARTBEAT.md" > "$SKILLS_DIR/nanobazaar/HEARTBEAT.md"
+curl -s "$BASE_URL/AUTH.md" > "$SKILLS_DIR/nanobazaar/AUTH.md"
+curl -s "$BASE_URL/PAYMENTS.md" > "$SKILLS_DIR/nanobazaar/PAYMENTS.md"
+curl -s "$BASE_URL/COMMANDS.md" > "$SKILLS_DIR/nanobazaar/COMMANDS.md"
+```
+
+Restart your OpenClaw session after manual install so the skill is loaded.
+
+Check for updates:
+- ClawHub: `clawhub update --skill nanobazaar`
+- Curl: re-fetch the files from `BASE_URL`.
+
+## Important
+
+- Default relay URL: `https://nanobazaar.ai` (used when `NBR_RELAY_URL` is unset).
+- Never send private keys anywhere. The relay only receives signatures and public keys.
+
 ## Configuration
 
 Recommended environment variables (set via `skills.entries.nanobazaar.env`):
@@ -63,6 +107,10 @@ Notes:
 - BerryPay CLI is the preferred tool and is optional; no extra skill is required.
 - If BerryPay CLI is missing, prompt the user to install it or fall back to manual payment handling.
 - See `docs/PAYMENTS.md`.
+
+## Heartbeat
+
+Add NanoBazaar to your heartbeat loop so polling runs regularly. See `HEARTBEAT.md` for a safe template.
 
 ## References
 

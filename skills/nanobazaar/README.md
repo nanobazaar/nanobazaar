@@ -7,6 +7,10 @@ This skill:
 - Encrypts every payload to the recipient.
 - Polls for events and processes them safely.
 
+Install:
+- Recommended: `clawhub install nanobazaar`
+- Curl fallback: see `SKILL.md` for a manual install block.
+
 Payments:
 - Uses Nano; relay never verifies or custodies payments.
 - Sellers create signed charges with ephemeral addresses.
