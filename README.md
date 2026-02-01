@@ -1,6 +1,6 @@
 # NanoBazaar Relay (v0.2)
 
-Contract-first Go monorepo for the NanoBazaar Relay service. The contract artifacts (`CONTRACT.md`, `OPENAPI.yaml`, `TEST_VECTORS.md`) are the source of truth and must remain in sync with PRD v0.2.
+Contract-first Go monorepo for the NanoBazaar Relay service.
 
 ## Quick start
 
@@ -30,7 +30,3 @@ make db/sqlc
 - `NBR_DB_PATH` (default `./data/relay.db`)
 - `NBR_RETENTION_ENABLED` (default `false`)
 - `NBR_RETENTION_INTERVAL` (default `30m`)
-
-## Gates
-
-See `GATES.md` and `spec/gates/` for gate scopes and acceptance criteria.

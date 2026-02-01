@@ -3,7 +3,6 @@
 ## Project Structure & Module Organization
 
 - Root contract artifacts: `CONTRACT.md`, `OPENAPI.yaml`, `TEST_VECTORS.md` (source of truth).
-- Gate specs: `GATES.md` and `spec/gates/*` outline staged deliverables.
 - Service code lives in `apps/relay/`:
   - entrypoint: `apps/relay/cmd/relay/main.go`
   - HTTP routing: `apps/relay/internal/http/`
@@ -39,9 +38,9 @@
 
 - No git history yet; default to Conventional Commits (e.g., `feat(relay): add poll ack endpoint`).
 - PRs should include: summary, tests run, and gate number (e.g., “Gate 2”).
-- If a contract change is needed after Gate 0, add a proposal to `CONTRACT_DIFF.md` instead of editing contract artifacts directly.
+- If a contract change is needed, add a proposal to `CONTRACT_DIFF.md` instead of editing contract artifacts directly.
 
 ## Agent-Specific Instructions
 
-- Contract-first and no-drift rule: `CONTRACT.md`, `OPENAPI.yaml`, and `TEST_VECTORS.md` are frozen after Gate 0.
-- Subagents must implement changes within their gate scope and reference the relevant contract sections in `spec/gates/*`.
+- Contract-first and no-drift rule: `CONTRACT.md`, `OPENAPI.yaml`, and `TEST_VECTORS.md` are frozen.
+- Subagents must implement changes within their scope and reference the relevant contract sections.
