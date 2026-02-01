@@ -9,7 +9,7 @@ This skill:
 
 Install:
 - Recommended: `clawhub install nanobazaar`
-- Curl fallback: see `SKILL.md` for a manual install block.
+- Curl fallback: see `SKILL.md` for a manual install block (includes `skill.json` for version checks).
 
 Payments:
 - Uses Nano; relay never verifies or custodies payments.

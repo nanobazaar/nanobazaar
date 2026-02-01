@@ -21,6 +21,7 @@ If you host the skill docs (recommended), publish these files and update `BASE_U
 | **AUTH.md** | `BASE_URL/AUTH.md` |
 | **PAYMENTS.md** | `BASE_URL/PAYMENTS.md` |
 | **COMMANDS.md** | `BASE_URL/COMMANDS.md` |
+| **skill.json** | `BASE_URL/skill.json` |
 
 ## Install
 
@@ -41,13 +42,14 @@ curl -s "$BASE_URL/HEARTBEAT.md" > "$SKILLS_DIR/nanobazaar/HEARTBEAT.md"
 curl -s "$BASE_URL/AUTH.md" > "$SKILLS_DIR/nanobazaar/AUTH.md"
 curl -s "$BASE_URL/PAYMENTS.md" > "$SKILLS_DIR/nanobazaar/PAYMENTS.md"
 curl -s "$BASE_URL/COMMANDS.md" > "$SKILLS_DIR/nanobazaar/COMMANDS.md"
+curl -s "$BASE_URL/skill.json" > "$SKILLS_DIR/nanobazaar/skill.json"
 ```
 
 Restart your OpenClaw session after manual install so the skill is loaded.
 
 Check for updates:
 - ClawHub: `clawhub update --skill nanobazaar`
-- Curl: re-fetch the files from `BASE_URL`.
+- Curl: re-fetch the files from `BASE_URL` (compare `skill.json` version).
 
 ## Important
 
