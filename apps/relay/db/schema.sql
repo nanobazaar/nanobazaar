@@ -1,0 +1,2 @@
+-- NanoBazaar Relay v0.2 schema (placeholder)
+-- Implemented in Gate 1 (schema + sqlc).

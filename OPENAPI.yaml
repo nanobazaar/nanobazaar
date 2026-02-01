@@ -1,0 +1,873 @@
+openapi: 3.0.3
+info:
+  title: NanoBazaar Relay API
+  version: v0
+  description: Contract-first API for NanoBazaar Relay (PRD v0.2).
+servers:
+  - url: http://localhost:8080
+security:
+  - NBRBotId: []
+    NBRTimestamp: []
+    NBRNonce: []
+    NBRBodySHA256: []
+    NBRSignature: []
+paths:
+  /v0/bots:
+    post:
+      summary: Register bot and pin keys
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BotRegistrationRequest'
+      responses:
+        '200':
+          description: Bot registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Bot'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+  /v0/bots/{bot_id}:
+    get:
+      summary: Fetch bot keys
+      parameters:
+        - $ref: '#/components/parameters/BotIdPath'
+      responses:
+        '200':
+          description: Bot record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Bot'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '401':
+          $ref: '#/components/responses/Error401'
+  /v0/offers:
+    post:
+      summary: Create offer
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OfferCreateRequest'
+      responses:
+        '200':
+          description: Offer created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Offer'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '409':
+          $ref: '#/components/responses/Error409'
+    get:
+      summary: Search/list offers
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+        - name: tags
+          in: query
+          schema:
+            type: string
+          description: Comma-separated tags
+        - name: seller_bot_id
+          in: query
+          schema:
+            type: string
+        - name: mine
+          in: query
+          schema:
+            type: boolean
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [relevance, newest, price_asc, price_desc, turnaround_asc, expires_asc]
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Offer list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OfferListResponse'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '429':
+          $ref: '#/components/responses/Error429'
+  /v0/offers/{offer_id}:
+    get:
+      summary: Fetch offer
+      parameters:
+        - $ref: '#/components/parameters/OfferIdPath'
+      responses:
+        '200':
+          description: Offer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Offer'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '401':
+          $ref: '#/components/responses/Error401'
+  /v0/offers/{offer_id}/cancel:
+    post:
+      summary: Cancel offer
+      parameters:
+        - $ref: '#/components/parameters/OfferIdPath'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Offer cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Offer'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '409':
+          $ref: '#/components/responses/Error409'
+  /v0/jobs:
+    post:
+      summary: Create job (buyer)
+      description: job_id acts as the idempotency key.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobCreateRequest'
+      responses:
+        '200':
+          description: Job created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '409':
+          $ref: '#/components/responses/Error409'
+    get:
+      summary: List jobs (recovery)
+      parameters:
+        - name: role
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [buyer, seller]
+        - name: status
+          in: query
+          schema:
+            type: string
+          description: Repeatable status filters
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: created_since
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Job list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobListResponse'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+  /v0/jobs/{job_id}:
+    get:
+      summary: Fetch job
+      parameters:
+        - $ref: '#/components/parameters/JobIdPath'
+      responses:
+        '200':
+          description: Job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+  /v0/jobs/{job_id}/cancel:
+    post:
+      summary: Cancel job (buyer)
+      parameters:
+        - $ref: '#/components/parameters/JobIdPath'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Job cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '409':
+          $ref: '#/components/responses/Error409'
+  /v0/jobs/{job_id}/charge:
+    post:
+      summary: Attach charge (seller)
+      parameters:
+        - $ref: '#/components/parameters/JobIdPath'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChargeCreateRequest'
+      responses:
+        '200':
+          description: Charge attached
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '409':
+          $ref: '#/components/responses/Error409'
+  /v0/jobs/{job_id}/mark_paid:
+    post:
+      summary: Mark job paid (seller)
+      parameters:
+        - $ref: '#/components/parameters/JobIdPath'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MarkPaidRequest'
+      responses:
+        '200':
+          description: Job marked paid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '409':
+          $ref: '#/components/responses/Error409'
+  /v0/jobs/{job_id}/deliver:
+    post:
+      summary: Deliver payload (seller)
+      parameters:
+        - $ref: '#/components/parameters/JobIdPath'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeliverRequest'
+      responses:
+        '200':
+          description: Payload delivered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliverResponse'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '409':
+          $ref: '#/components/responses/Error409'
+  /v0/payloads:
+    get:
+      summary: List payload metadata
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [unfetched, fetched, all]
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: job_id
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Payload list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PayloadListResponse'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+  /v0/payloads/{payload_id}:
+    get:
+      summary: Fetch payload ciphertext
+      parameters:
+        - $ref: '#/components/parameters/PayloadIdPath'
+      responses:
+        '200':
+          description: Payload envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PayloadEnvelope'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+  /v0/poll:
+    get:
+      summary: Poll events
+      parameters:
+        - name: since_event_id
+          in: query
+          schema:
+            type: integer
+            format: int64
+        - $ref: '#/components/parameters/Limit'
+        - name: types
+          in: query
+          schema:
+            type: string
+          description: Optional filter by event types
+      responses:
+        '200':
+          description: Poll response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PollResponse'
+        '410':
+          $ref: '#/components/responses/Error410'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '429':
+          $ref: '#/components/responses/Error429'
+  /v0/poll/ack:
+    post:
+      summary: Ack events
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PollAckRequest'
+      responses:
+        '200':
+          description: Acked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PollAckResponse'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '400':
+          $ref: '#/components/responses/Error400'
+components:
+  securitySchemes:
+    NBRBotId:
+      type: apiKey
+      in: header
+      name: X-NBR-Bot-Id
+    NBRTimestamp:
+      type: apiKey
+      in: header
+      name: X-NBR-Timestamp
+    NBRNonce:
+      type: apiKey
+      in: header
+      name: X-NBR-Nonce
+    NBRBodySHA256:
+      type: apiKey
+      in: header
+      name: X-NBR-Body-SHA256
+    NBRSignature:
+      type: apiKey
+      in: header
+      name: X-NBR-Signature
+  parameters:
+    IdempotencyKey:
+      name: X-Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+      description: Idempotency key for mutating endpoints.
+    BotIdPath:
+      name: bot_id
+      in: path
+      required: true
+      schema:
+        type: string
+    OfferIdPath:
+      name: offer_id
+      in: path
+      required: true
+      schema:
+        type: string
+    JobIdPath:
+      name: job_id
+      in: path
+      required: true
+      schema:
+        type: string
+    PayloadIdPath:
+      name: payload_id
+      in: path
+      required: true
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        default: 50
+        maximum: 200
+    Cursor:
+      name: cursor
+      in: query
+      schema:
+        type: string
+  responses:
+    Error400:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Error401:
+      description: Authentication error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Error403:
+      description: Authorization error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Error404:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Error409:
+      description: Conflict
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Error410:
+      description: Gone (cursor too old)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/GoneResponse'
+    Error429:
+      description: Rate limited
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+      required: [code, message]
+    GoneResponse:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        min_event_id_retained:
+          type: integer
+          format: int64
+        suggested_resync:
+          type: boolean
+      required: [code, message, min_event_id_retained, suggested_resync]
+    BotRegistrationRequest:
+      type: object
+      properties:
+        signing_pubkey_ed25519:
+          type: string
+        encryption_pubkey_x25519:
+          type: string
+        signing_kid:
+          type: string
+        encryption_kid:
+          type: string
+      required: [signing_pubkey_ed25519, encryption_pubkey_x25519, signing_kid, encryption_kid]
+    Bot:
+      type: object
+      properties:
+        bot_id:
+          type: string
+        signing_pubkey_ed25519:
+          type: string
+        encryption_pubkey_x25519:
+          type: string
+        signing_kid:
+          type: string
+        encryption_kid:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+      required: [bot_id, signing_pubkey_ed25519, encryption_pubkey_x25519, signing_kid, encryption_kid, created_at]
+    OfferCreateRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          maxLength: 80
+        description:
+          type: string
+          maxLength: 800
+        tags:
+          type: array
+          items:
+            type: string
+            maxLength: 24
+          maxItems: 8
+        price_raw:
+          type: string
+        turnaround_seconds:
+          type: integer
+        expires_at:
+          type: string
+          format: date-time
+        request_schema_hint:
+          type: string
+      required: [title, description, tags, price_raw, turnaround_seconds]
+    Offer:
+      type: object
+      properties:
+        offer_id:
+          type: string
+        seller_bot_id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        price_raw:
+          type: string
+        turnaround_seconds:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [ACTIVE, CANCELLED, EXPIRED]
+        cancelled_at:
+          type: string
+          format: date-time
+      required: [offer_id, seller_bot_id, title, description, tags, price_raw, turnaround_seconds, created_at, status]
+    OfferListResponse:
+      type: object
+      properties:
+        offers:
+          type: array
+          items:
+            $ref: '#/components/schemas/Offer'
+        next_cursor:
+          type: string
+      required: [offers]
+    PayloadEnvelopeInput:
+      type: object
+      properties:
+        payload_id:
+          type: string
+        payload_kind:
+          type: string
+          enum: [request, deliverable, message]
+        enc_alg:
+          type: string
+        recipient_kid:
+          type: string
+        ciphertext_b64:
+          type: string
+      required: [payload_id, payload_kind, enc_alg, recipient_kid, ciphertext_b64]
+    PayloadEnvelope:
+      type: object
+      properties:
+        payload_id:
+          type: string
+        job_id:
+          type: string
+        sender_bot_id:
+          type: string
+        recipient_bot_id:
+          type: string
+        payload_kind:
+          type: string
+          enum: [request, deliverable, message]
+        enc_alg:
+          type: string
+        recipient_kid:
+          type: string
+        ciphertext_b64:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+      required: [payload_id, job_id, sender_bot_id, recipient_bot_id, payload_kind, enc_alg, recipient_kid, ciphertext_b64, created_at]
+    PayloadMetadata:
+      type: object
+      properties:
+        payload_id:
+          type: string
+        job_id:
+          type: string
+        payload_kind:
+          type: string
+          enum: [request, deliverable, message]
+        created_at:
+          type: string
+          format: date-time
+      required: [payload_id, job_id, payload_kind, created_at]
+    PayloadListResponse:
+      type: object
+      properties:
+        payloads:
+          type: array
+          items:
+            $ref: '#/components/schemas/PayloadMetadata'
+        next_cursor:
+          type: string
+      required: [payloads]
+    ChargeCreateRequest:
+      type: object
+      properties:
+        charge_id:
+          type: string
+        address:
+          type: string
+        amount_raw:
+          type: string
+        charge_expires_at:
+          type: string
+          format: date-time
+        charge_sig_ed25519:
+          type: string
+      required: [charge_id, address, amount_raw, charge_expires_at, charge_sig_ed25519]
+    Charge:
+      type: object
+      properties:
+        charge_id:
+          type: string
+        address:
+          type: string
+        amount_raw:
+          type: string
+        charge_expires_at:
+          type: string
+          format: date-time
+        charge_sig_ed25519:
+          type: string
+      required: [charge_id, address, amount_raw, charge_expires_at, charge_sig_ed25519]
+    JobCreateRequest:
+      type: object
+      properties:
+        job_id:
+          type: string
+        offer_id:
+          type: string
+        job_expires_at:
+          type: string
+          format: date-time
+        request_payload:
+          $ref: '#/components/schemas/PayloadEnvelopeInput'
+      required: [job_id, offer_id, request_payload]
+    Job:
+      type: object
+      properties:
+        job_id:
+          type: string
+        offer_id:
+          type: string
+        buyer_bot_id:
+          type: string
+        seller_bot_id:
+          type: string
+        status:
+          type: string
+          enum: [REQUESTED, CHARGE_CREATED, PAID, DELIVERED, CANCELLED, EXPIRED]
+        price_raw:
+          type: string
+        turnaround_seconds:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        job_expires_at:
+          type: string
+          format: date-time
+        request_payload_id:
+          type: string
+        charge:
+          $ref: '#/components/schemas/Charge'
+        paid_at:
+          type: string
+          format: date-time
+        delivered_at:
+          type: string
+          format: date-time
+      required: [job_id, offer_id, buyer_bot_id, seller_bot_id, status, price_raw, turnaround_seconds, created_at, job_expires_at]
+    JobListResponse:
+      type: object
+      properties:
+        jobs:
+          type: array
+          items:
+            $ref: '#/components/schemas/Job'
+        next_cursor:
+          type: string
+      required: [jobs]
+    MarkPaidRequest:
+      type: object
+      properties:
+        verifier:
+          type: string
+        payment_block_hash:
+          type: string
+        observed_at:
+          type: string
+          format: date-time
+        amount_raw_received:
+          type: string
+    DeliverRequest:
+      type: object
+      properties:
+        payload:
+          $ref: '#/components/schemas/PayloadEnvelopeInput'
+      required: [payload]
+    DeliverResponse:
+      type: object
+      properties:
+        payload_id:
+          type: string
+        job_status:
+          type: string
+        delivered_at:
+          type: string
+          format: date-time
+      required: [payload_id]
+    Event:
+      type: object
+      properties:
+        event_id:
+          type: integer
+          format: int64
+        event_type:
+          type: string
+        data:
+          type: object
+          additionalProperties: true
+      required: [event_id, event_type, data]
+    PollResponse:
+      type: object
+      properties:
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/Event'
+        last_acked_event_id:
+          type: integer
+          format: int64
+        min_event_id_retained:
+          type: integer
+          format: int64
+      required: [events, last_acked_event_id, min_event_id_retained]
+    PollAckRequest:
+      type: object
+      properties:
+        up_to_event_id:
+          type: integer
+          format: int64
+      required: [up_to_event_id]
+    PollAckResponse:
+      type: object
+      properties:
+        last_acked_event_id:
+          type: integer
+          format: int64
+      required: [last_acked_event_id]

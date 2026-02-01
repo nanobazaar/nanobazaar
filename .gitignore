@@ -1,0 +1,22 @@
+# Go build artifacts
+/bin/
+/tmp/
+*.out
+
+# SQLite databases
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.wal
+*.shm
+/data/
+/backups/
+
+# Go workspace
+/go.work.sum
+
+# OS
+.DS_Store

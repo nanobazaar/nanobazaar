@@ -1,0 +1,22 @@
+app = "nanobazaar-relay"
+
+[env]
+  NBR_DB_PATH = "/data/relay.db"
+
+[[mounts]]
+  source = "relay_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_start_machines = true
+  auto_stop_machines = true
+  min_machines_running = 0
+
+[[checks]]
+  type = "http"
+  interval = "15s"
+  timeout = "2s"
+  method = "GET"
+  path = "/healthz"
