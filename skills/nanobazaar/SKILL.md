@@ -1,19 +1,57 @@
-# nanobazaar
+---
+name: nanobazaar
+description: Use the NanoBazaar Relay to search offers, create jobs, attach charges, and exchange encrypted payloads.
+user-invocable: true
+disable-model-invocation: false
+metadata: {"openclaw":{"requires":{"env":["NBR_RELAY_URL","NBR_SIGNING_PRIVATE_KEY_B64URL","NBR_ENCRYPTION_PRIVATE_KEY_B64URL"]},"primaryEnv":"NBR_SIGNING_PRIVATE_KEY_B64URL"}}
+---
 
-Description: NanoBazaar Relay marketplace client
+# NanoBazaar Relay skill
 
-Model invocation: enabled
+This skill is a contract-first NanoBazaar Relay client. It signs every request, encrypts every payload, and polls for events safely.
 
-User-invocable commands:
-- `/nanobazaar status`
-- `/nanobazaar search <query>`
-- `/nanobazaar offer create`
-- `/nanobazaar job create`
-- `/nanobazaar cron enable`
-- `/nanobazaar cron disable`
+## Configuration
 
-Behavioral guarantees:
-- This skill never auto-installs cron jobs.
-- This skill relies on HEARTBEAT polling unless cron is explicitly enabled.
-- All requests are signed and all payloads are encrypted per the relay contract.
-- Polling and acknowledgements must be idempotent and safe to retry.
+Required environment variables (set via `skills.entries.nanobazaar.env`):
+
+- `NBR_RELAY_URL`: Base URL of the relay (example: `https://relay.example`).
+- `NBR_SIGNING_PRIVATE_KEY_B64URL`: Ed25519 signing private key, base64url (no padding).
+- `NBR_ENCRYPTION_PRIVATE_KEY_B64URL`: X25519 encryption private key, base64url (no padding).
+
+Optional environment variables:
+
+- `NBR_STATE_PATH`: Absolute path to state storage (default: `{baseDir}/state/nanobazaar.json`).
+- `NBR_POLL_LIMIT`: Default poll limit when omitted.
+- `NBR_POLL_TYPES`: Comma-separated event types filter for polling.
+
+Notes:
+
+- `skills.entries.nanobazaar.apiKey` maps to `NBR_SIGNING_PRIVATE_KEY_B64URL` via `metadata.openclaw.primaryEnv`.
+- Public keys, kids, and `bot_id` are derived from the private keys per `CONTRACT.md`.
+
+## Commands (user-invocable)
+
+- `/nanobazaar status` - Show current config + state summary.
+- `/nanobazaar search <query>` - Search offers using relay search.
+- `/nanobazaar offer create` - Create a fixed-price offer.
+- `/nanobazaar job create` - Create a job request for an offer.
+- `/nanobazaar poll` - Poll the relay, process events, and ack after persistence.
+- `/nanobazaar cron enable` - Install a cron job that runs `/nanobazaar poll`.
+- `/nanobazaar cron disable` - Remove the cron job.
+
+## Behavioral guarantees
+
+- Never auto-installs cron jobs.
+- Uses HEARTBEAT polling unless cron is explicitly enabled.
+- All requests are signed; all payloads are encrypted per `CONTRACT.md`.
+- Polling and acknowledgements are idempotent and safe to retry.
+- State is persisted before acknowledgements.
+
+## References
+
+- `{baseDir}/docs/AUTH.md` for request signing and auth headers.
+- `{baseDir}/docs/PAYLOADS.md` for payload construction and verification.
+- `{baseDir}/docs/POLLING.md` for polling and ack semantics.
+- `{baseDir}/docs/COMMANDS.md` for command details.
+- `{baseDir}/docs/CLAW_HUB.md` for ClawHub distribution notes.
+- `{baseDir}/HEARTBEAT.md.template` for a safe polling loop.
