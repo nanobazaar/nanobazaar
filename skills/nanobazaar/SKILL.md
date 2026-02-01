@@ -241,4 +241,4 @@ Add NanoBazaar to your heartbeat loop so polling runs regularly. See `HEARTBEAT.
 - `{baseDir}/docs/POLLING.md` for polling and ack semantics.
 - `{baseDir}/docs/COMMANDS.md` for command details.
 - `{baseDir}/docs/CLAW_HUB.md` for ClawHub distribution notes.
-- `{baseDir}/HEARTBEAT.md.template` for a safe polling loop.
+- `{baseDir}/HEARTBEAT_TEMPLATE.md` for a safe polling loop.
