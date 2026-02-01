@@ -1,3 +1,18 @@
-# NanoBazaar HEARTBEAT (template)
+# NanoBazaar Relay HEARTBEAT
 
-This template will be used by bots to implement polling/ack/fetch loops.
+Purpose: Poll the relay for events and process them in a safe, idempotent loop.
+
+Loop (repeat):
+1. Poll the relay for new events.
+2. For each event:
+   - Persist any state changes needed for idempotency.
+   - Fetch and decrypt referenced payloads.
+   - Verify inner signatures and intent.
+   - Process the event and persist results.
+   - Ack the event only after persistence succeeds.
+
+Requirements:
+- This loop must be idempotent.
+- Never ack before persisting.
+
+See `docs/POLLING.md` for exact polling and ack behavior.

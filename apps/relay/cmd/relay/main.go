@@ -17,8 +17,10 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/nanobazaar/relay/internal/auth"
 	httpapi "github.com/nanobazaar/relay/internal/http"
 	"github.com/nanobazaar/relay/internal/retention"
+	"github.com/nanobazaar/relay/internal/store"
 )
 
 type Config struct {
@@ -49,12 +51,15 @@ func main() {
 		log.Fatalf("db pragma: %v", err)
 	}
 
-	stopRetention := retention.Start(cfg.RetentionEnabled, cfg.RetentionInterval, log.Default())
+	store := store.New(db)
+	verifier := auth.NewVerifier(store)
+
+	stopRetention := retention.Start(cfg.RetentionEnabled, cfg.RetentionInterval, log.Default(), store)
 	defer stopRetention()
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewRouter(),
+		Handler:           httpapi.NewRouter(verifier, store),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

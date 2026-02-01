@@ -1,0 +1,319 @@
+package httpapi
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"encoding/base64"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/nanobazaar/relay/internal/domain"
+	"github.com/nanobazaar/relay/internal/store"
+	"github.com/nanobazaar/relay/internal/store/sqlc"
+)
+
+func TestJobLifecycleChargeDeliver(t *testing.T) {
+	ctx := context.Background()
+	db := setupTestDB(t)
+	defer db.Close()
+
+	st := store.New(db)
+	now := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return now }
+
+	buyerID := "bot_buyer"
+	sellerID := "bot_seller"
+	offerID := "offer_1"
+	seedJobBot(t, st, buyerID, now)
+	seedJobBot(t, st, sellerID, now)
+	seedJobOffer(t, st, offerID, sellerID, now)
+
+	router := NewRouter(nil, st, WithClock(clock))
+
+	createPayload := payloadEnvelopeInput{
+		PayloadID:     "pay_req_1",
+		PayloadKind:   payloadKindRequest,
+		EncAlg:        encAlgSealBox,
+		RecipientKid:  "kid_seller",
+		CiphertextB64: base64.RawURLEncoding.EncodeToString([]byte("request")),
+	}
+	createReq := jobCreateRequest{
+		JobID:          "job_1",
+		OfferID:        offerID,
+		RequestPayload: createPayload,
+	}
+
+	create := newJSONRequest(t, http.MethodPost, "/v0/jobs", mustJSONBytes(t, createReq))
+	create.Header.Set(headerBotID, buyerID)
+	createRec := httptestRequest(t, router, create)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+
+	job, err := st.GetJob(ctx, "job_1")
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if job.Status != string(domain.JobRequested) {
+		t.Fatalf("expected status REQUESTED, got %s", job.Status)
+	}
+
+	chargeReq := chargeCreateRequest{
+		ChargeID:        "chg_1",
+		Address:         "nano_addr",
+		AmountRaw:       "1000",
+		ChargeExpiresAt: now.Add(2 * time.Hour).Format(time.RFC3339),
+		ChargeSig:       "sig",
+	}
+	charge := newJSONRequest(t, http.MethodPost, "/v0/jobs/job_1/charge", mustJSONBytes(t, chargeReq))
+	charge.Header.Set(headerBotID, sellerID)
+	chargeRec := httptestRequest(t, router, charge)
+	if chargeRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", chargeRec.Code, chargeRec.Body.String())
+	}
+
+	cancel := newJSONRequest(t, http.MethodPost, "/v0/jobs/job_1/cancel", nil)
+	cancel.Header.Set(headerBotID, buyerID)
+	cancelRec := httptestRequest(t, router, cancel)
+	if cancelRec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", cancelRec.Code, cancelRec.Body.String())
+	}
+
+	markPaid := newJSONRequest(t, http.MethodPost, "/v0/jobs/job_1/mark_paid", nil)
+	markPaid.Header.Set(headerBotID, sellerID)
+	markPaidRec := httptestRequest(t, router, markPaid)
+	if markPaidRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", markPaidRec.Code, markPaidRec.Body.String())
+	}
+
+	deliverPayload := payloadEnvelopeInput{
+		PayloadID:     "pay_deliver_1",
+		PayloadKind:   payloadKindDeliver,
+		EncAlg:        encAlgSealBox,
+		RecipientKid:  "kid_buyer",
+		CiphertextB64: base64.RawURLEncoding.EncodeToString([]byte("deliver")),
+	}
+	deliverReq := deliverRequest{Payload: deliverPayload}
+	deliver := newJSONRequest(t, http.MethodPost, "/v0/jobs/job_1/deliver", mustJSONBytes(t, deliverReq))
+	deliver.Header.Set(headerBotID, sellerID)
+	deliverRec := httptestRequest(t, router, deliver)
+	if deliverRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", deliverRec.Code, deliverRec.Body.String())
+	}
+
+	finalJob, err := st.GetJob(ctx, "job_1")
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if finalJob.Status != string(domain.JobDelivered) {
+		t.Fatalf("expected status DELIVERED, got %s", finalJob.Status)
+	}
+}
+
+func TestJobMarkPaidChargeExpired(t *testing.T) {
+	ctx := context.Background()
+	db := setupTestDB(t)
+	defer db.Close()
+
+	st := store.New(db)
+	now := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return now }
+
+	buyerID := "bot_buyer"
+	sellerID := "bot_seller"
+	offerID := "offer_2"
+	seedJobBot(t, st, buyerID, now)
+	seedJobBot(t, st, sellerID, now)
+	seedJobOffer(t, st, offerID, sellerID, now)
+
+	router := NewRouter(nil, st, WithClock(clock))
+
+	createPayload := payloadEnvelopeInput{
+		PayloadID:     "pay_req_2",
+		PayloadKind:   payloadKindRequest,
+		EncAlg:        encAlgSealBox,
+		RecipientKid:  "kid_seller",
+		CiphertextB64: base64.RawURLEncoding.EncodeToString([]byte("request")),
+	}
+	createReq := jobCreateRequest{
+		JobID:          "job_2",
+		OfferID:        offerID,
+		RequestPayload: createPayload,
+	}
+	create := newJSONRequest(t, http.MethodPost, "/v0/jobs", mustJSONBytes(t, createReq))
+	create.Header.Set(headerBotID, buyerID)
+	createRec := httptestRequest(t, router, create)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+
+	chargeReq := chargeCreateRequest{
+		ChargeID:        "chg_2",
+		Address:         "nano_addr_2",
+		AmountRaw:       "1000",
+		ChargeExpiresAt: now.Add(30 * time.Minute).Format(time.RFC3339),
+		ChargeSig:       "sig",
+	}
+	charge := newJSONRequest(t, http.MethodPost, "/v0/jobs/job_2/charge", mustJSONBytes(t, chargeReq))
+	charge.Header.Set(headerBotID, sellerID)
+	chargeRec := httptestRequest(t, router, charge)
+	if chargeRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", chargeRec.Code, chargeRec.Body.String())
+	}
+
+	now = now.Add(2 * time.Hour)
+	markPaid := newJSONRequest(t, http.MethodPost, "/v0/jobs/job_2/mark_paid", nil)
+	markPaid.Header.Set(headerBotID, sellerID)
+	markPaidRec := httptestRequest(t, router, markPaid)
+	if markPaidRec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", markPaidRec.Code, markPaidRec.Body.String())
+	}
+
+	job, err := st.GetJob(ctx, "job_2")
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if job.Status != string(domain.JobExpired) {
+		t.Fatalf("expected status EXPIRED, got %s", job.Status)
+	}
+
+	buyerEvents, err := st.ListEventsAfterID(ctx, sqlc.ListEventsAfterIDParams{
+		RecipientBotID: buyerID,
+		SinceEventID:   0,
+		Limit:          10,
+	})
+	if err != nil {
+		t.Fatalf("list buyer events: %v", err)
+	}
+	if !containsEventType(buyerEvents, jobExpiredEventType) {
+		t.Fatalf("expected job.expired event for buyer")
+	}
+
+	sellerEvents, err := st.ListEventsAfterID(ctx, sqlc.ListEventsAfterIDParams{
+		RecipientBotID: sellerID,
+		SinceEventID:   0,
+		Limit:          10,
+	})
+	if err != nil {
+		t.Fatalf("list seller events: %v", err)
+	}
+	if !containsEventType(sellerEvents, jobExpiredEventType) {
+		t.Fatalf("expected job.expired event for seller")
+	}
+}
+
+func containsEventType(events []sqlc.Event, eventType string) bool {
+	for _, event := range events {
+		if event.EventType == eventType {
+			return true
+		}
+	}
+	return false
+}
+
+func TestJobDeliverRequiresPaid(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	st := store.New(db)
+	now := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return now }
+
+	buyerID := "bot_buyer"
+	sellerID := "bot_seller"
+	offerID := "offer_3"
+	seedJobBot(t, st, buyerID, now)
+	seedJobBot(t, st, sellerID, now)
+	seedJobOffer(t, st, offerID, sellerID, now)
+
+	router := NewRouter(nil, st, WithClock(clock))
+
+	createPayload := payloadEnvelopeInput{
+		PayloadID:     "pay_req_3",
+		PayloadKind:   payloadKindRequest,
+		EncAlg:        encAlgSealBox,
+		RecipientKid:  "kid_seller",
+		CiphertextB64: base64.RawURLEncoding.EncodeToString([]byte("request")),
+	}
+	createReq := jobCreateRequest{
+		JobID:          "job_3",
+		OfferID:        offerID,
+		RequestPayload: createPayload,
+	}
+	create := newJSONRequest(t, http.MethodPost, "/v0/jobs", mustJSONBytes(t, createReq))
+	create.Header.Set(headerBotID, buyerID)
+	createRec := httptestRequest(t, router, create)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+
+	deliverPayload := payloadEnvelopeInput{
+		PayloadID:     "pay_deliver_3",
+		PayloadKind:   payloadKindDeliver,
+		EncAlg:        encAlgSealBox,
+		RecipientKid:  "kid_buyer",
+		CiphertextB64: base64.RawURLEncoding.EncodeToString([]byte("deliver")),
+	}
+	deliverReq := deliverRequest{Payload: deliverPayload}
+	deliver := newJSONRequest(t, http.MethodPost, "/v0/jobs/job_3/deliver", mustJSONBytes(t, deliverReq))
+	deliver.Header.Set(headerBotID, sellerID)
+	deliverRec := httptestRequest(t, router, deliver)
+	if deliverRec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", deliverRec.Code, deliverRec.Body.String())
+	}
+}
+
+func seedJobBot(t *testing.T, st *store.Store, botID string, now time.Time) {
+	t.Helper()
+	err := st.CreateBot(context.Background(), sqlc.CreateBotParams{
+		BotID:                  botID,
+		SigningPubkeyEd25519:   "signing",
+		EncryptionPubkeyX25519: "encryption",
+		SigningKid:             "signing_kid",
+		EncryptionKid:          "encryption_kid",
+		CreatedAt:              now,
+		LastSeenAt:             sql.NullTime{Time: now, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("create bot: %v", err)
+	}
+}
+
+func seedJobOffer(t *testing.T, st *store.Store, offerID, sellerID string, now time.Time) {
+	t.Helper()
+	err := st.CreateOffer(context.Background(), sqlc.CreateOfferParams{
+		OfferID:           offerID,
+		SellerBotID:       sellerID,
+		Title:             "title",
+		Description:       "desc",
+		TagsJson:          "[]",
+		PriceRaw:          "1000",
+		TurnaroundSeconds: 3600,
+		CreatedAt:         now,
+		ExpiresAt:         sql.NullTime{},
+		Status:            string(domain.OfferActive),
+		CancelledAt:       sql.NullTime{},
+		RequestSchemaHint: sql.NullString{},
+	})
+	if err != nil {
+		t.Fatalf("create offer: %v", err)
+	}
+}
+
+func newJSONRequest(t *testing.T, method, path string, body []byte) *http.Request {
+	t.Helper()
+	var buf *bytes.Reader
+	if body == nil {
+		buf = bytes.NewReader(nil)
+	} else {
+		buf = bytes.NewReader(body)
+	}
+	req := httptest.NewRequest(method, path, buf)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	return req
+}
