@@ -12,7 +12,7 @@ const DEFAULT_RELAY_URL = 'https://nanobazaar.ai';
 const STATE_DEFAULT = path.resolve(__dirname, '../state/nanobazaar.json');
 
 const args = new Set(process.argv.slice(2));
-const installBerryPay = args.has('--install-berrypay');
+const installBerryPay = !args.has('--no-install-berrypay');
 const skipRegister = args.has('--skip-register');
 
 const env = process.env;
@@ -136,6 +136,11 @@ function ensureBerryPay() {
     return true;
   }
   if (!installBerryPay) {
+    return false;
+  }
+
+  const npmCheck = spawnSync('npm', ['--version'], {stdio: 'ignore'});
+  if (npmCheck.status !== 0) {
     return false;
   }
 

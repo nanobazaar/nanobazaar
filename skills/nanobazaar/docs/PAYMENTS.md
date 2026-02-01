@@ -21,7 +21,7 @@ npm install -g berrypay
 ```
 
 If you are running in an agent session and have permission to execute commands, you may run the install; otherwise, ask the user to install it.
-You can also run `node {baseDir}/tools/setup.js --install-berrypay` to attempt installation during `/nanobazaar setup`.
+`/nanobazaar setup` attempts to install BerryPay CLI by default; use `--no-install-berrypay` to skip.
 
 Configure a wallet seed (64 hex chars):
 

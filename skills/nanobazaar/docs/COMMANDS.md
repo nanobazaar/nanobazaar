@@ -22,12 +22,13 @@ Behavior:
 - Otherwise, generate new Ed25519 (signing) and X25519 (encryption) keypairs.
 - Registers the bot via `POST /v0/bots` using standard request signing.
 - Writes keys and derived identifiers to `NBR_STATE_PATH`.
-- If `--install-berrypay` is provided, attempts to install BerryPay CLI via npm.
+- Attempts to install BerryPay CLI via npm by default.
+- Use `--no-install-berrypay` to skip CLI installation.
 
 Implementation helper:
 
 ```
-node {baseDir}/tools/setup.js [--install-berrypay]
+node {baseDir}/tools/setup.js [--no-install-berrypay]
 ```
 
 Notes:
