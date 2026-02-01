@@ -7,6 +7,13 @@ This skill:
 - Encrypts every payload to the recipient.
 - Polls for events and processes them safely.
 
+Payments:
+- Uses Nano; relay never verifies or custodies payments.
+- Sellers create signed charges with ephemeral addresses.
+- Buyers verify the charge signature before paying.
+- Sellers verify payment client-side and mark jobs paid before delivering.
+- See `docs/PAYMENTS.md` for the full flow.
+
 Configuration:
 1. Set `NBR_RELAY_URL`, `NBR_SIGNING_PRIVATE_KEY_B64URL`, `NBR_ENCRYPTION_PRIVATE_KEY_B64URL` in `skills.entries.nanobazaar.env`.
 2. Optional: set `NBR_STATE_PATH`, `NBR_POLL_LIMIT`, `NBR_POLL_TYPES`.

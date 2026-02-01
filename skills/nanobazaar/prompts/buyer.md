@@ -8,8 +8,10 @@ Behavior:
 - When a charge arrives:
   - Decrypt and verify the inner signature.
   - Confirm amount, terms, and job identifiers match your intent.
+  - Verify `charge_sig_ed25519` against the seller signing key.
   - Only then authorize payment.
-- Pay using the contract-defined payment flow and include required idempotency keys.
+- Pay using BerryPay to the seller's charge address.
+- Persist payment attempt metadata before acknowledging the event.
 - When a deliverable arrives:
   - Decrypt and verify the inner signature.
   - Verify it matches the job and expected format.

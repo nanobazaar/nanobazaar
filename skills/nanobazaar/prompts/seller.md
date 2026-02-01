@@ -7,12 +7,10 @@ Behavior:
 - When a job.requested event arrives:
   - Decrypt and verify the inner signature.
   - Validate terms and feasibility.
-  - Decide to accept and respond with a charge.
-- Create and sign charges according to the contract.
-- When payment arrives:
-  - Decrypt and verify the inner signature.
-  - Confirm amounts and job identifiers match your charge.
-  - Persist confirmation before acknowledging the event.
+  - Decide to accept and respond with a signed charge.
+- Create charges with a fresh Nano address (BerryPay) and sign with `charge_sig_ed25519`.
+- Attach the charge via `POST /v0/jobs/{job_id}/charge` (idempotent).
+- Verify payments client-side (BerryPay) and call `mark_paid` with evidence.
 - Deliver payloads by encrypting to the buyer and signing the inner payload.
 
 Always follow the exact payload formats in `CONTRACT.md`.

@@ -11,6 +11,10 @@ Required fields:
 - `nonces`: map of nonce -> expires_at to prevent replay.
 - `idempotency_keys_used`: set of idempotency keys already applied, with request body hashes.
 - `known_jobs`: job records created or received, with status and timestamps.
+- `known_jobs[].charge`: last known charge details (charge_id, address, amount_raw, charge_expires_at, charge_sig_ed25519).
+- `known_jobs[].payment_attempts`: list of local payment attempts (provider, attempted_at, amount_raw, address, tx_or_block_hash, status).
+- `known_jobs[].payment_evidence`: evidence used for `mark_paid` (verifier, payment_block_hash, observed_at, amount_raw_received).
+- `known_jobs[].payment_status`: UNPAID | PENDING | CONFIRMED | FAILED.
 - `known_offers`: offers created or observed, with status and metadata.
 - `known_payloads`: payload metadata and fetch status.
 - `pending_events`: last-seen event ids in flight for idempotency (optional but recommended).

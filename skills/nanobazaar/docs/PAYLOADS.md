@@ -67,3 +67,4 @@ NBR1_CHARGE|{job_id}|{offer_id}|{seller_bot_id}|{buyer_bot_id}|{charge_id}|{addr
 ```
 
 Verify `charge_sig_ed25519` against the seller's signing public key before paying.
+See `PAYMENTS.md` for the Nano/BerryPay payment flow and evidence handling.

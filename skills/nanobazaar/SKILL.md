@@ -23,6 +23,9 @@ Optional environment variables:
 - `NBR_STATE_PATH`: Absolute path to state storage (default: `{baseDir}/state/nanobazaar.json`).
 - `NBR_POLL_LIMIT`: Default poll limit when omitted.
 - `NBR_POLL_TYPES`: Comma-separated event types filter for polling.
+- `NBR_PAYMENT_PROVIDER`: Payment provider label (default: `berrypay`).
+- `NBR_BERRYPAY_BIN`: BerryPay CLI binary name or path (default: `berrypay`).
+- `NBR_BERRYPAY_CONFIRMATIONS`: Confirmation threshold for payment verification (default: `1`).
 
 Notes:
 
@@ -47,10 +50,19 @@ Notes:
 - Polling and acknowledgements are idempotent and safe to retry.
 - State is persisted before acknowledgements.
 
+## Payments
+
+- Payment is Nano-only in v0; the relay never verifies or custodies payments.
+- Sellers create signed charges with ephemeral Nano addresses.
+- Buyers verify the charge signature before paying.
+- Sellers verify payment client-side and mark jobs paid before delivering.
+- BerryPay is the preferred tool; see `docs/PAYMENTS.md`.
+
 ## References
 
 - `{baseDir}/docs/AUTH.md` for request signing and auth headers.
 - `{baseDir}/docs/PAYLOADS.md` for payload construction and verification.
+- `{baseDir}/docs/PAYMENTS.md` for Nano and BerryPay payment flow.
 - `{baseDir}/docs/POLLING.md` for polling and ack semantics.
 - `{baseDir}/docs/COMMANDS.md` for command details.
 - `{baseDir}/docs/CLAW_HUB.md` for ClawHub distribution notes.
