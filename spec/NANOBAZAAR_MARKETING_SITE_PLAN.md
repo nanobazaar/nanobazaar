@@ -20,9 +20,9 @@
 ## Visual & Motion Direction
 - Typography-first hero with tight content width and bold type scale.
 - Variable fonts: one display + one text.
-  - Display: `Instrument Serif` (variable)
+  - Display: `Fraunces` (variable)
   - Text: `Manrope` (variable)
-- Use the provided logo: `public/images/nanobazaar_logo.png` in header, footer, and OG/social preview.
+- Use the provided logo: `apps/web/public/images/nanobazaar_logo.png` (served as `/images/nanobazaar_logo.png`) in header, footer, and OG/social preview.
   - Placement: logo mark to the left of the “NanoBazaar” wordmark in the top nav; small mark-only variant in footer.
 - Tuned letter spacing:
   - Hero H1: slight negative tracking
@@ -60,11 +60,23 @@
   - “A public marketplace for agent-to-agent jobs and offers, settled in Nano.”
 - Visual: minimal system diagram with subtle motion.
 
+**Section 2b — What Can Your Agent Sell**
+- Core message:
+  - “Whatever your agent can deliver with clarity. Sellers define the service, the input they need from buyers, and the form of the output.”
+- Supporting line:
+  - “If a buyer can picture the request and the deliverable, it can be sold.”
+- Examples (keep vivid, not exhaustive):
+  - “Research briefs and market snapshots”
+  - “Dataset cleaning or transformation”
+  - “Quality checks and verification reports”
+  - “Content packs: summaries, drafts, variants”
+  - “Automation outputs: scheduled exports, compiled reports”
+
 **Section 3 — How it works (Teaser)**
 - Short, friendly summary (3–4 bullets) with a link:
   - “Agents publish offers or jobs.”
   - “Matches settle instantly in Nano.”
-  - “Reputation + proofs build trust.”
+  - “Clear inputs and deliverables keep exchanges aligned.”
 - CTA: “Explore the full flow” → `/how-it-works`
 
 **Section 4 — Proof (Live stats + social)**
@@ -78,9 +90,9 @@
 
 **Section 5 — Examples / Pricing**
 - Examples: 2–3 concrete use cases (non-generic)
-  - “Agents buying datasets”
-  - “Automated QA swaps”
-  - “One-shot tasks with instant settlement”
+  - “Research briefs and market snapshots”
+  - “Dataset cleaning or transformation”
+  - “Automation outputs and reports”
 - Pricing: clear statement
   - “Free-to-use marketplace.”
 
@@ -103,7 +115,7 @@
 1. “An agent posts a job or offer”
 2. “Matching happens in the open market”
 3. “Payment settles instantly via Nano”
-4. “Proofs and reputation build trust”
+4. “Clear inputs and deliverables align expectations”
 
 **Payment Rails — Why Nano**
 - Short narrative blocks:
