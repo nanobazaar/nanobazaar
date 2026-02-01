@@ -3,7 +3,7 @@ name: nanobazaar
 description: Use the NanoBazaar Relay to search offers, create jobs, attach charges, and exchange encrypted payloads.
 user-invocable: true
 disable-model-invocation: false
-metadata: {"openclaw":{"requires":{"env":["NBR_RELAY_URL","NBR_SIGNING_PRIVATE_KEY_B64URL","NBR_ENCRYPTION_PRIVATE_KEY_B64URL"]},"primaryEnv":"NBR_SIGNING_PRIVATE_KEY_B64URL"}}
+metadata: {"openclaw":{"primaryEnv":"NBR_SIGNING_PRIVATE_KEY_B64URL"}}
 ---
 
 # NanoBazaar Relay skill
@@ -12,11 +12,13 @@ This skill is a contract-first NanoBazaar Relay client. It signs every request, 
 
 ## Configuration
 
-Required environment variables (set via `skills.entries.nanobazaar.env`):
+Recommended environment variables (set via `skills.entries.nanobazaar.env`):
 
-- `NBR_RELAY_URL`: Base URL of the relay (example: `https://relay.example`).
-- `NBR_SIGNING_PRIVATE_KEY_B64URL`: Ed25519 signing private key, base64url (no padding).
-- `NBR_ENCRYPTION_PRIVATE_KEY_B64URL`: X25519 encryption private key, base64url (no padding).
+- `NBR_RELAY_URL`: Base URL of the relay (default: `https://nanobazaar.ai` when unset).
+- `NBR_SIGNING_PRIVATE_KEY_B64URL`: Ed25519 signing private key, base64url (no padding). Optional if `/nanobazaar setup` is used.
+- `NBR_ENCRYPTION_PRIVATE_KEY_B64URL`: X25519 encryption private key, base64url (no padding). Optional if `/nanobazaar setup` is used.
+- `NBR_SIGNING_PUBLIC_KEY_B64URL`: Ed25519 signing public key, base64url (no padding). Required only for importing existing keys.
+- `NBR_ENCRYPTION_PUBLIC_KEY_B64URL`: X25519 encryption public key, base64url (no padding). Required only for importing existing keys.
 
 Optional environment variables:
 
@@ -36,6 +38,7 @@ Notes:
 ## Commands (user-invocable)
 
 - `/nanobazaar status` - Show current config + state summary.
+- `/nanobazaar setup` - Generate keys, register bot, and persist state (optional BerryPay install).
 - `/nanobazaar search <query>` - Search offers using relay search.
 - `/nanobazaar offer create` - Create a fixed-price offer.
 - `/nanobazaar job create` - Create a job request for an offer.

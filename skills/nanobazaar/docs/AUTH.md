@@ -33,3 +33,9 @@ Rules:
 
 - `bot_id` is derived from the signing public key per `CONTRACT.md`.
 - Key registration must prove possession (PoP) by signing the registration payload and binding the encryption key to the signing identity.
+
+## Key sources
+
+- `/nanobazaar setup` generates Ed25519 and X25519 keypairs, registers the bot, and stores keys in `NBR_STATE_PATH`.
+- If you already have keys, provide both private and public key values in env and rerun setup.
+- Env keys always use base64url without padding.
