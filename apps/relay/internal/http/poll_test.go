@@ -24,7 +24,7 @@ func TestPollAndAckFlow(t *testing.T) {
 	seedEvent(t, st, recipient, "job.requested", map[string]any{"job_id": "job_1"}, now)
 	seedEvent(t, st, recipient, "job.paid", map[string]any{"job_id": "job_1"}, now.Add(time.Minute))
 
-	router := NewRouter(nil, st)
+	router := NewRouter(RouterConfig{Store: st})
 
 	pollReq := httptest.NewRequest(http.MethodGet, "/v0/poll?limit=10", nil)
 	pollReq.Header.Set(headerBotID, recipient)
@@ -84,7 +84,7 @@ func TestPollTypesFilter(t *testing.T) {
 	seedEvent(t, st, recipient, "job.requested", map[string]any{"job_id": "job_1"}, now)
 	seedEvent(t, st, recipient, "job.paid", map[string]any{"job_id": "job_1"}, now.Add(time.Minute))
 
-	router := NewRouter(nil, st)
+	router := NewRouter(RouterConfig{Store: st})
 	pollReq := httptest.NewRequest(http.MethodGet, "/v0/poll?types=job.paid", nil)
 	pollReq.Header.Set(headerBotID, recipient)
 	pollRec := httptestRequest(t, router, pollReq)
@@ -120,7 +120,7 @@ func TestPollGoneWhenCursorTooOld(t *testing.T) {
 		t.Fatalf("delete events: %v", err)
 	}
 
-	router := NewRouter(nil, st)
+	router := NewRouter(RouterConfig{Store: st})
 	pollReq := httptest.NewRequest(http.MethodGet, "/v0/poll?since_event_id=0", nil)
 	pollReq.Header.Set(headerBotID, recipient)
 	pollRec := httptestRequest(t, router, pollReq)
@@ -136,6 +136,76 @@ func TestPollGoneWhenCursorTooOld(t *testing.T) {
 	}
 	if !gone.SuggestedResync {
 		t.Fatalf("expected suggested_resync true")
+	}
+}
+
+func TestPollSinceEventIDReturnsStoredAck(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	st := store.New(db)
+	now := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+	recipient := "bot_recipient"
+	seedJobBot(t, st, recipient, now)
+
+	seedEvent(t, st, recipient, "job.requested", map[string]any{"job_id": "job_1"}, now)
+	seedEvent(t, st, recipient, "job.paid", map[string]any{"job_id": "job_1"}, now.Add(time.Minute))
+	seedEvent(t, st, recipient, "job.cancelled", map[string]any{"job_id": "job_1"}, now.Add(2*time.Minute))
+
+	if err := st.UpsertPollAck(context.Background(), sqlc.UpsertPollAckParams{
+		RecipientBotID:   recipient,
+		LastAckedEventID: 3,
+		UpdatedAt:        now,
+	}); err != nil {
+		t.Fatalf("upsert poll ack: %v", err)
+	}
+
+	router := NewRouter(RouterConfig{Store: st})
+	pollReq := httptest.NewRequest(http.MethodGet, "/v0/poll?since_event_id=1", nil)
+	pollReq.Header.Set(headerBotID, recipient)
+	pollRec := httptestRequest(t, router, pollReq)
+	if pollRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", pollRec.Code, pollRec.Body.String())
+	}
+
+	var pollResp pollResponse
+	if err := json.Unmarshal(pollRec.Body.Bytes(), &pollResp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if pollResp.LastAckedEventID != 3 {
+		t.Fatalf("expected last_acked_event_id 3, got %d", pollResp.LastAckedEventID)
+	}
+	if len(pollResp.Events) == 0 || pollResp.Events[0].EventID <= 1 {
+		t.Fatalf("expected events after since_event_id")
+	}
+}
+
+func TestPollSinceEventIDNoStoredAckReturnsZero(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	st := store.New(db)
+	now := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+	recipient := "bot_recipient"
+	seedJobBot(t, st, recipient, now)
+
+	seedEvent(t, st, recipient, "job.requested", map[string]any{"job_id": "job_1"}, now)
+	seedEvent(t, st, recipient, "job.paid", map[string]any{"job_id": "job_1"}, now.Add(time.Minute))
+
+	router := NewRouter(RouterConfig{Store: st})
+	pollReq := httptest.NewRequest(http.MethodGet, "/v0/poll?since_event_id=1", nil)
+	pollReq.Header.Set(headerBotID, recipient)
+	pollRec := httptestRequest(t, router, pollReq)
+	if pollRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", pollRec.Code, pollRec.Body.String())
+	}
+
+	var pollResp pollResponse
+	if err := json.Unmarshal(pollRec.Body.Bytes(), &pollResp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if pollResp.LastAckedEventID != 0 {
+		t.Fatalf("expected last_acked_event_id 0, got %d", pollResp.LastAckedEventID)
 	}
 }
 

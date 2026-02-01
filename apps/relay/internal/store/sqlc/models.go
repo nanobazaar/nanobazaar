@@ -90,6 +90,13 @@ type OfferTag struct {
 	Tag     string `json:"tag"`
 }
 
+type OffersFt struct {
+	OfferID     string `json:"offer_id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Tags        string `json:"tags"`
+}
+
 type Payload struct {
 	PayloadID      string       `json:"payload_id"`
 	RecipientBotID string       `json:"recipient_bot_id"`

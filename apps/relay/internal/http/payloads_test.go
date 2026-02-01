@@ -36,7 +36,7 @@ func TestPayloadFetchMarksFetched(t *testing.T) {
 	seedJob(t, st, jobID, offerID, buyerID, sellerID, now)
 	seedPayload(t, st, payloadID, jobID, sellerID, buyerID, payloadKindMessage, now, false)
 
-	router := NewRouter(nil, st)
+	router := NewRouter(RouterConfig{Store: st})
 	req := httptest.NewRequest(http.MethodGet, "/v0/payloads/"+payloadID, nil)
 	req.Header.Set(headerBotID, buyerID)
 	rec := httptestRequest(t, router, req)
@@ -84,7 +84,7 @@ func TestPayloadFetchForbidden(t *testing.T) {
 	seedJob(t, st, jobID, offerID, buyerID, sellerID, now)
 	seedPayload(t, st, payloadID, jobID, sellerID, buyerID, payloadKindMessage, now, false)
 
-	router := NewRouter(nil, st)
+	router := NewRouter(RouterConfig{Store: st})
 	req := httptest.NewRequest(http.MethodGet, "/v0/payloads/"+payloadID, nil)
 	req.Header.Set(headerBotID, sellerID)
 	rec := httptestRequest(t, router, req)
@@ -121,7 +121,7 @@ func TestPayloadListStatusAndCursor(t *testing.T) {
 	seedPayload(t, st, "payload_old", jobID, sellerID, buyerID, payloadKindMessage, now.Add(-time.Minute), false)
 	seedPayload(t, st, "payload_new", jobID, sellerID, buyerID, payloadKindMessage, now, true)
 
-	router := NewRouter(nil, st)
+	router := NewRouter(RouterConfig{Store: st})
 
 	unfetchedReq := httptest.NewRequest(http.MethodGet, "/v0/payloads?status=unfetched", nil)
 	unfetchedReq.Header.Set(headerBotID, buyerID)

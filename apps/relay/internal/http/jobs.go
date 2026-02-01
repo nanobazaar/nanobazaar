@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/nanobazaar/relay/internal/domain"
+	"github.com/nanobazaar/relay/internal/metrics"
 	"github.com/nanobazaar/relay/internal/store"
 	"github.com/nanobazaar/relay/internal/store/sqlc"
 )
@@ -35,6 +36,7 @@ const (
 	payloadKindDeliver           = "deliverable"
 	payloadKindMessage           = "message"
 	cursorDelimiter              = "|"
+	maxPayloadBytes              = 64 * 1024
 )
 
 var jobStatusSet = map[string]struct{}{
@@ -48,12 +50,13 @@ var jobStatusSet = map[string]struct{}{
 
 // JobHandler handles job lifecycle endpoints.
 type JobHandler struct {
-	Store *store.Store
-	Clock func() time.Time
+	Store   *store.Store
+	Metrics *metrics.Registry
+	Clock   func() time.Time
 }
 
-func NewJobHandler(store *store.Store) *JobHandler {
-	return &JobHandler{Store: store, Clock: time.Now}
+func NewJobHandler(store *store.Store, metrics *metrics.Registry) *JobHandler {
+	return &JobHandler{Store: store, Metrics: metrics, Clock: time.Now}
 }
 
 type jobCreateRequest struct {
@@ -140,7 +143,8 @@ func (h *JobHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "missing fields")
 		return
 	}
-	if err := validatePayloadInput(payload.RequestPayload, map[string]struct{}{payloadKindRequest: {}}); err != nil {
+	payloadBytes, err := validatePayloadInput(payload.RequestPayload, map[string]struct{}{payloadKindRequest: {}})
+	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -268,6 +272,11 @@ func (h *JobHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.Metrics != nil {
+		h.Metrics.AddPayloadBytes(int64(payloadBytes))
+		h.Metrics.AddPendingPayloads(1)
+	}
+
 	job, err := h.Store.GetJob(r.Context(), payload.JobID)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "job lookup failed")
@@ -335,7 +344,7 @@ func (h *JobHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	statusFilter, err := parseStatusFilter(r.URL.Query()["status"])
+	statuses, statusFilter, err := parseStatusFilter(r.URL.Query()["status"])
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
@@ -372,7 +381,7 @@ func (h *JobHandler) List(w http.ResponseWriter, r *http.Request) {
 	batchCursorJobID = cursorJobID
 
 	for len(jobs) < limit {
-		batch, err := h.fetchJobs(r.Context(), role, caller, createdSince, batchCursorCreatedAt, batchCursorJobID, limit)
+		batch, err := h.fetchJobs(r.Context(), role, caller, createdSince, batchCursorCreatedAt, batchCursorJobID, limit, statuses)
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "job list failed")
 			return
@@ -762,7 +771,8 @@ func (h *JobHandler) Deliver(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "missing fields")
 		return
 	}
-	if err := validatePayloadInput(payload.Payload, map[string]struct{}{payloadKindDeliver: {}, payloadKindMessage: {}}); err != nil {
+	payloadBytes, err := validatePayloadInput(payload.Payload, map[string]struct{}{payloadKindDeliver: {}, payloadKindMessage: {}})
+	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -779,6 +789,10 @@ func (h *JobHandler) Deliver(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusConflict, err.Error())
 			return
 		}
+		if h.Metrics != nil {
+			h.Metrics.AddPayloadBytes(int64(payloadBytes))
+			h.Metrics.AddPendingPayloads(1)
+		}
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
@@ -790,6 +804,10 @@ func (h *JobHandler) Deliver(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSONError(w, http.StatusInternalServerError, "payload create failed")
 		return
+	}
+	if h.Metrics != nil {
+		h.Metrics.AddPayloadBytes(int64(payloadBytes))
+		h.Metrics.AddPendingPayloads(1)
 	}
 
 	updated, err := h.Store.GetJob(r.Context(), job.JobID)
@@ -893,8 +911,43 @@ func (h *JobHandler) insertPayload(ctx context.Context, job sqlc.Job, payload pa
 	return nil
 }
 
-func (h *JobHandler) fetchJobs(ctx context.Context, role, caller string, createdSince *time.Time, cursorCreatedAt *time.Time, cursorJobID *string, limit int) ([]sqlc.Job, error) {
+func (h *JobHandler) fetchJobs(ctx context.Context, role, caller string, createdSince *time.Time, cursorCreatedAt *time.Time, cursorJobID *string, limit int, statuses []string) ([]sqlc.Job, error) {
 	if role == "buyer" {
+		if len(statuses) > 0 {
+			if createdSince != nil {
+				if cursorCreatedAt != nil && cursorJobID != nil {
+					return h.Store.ListJobsByBuyerSinceAfterWithStatus(ctx, sqlc.ListJobsByBuyerSinceAfterWithStatusParams{
+						BuyerBotID:      caller,
+						CreatedSince:    *createdSince,
+						CursorCreatedAt: *cursorCreatedAt,
+						CursorJobID:     *cursorJobID,
+						Statuses:        statuses,
+						Limit:           int64(limit),
+					})
+				}
+				return h.Store.ListJobsByBuyerSinceWithStatus(ctx, sqlc.ListJobsByBuyerSinceWithStatusParams{
+					BuyerBotID:   caller,
+					CreatedSince: *createdSince,
+					Statuses:     statuses,
+					Limit:        int64(limit),
+				})
+			}
+			if cursorCreatedAt != nil && cursorJobID != nil {
+				return h.Store.ListJobsByBuyerNewestAfterWithStatus(ctx, sqlc.ListJobsByBuyerNewestAfterWithStatusParams{
+					BuyerBotID:      caller,
+					CursorCreatedAt: *cursorCreatedAt,
+					CursorJobID:     *cursorJobID,
+					Statuses:        statuses,
+					Limit:           int64(limit),
+				})
+			}
+			return h.Store.ListJobsByBuyerNewestWithStatus(ctx, sqlc.ListJobsByBuyerNewestWithStatusParams{
+				BuyerBotID: caller,
+				Statuses:   statuses,
+				Limit:      int64(limit),
+			})
+		}
+
 		if createdSince != nil {
 			if cursorCreatedAt != nil && cursorJobID != nil {
 				return h.Store.ListJobsByBuyerSinceAfter(ctx, sqlc.ListJobsByBuyerSinceAfterParams{
@@ -922,6 +975,41 @@ func (h *JobHandler) fetchJobs(ctx context.Context, role, caller string, created
 		return h.Store.ListJobsByBuyerNewest(ctx, sqlc.ListJobsByBuyerNewestParams{
 			BuyerBotID: caller,
 			Limit:      int64(limit),
+		})
+	}
+
+	if len(statuses) > 0 {
+		if createdSince != nil {
+			if cursorCreatedAt != nil && cursorJobID != nil {
+				return h.Store.ListJobsBySellerSinceAfterWithStatus(ctx, sqlc.ListJobsBySellerSinceAfterWithStatusParams{
+					SellerBotID:     caller,
+					CreatedSince:    *createdSince,
+					CursorCreatedAt: *cursorCreatedAt,
+					CursorJobID:     *cursorJobID,
+					Statuses:        statuses,
+					Limit:           int64(limit),
+				})
+			}
+			return h.Store.ListJobsBySellerSinceWithStatus(ctx, sqlc.ListJobsBySellerSinceWithStatusParams{
+				SellerBotID:  caller,
+				CreatedSince: *createdSince,
+				Statuses:     statuses,
+				Limit:        int64(limit),
+			})
+		}
+		if cursorCreatedAt != nil && cursorJobID != nil {
+			return h.Store.ListJobsBySellerNewestAfterWithStatus(ctx, sqlc.ListJobsBySellerNewestAfterWithStatusParams{
+				SellerBotID:     caller,
+				CursorCreatedAt: *cursorCreatedAt,
+				CursorJobID:     *cursorJobID,
+				Statuses:        statuses,
+				Limit:           int64(limit),
+			})
+		}
+		return h.Store.ListJobsBySellerNewestWithStatus(ctx, sqlc.ListJobsBySellerNewestWithStatusParams{
+			SellerBotID: caller,
+			Statuses:    statuses,
+			Limit:       int64(limit),
 		})
 	}
 
@@ -1028,22 +1116,34 @@ func (h *JobHandler) now() time.Time {
 	return h.Clock().UTC()
 }
 
-func parseStatusFilter(values []string) (map[string]bool, error) {
+func parseStatusFilter(values []string) ([]string, map[string]bool, error) {
 	if len(values) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
-	filter := make(map[string]bool)
+	seen := make(map[string]struct{})
+	statuses := make([]string, 0, len(values))
 	for _, value := range values {
 		if value == "" {
 			continue
 		}
 		normalized := strings.ToUpper(value)
 		if _, ok := jobStatusSet[normalized]; !ok {
-			return nil, fmt.Errorf("invalid status")
+			return nil, nil, fmt.Errorf("invalid status")
 		}
-		filter[normalized] = true
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		statuses = append(statuses, normalized)
 	}
-	return filter, nil
+	if len(statuses) == 0 {
+		return nil, nil, nil
+	}
+	filter := make(map[string]bool, len(statuses))
+	for _, status := range statuses {
+		filter[status] = true
+	}
+	return statuses, filter, nil
 }
 
 func parseTime(value string) (time.Time, error) {
@@ -1084,31 +1184,44 @@ func decodeCursor(value string) (time.Time, string, error) {
 	return createdAt, parts[1], nil
 }
 
-func validatePayloadInput(payload payloadEnvelopeInput, allowedKinds map[string]struct{}) error {
+func validatePayloadInput(payload payloadEnvelopeInput, allowedKinds map[string]struct{}) (int, error) {
 	if payload.PayloadID == "" || payload.PayloadKind == "" || payload.EncAlg == "" || payload.RecipientKid == "" || payload.CiphertextB64 == "" {
-		return errors.New("missing fields")
+		return 0, errors.New("missing fields")
 	}
 	if payload.EncAlg != encAlgSealBox {
-		return errors.New("invalid enc_alg")
+		return 0, errors.New("invalid enc_alg")
 	}
 	if _, ok := allowedKinds[payload.PayloadKind]; !ok {
-		return errors.New("invalid payload_kind")
+		return 0, errors.New("invalid payload_kind")
 	}
-	if !isBase64URLNoPad(payload.CiphertextB64) {
-		return errors.New("invalid ciphertext_b64")
+	decodedLen, err := decodeCiphertextB64(payload.CiphertextB64, maxPayloadBytes)
+	if err != nil {
+		return 0, err
 	}
-	return nil
+	return decodedLen, nil
 }
 
-func isBase64URLNoPad(value string) bool {
+func decodeCiphertextB64(value string, maxBytes int) (int, error) {
 	if value == "" {
-		return false
+		return 0, errors.New("invalid ciphertext_b64")
 	}
 	if strings.Contains(value, "=") {
-		return false
+		return 0, errors.New("invalid ciphertext_b64")
 	}
-	_, err := base64.RawURLEncoding.DecodeString(value)
-	return err == nil
+	if maxBytes > 0 {
+		maxEncoded := base64.RawURLEncoding.EncodedLen(maxBytes)
+		if len(value) > maxEncoded {
+			return 0, errors.New("ciphertext_b64 too large")
+		}
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return 0, errors.New("invalid ciphertext_b64")
+	}
+	if maxBytes > 0 && len(decoded) > maxBytes {
+		return 0, errors.New("ciphertext_b64 too large")
+	}
+	return len(decoded), nil
 }
 
 func jobToResponse(job sqlc.Job) jobResponse {

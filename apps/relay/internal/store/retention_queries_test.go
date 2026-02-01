@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -127,10 +128,41 @@ func setupStoreTestDB(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatalf("read schema: %v", err)
 	}
-	if _, err := db.Exec(string(schema)); err != nil {
+	if err := execSchema(db, string(schema)); err != nil {
 		t.Fatalf("exec schema: %v", err)
 	}
 	return db
+}
+
+func execSchema(db *sql.DB, schema string) error {
+	if _, err := db.Exec(schema); err == nil {
+		return nil
+	} else if !strings.Contains(err.Error(), "fts5") {
+		return err
+	}
+	stripped := stripFTS(schema)
+	if _, err := db.Exec(stripped); err != nil {
+		return err
+	}
+	return nil
+}
+
+func stripFTS(schema string) string {
+	const startMarker = "-- FTS BEGIN"
+	const endMarker = "-- FTS END"
+	for {
+		start := strings.Index(schema, startMarker)
+		if start == -1 {
+			break
+		}
+		end := strings.Index(schema[start:], endMarker)
+		if end == -1 {
+			break
+		}
+		end = start + end + len(endMarker)
+		schema = schema[:start] + schema[end:]
+	}
+	return schema
 }
 
 func seedBot(t *testing.T, st *Store, botID string, createdAt time.Time) {

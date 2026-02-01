@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -55,7 +56,7 @@ func TestBotsRegister(t *testing.T) {
 	req := signedRequest(t, priv, botID, httpMethodPost, "/v0/bots", "", body, now, "nonce-1")
 	req.Header.Set(headerIdempotency, "idem-1")
 
-	rec := httptestRequest(t, NewRouter(verifier, store), req)
+	rec := httptestRequest(t, NewRouter(RouterConfig{Verifier: verifier, Store: store}), req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -105,7 +106,7 @@ func TestBotsRegisterConflict(t *testing.T) {
 
 	req1 := signedRequest(t, priv, botID, httpMethodPost, "/v0/bots", "", mustJSONBytes(t, first), now, "nonce-1")
 	req1.Header.Set(headerIdempotency, "idem-1")
-	rec1 := httptestRequest(t, NewRouter(verifier, store), req1)
+	rec1 := httptestRequest(t, NewRouter(RouterConfig{Verifier: verifier, Store: store}), req1)
 	if rec1.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec1.Code, rec1.Body.String())
 	}
@@ -120,7 +121,7 @@ func TestBotsRegisterConflict(t *testing.T) {
 
 	req2 := signedRequest(t, priv, botID, httpMethodPost, "/v0/bots", "", mustJSONBytes(t, second), now, "nonce-2")
 	req2.Header.Set(headerIdempotency, "idem-2")
-	rec2 := httptestRequest(t, NewRouter(verifier, store), req2)
+	rec2 := httptestRequest(t, NewRouter(RouterConfig{Verifier: verifier, Store: store}), req2)
 	if rec2.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d: %s", rec2.Code, rec2.Body.String())
 	}
@@ -147,13 +148,13 @@ func TestBotsGet(t *testing.T) {
 	}
 	req := signedRequest(t, priv, botID, httpMethodPost, "/v0/bots", "", mustJSONBytes(t, register), now, "nonce-1")
 	req.Header.Set(headerIdempotency, "idem-1")
-	rec := httptestRequest(t, NewRouter(verifier, store), req)
+	rec := httptestRequest(t, NewRouter(RouterConfig{Verifier: verifier, Store: store}), req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
 	getReq := signedRequest(t, priv, botID, httpMethodGet, "/v0/bots/"+botID, "", nil, now, "nonce-2")
-	getRec := httptestRequest(t, NewRouter(verifier, store), getReq)
+	getRec := httptestRequest(t, NewRouter(RouterConfig{Verifier: verifier, Store: store}), getReq)
 	if getRec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", getRec.Code, getRec.Body.String())
 	}
@@ -186,10 +187,41 @@ func setupTestDB(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatalf("read schema: %v", err)
 	}
-	if _, err := db.Exec(string(schema)); err != nil {
+	if err := execSchema(db, string(schema)); err != nil {
 		t.Fatalf("exec schema: %v", err)
 	}
 	return db
+}
+
+func execSchema(db *sql.DB, schema string) error {
+	if _, err := db.Exec(schema); err == nil {
+		return nil
+	} else if !strings.Contains(err.Error(), "fts5") {
+		return err
+	}
+	stripped := stripFTS(schema)
+	if _, err := db.Exec(stripped); err != nil {
+		return err
+	}
+	return nil
+}
+
+func stripFTS(schema string) string {
+	const startMarker = "-- FTS BEGIN"
+	const endMarker = "-- FTS END"
+	for {
+		start := strings.Index(schema, startMarker)
+		if start == -1 {
+			break
+		}
+		end := strings.Index(schema[start:], endMarker)
+		if end == -1 {
+			break
+		}
+		end = start + end + len(endMarker)
+		schema = schema[:start] + schema[end:]
+	}
+	return schema
 }
 
 func generateSigningKey(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {

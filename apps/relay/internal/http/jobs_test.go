@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -31,7 +32,7 @@ func TestJobLifecycleChargeDeliver(t *testing.T) {
 	seedJobBot(t, st, sellerID, now)
 	seedJobOffer(t, st, offerID, sellerID, now)
 
-	router := NewRouter(nil, st, WithClock(clock))
+	router := NewRouter(RouterConfig{Store: st}, WithClock(clock))
 
 	createPayload := payloadEnvelopeInput{
 		PayloadID:     "pay_req_1",
@@ -129,7 +130,7 @@ func TestJobMarkPaidChargeExpired(t *testing.T) {
 	seedJobBot(t, st, sellerID, now)
 	seedJobOffer(t, st, offerID, sellerID, now)
 
-	router := NewRouter(nil, st, WithClock(clock))
+	router := NewRouter(RouterConfig{Store: st}, WithClock(clock))
 
 	createPayload := payloadEnvelopeInput{
 		PayloadID:     "pay_req_2",
@@ -229,7 +230,7 @@ func TestJobDeliverRequiresPaid(t *testing.T) {
 	seedJobBot(t, st, sellerID, now)
 	seedJobOffer(t, st, offerID, sellerID, now)
 
-	router := NewRouter(nil, st, WithClock(clock))
+	router := NewRouter(RouterConfig{Store: st}, WithClock(clock))
 
 	createPayload := payloadEnvelopeInput{
 		PayloadID:     "pay_req_3",
@@ -263,6 +264,143 @@ func TestJobDeliverRequiresPaid(t *testing.T) {
 	deliverRec := httptestRequest(t, router, deliver)
 	if deliverRec.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d: %s", deliverRec.Code, deliverRec.Body.String())
+	}
+}
+
+func TestJobCreateRejectsLargePayload(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	st := store.New(db)
+	now := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+	buyerID := "bot_buyer"
+	sellerID := "bot_seller"
+	offerID := "offer_big"
+	seedJobBot(t, st, buyerID, now)
+	seedJobBot(t, st, sellerID, now)
+	seedJobOffer(t, st, offerID, sellerID, now)
+
+	oversized := make([]byte, maxPayloadBytes+1)
+	ciphertext := base64.RawURLEncoding.EncodeToString(oversized)
+	createPayload := payloadEnvelopeInput{
+		PayloadID:     "pay_req_big",
+		PayloadKind:   payloadKindRequest,
+		EncAlg:        encAlgSealBox,
+		RecipientKid:  "kid_seller",
+		CiphertextB64: ciphertext,
+	}
+	createReq := jobCreateRequest{
+		JobID:          "job_big",
+		OfferID:        offerID,
+		RequestPayload: createPayload,
+	}
+
+	router := NewRouter(RouterConfig{Store: st})
+	create := newJSONRequest(t, http.MethodPost, "/v0/jobs", mustJSONBytes(t, createReq))
+	create.Header.Set(headerBotID, buyerID)
+	createRec := httptestRequest(t, router, create)
+	if createRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+}
+
+func TestJobDeliverRejectsLargePayload(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	st := store.New(db)
+	now := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+	buyerID := "bot_buyer"
+	sellerID := "bot_seller"
+	offerID := "offer_big_deliver"
+	jobID := "job_big_deliver"
+	seedJobBot(t, st, buyerID, now)
+	seedJobBot(t, st, sellerID, now)
+	seedJobOffer(t, st, offerID, sellerID, now)
+	seedJob(t, st, jobID, offerID, buyerID, sellerID, now)
+
+	oversized := make([]byte, maxPayloadBytes+1)
+	ciphertext := base64.RawURLEncoding.EncodeToString(oversized)
+	deliverPayload := payloadEnvelopeInput{
+		PayloadID:     "pay_msg_big",
+		PayloadKind:   payloadKindMessage,
+		EncAlg:        encAlgSealBox,
+		RecipientKid:  "kid_buyer",
+		CiphertextB64: ciphertext,
+	}
+	deliverReq := deliverRequest{Payload: deliverPayload}
+
+	router := NewRouter(RouterConfig{Store: st})
+	deliver := newJSONRequest(t, http.MethodPost, "/v0/jobs/"+jobID+"/deliver", mustJSONBytes(t, deliverReq))
+	deliver.Header.Set(headerBotID, sellerID)
+	deliverRec := httptestRequest(t, router, deliver)
+	if deliverRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", deliverRec.Code, deliverRec.Body.String())
+	}
+}
+
+func TestJobListStatusFilterWithCursor(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	st := store.New(db)
+	now := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+	buyerID := "bot_buyer"
+	sellerID := "bot_seller"
+	offerID := "offer_list"
+	seedJobBot(t, st, buyerID, now)
+	seedJobBot(t, st, sellerID, now)
+	seedJobOffer(t, st, offerID, sellerID, now)
+
+	seedJob(t, st, "job_a", offerID, buyerID, sellerID, now.Add(-2*time.Hour))
+	seedJob(t, st, "job_b", offerID, buyerID, sellerID, now.Add(-time.Hour))
+	seedJob(t, st, "job_c", offerID, buyerID, sellerID, now.Add(-30*time.Minute))
+
+	if err := st.UpdateJobCancel(context.Background(), sqlc.UpdateJobCancelParams{
+		JobID:       "job_b",
+		CancelledAt: sql.NullTime{Time: now, Valid: true},
+	}); err != nil {
+		t.Fatalf("cancel job: %v", err)
+	}
+
+	router := NewRouter(RouterConfig{Store: st})
+	listReq := httptest.NewRequest(http.MethodGet, "/v0/jobs?role=buyer&status=REQUESTED&limit=1", nil)
+	listReq.Header.Set(headerBotID, buyerID)
+	listRec := httptestRequest(t, router, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", listRec.Code, listRec.Body.String())
+	}
+
+	var listResp jobListResponse
+	if err := json.Unmarshal(listRec.Body.Bytes(), &listResp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(listResp.Jobs) != 1 {
+		t.Fatalf("expected 1 job, got %d", len(listResp.Jobs))
+	}
+	if listResp.Jobs[0].JobID != "job_c" {
+		t.Fatalf("expected job_c first, got %q", listResp.Jobs[0].JobID)
+	}
+	if listResp.NextCursor == "" {
+		t.Fatalf("expected next_cursor set")
+	}
+
+	secondReq := httptest.NewRequest(http.MethodGet, "/v0/jobs?role=buyer&status=REQUESTED&limit=1&cursor="+listResp.NextCursor, nil)
+	secondReq.Header.Set(headerBotID, buyerID)
+	secondRec := httptestRequest(t, router, secondReq)
+	if secondRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", secondRec.Code, secondRec.Body.String())
+	}
+
+	var secondResp jobListResponse
+	if err := json.Unmarshal(secondRec.Body.Bytes(), &secondResp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(secondResp.Jobs) != 1 {
+		t.Fatalf("expected 1 job, got %d", len(secondResp.Jobs))
+	}
+	if secondResp.Jobs[0].JobID != "job_a" {
+		t.Fatalf("expected job_a second, got %q", secondResp.Jobs[0].JobID)
 	}
 }
 

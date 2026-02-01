@@ -12,10 +12,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/nanobazaar/relay/internal/metrics"
 	"github.com/nanobazaar/relay/internal/store/sqlc"
 )
 
@@ -44,6 +46,7 @@ type Verifier struct {
 	NonceTTL       time.Duration
 	ReplayWindow   time.Duration
 	IdempotencyTTL time.Duration
+	Metrics        *metrics.Registry
 }
 
 type HTTPError struct {
@@ -81,6 +84,10 @@ func Middleware(v *Verifier) func(http.Handler) http.Handler {
 			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
 			if err := v.verifyRequest(r, bodyBytes, bodyHash); err != nil {
+				if v.Metrics != nil {
+					v.Metrics.RecordAuthFailure(err.Message)
+				}
+				logAuthFailure(r, err.Message)
 				writeError(w, err)
 				return
 			}
@@ -392,4 +399,10 @@ func writeError(w http.ResponseWriter, err *HTTPError) {
 
 func isMutating(method string) bool {
 	return method == http.MethodPost || method == http.MethodPut || method == http.MethodPatch || method == http.MethodDelete
+}
+
+func logAuthFailure(r *http.Request, reason string) {
+	botID := r.Header.Get(headerBotID)
+	path := canonicalPath(r)
+	log.Printf("auth_failed reason=%s bot_id=%s method=%s path=%s remote_addr=%s", reason, botID, r.Method, path, r.RemoteAddr)
 }

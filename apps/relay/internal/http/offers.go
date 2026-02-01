@@ -23,8 +23,9 @@ import (
 )
 
 const (
-	offerDefaultTTL = 7 * 24 * time.Hour
-	offerMaxTTL     = 30 * 24 * time.Hour
+	offerDefaultTTL           = 7 * 24 * time.Hour
+	offerMaxTTL               = 30 * 24 * time.Hour
+	maxRequestSchemaHintBytes = 4096
 )
 
 type OfferHandler struct {
@@ -398,6 +399,126 @@ func (h *OfferHandler) insertOffer(ctx context.Context, offerID, sellerBotID str
 }
 
 func (h *OfferHandler) loadOfferEntries(ctx context.Context, sellerBotID, query string, filterTags []string) ([]offerEntry, error) {
+	if query != "" {
+		return h.loadOfferEntriesSearch(ctx, sellerBotID, query, filterTags)
+	}
+	rows, err := h.Store.DB.QueryContext(ctx, selectOffersQuery, sellerBotID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	entries := make([]offerEntry, 0)
+	for rows.Next() {
+		var offer sqlc.Offer
+		if err := rows.Scan(
+			&offer.OfferID,
+			&offer.SellerBotID,
+			&offer.Title,
+			&offer.Description,
+			&offer.TagsJson,
+			&offer.PriceRaw,
+			&offer.TurnaroundSeconds,
+			&offer.CreatedAt,
+			&offer.ExpiresAt,
+			&offer.Status,
+			&offer.CancelledAt,
+			&offer.RequestSchemaHint,
+		); err != nil {
+			return nil, err
+		}
+
+		if err := h.expireOfferIfNeeded(ctx, &offer); err != nil {
+			return nil, err
+		}
+		if offer.Status != string(domain.OfferActive) {
+			continue
+		}
+
+		tags, err := h.loadOfferTags(ctx, offer)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(filterTags) > 0 && !offerHasTags(tags, filterTags) {
+			continue
+		}
+
+		entries = append(entries, offerEntry{
+			Offer: offer,
+			Tags:  tags,
+			Score: 0,
+			Price: parsePrice(offer.PriceRaw),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+func (h *OfferHandler) loadOfferEntriesSearch(ctx context.Context, sellerBotID, query string, filterTags []string) ([]offerEntry, error) {
+	rows, err := h.Store.DB.QueryContext(ctx, selectOffersSearchQuery, query, sellerBotID)
+	if err != nil {
+		if isFTSUnavailable(err) {
+			return h.loadOfferEntriesSearchFallback(ctx, sellerBotID, query, filterTags)
+		}
+		return nil, err
+	}
+	defer rows.Close()
+
+	entries := make([]offerEntry, 0)
+	for rows.Next() {
+		var offer sqlc.Offer
+		var score int64
+		if err := rows.Scan(
+			&offer.OfferID,
+			&offer.SellerBotID,
+			&offer.Title,
+			&offer.Description,
+			&offer.TagsJson,
+			&offer.PriceRaw,
+			&offer.TurnaroundSeconds,
+			&offer.CreatedAt,
+			&offer.ExpiresAt,
+			&offer.Status,
+			&offer.CancelledAt,
+			&offer.RequestSchemaHint,
+			&score,
+		); err != nil {
+			return nil, err
+		}
+
+		if err := h.expireOfferIfNeeded(ctx, &offer); err != nil {
+			return nil, err
+		}
+		if offer.Status != string(domain.OfferActive) {
+			continue
+		}
+
+		tags, err := h.loadOfferTags(ctx, offer)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(filterTags) > 0 && !offerHasTags(tags, filterTags) {
+			continue
+		}
+
+		entries = append(entries, offerEntry{
+			Offer: offer,
+			Tags:  tags,
+			Score: int(score),
+			Price: parsePrice(offer.PriceRaw),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+func (h *OfferHandler) loadOfferEntriesSearchFallback(ctx context.Context, sellerBotID, query string, filterTags []string) ([]offerEntry, error) {
 	rows, err := h.Store.DB.QueryContext(ctx, selectOffersQuery, sellerBotID)
 	if err != nil {
 		return nil, err
@@ -441,7 +562,7 @@ func (h *OfferHandler) loadOfferEntries(ctx context.Context, sellerBotID, query 
 		}
 
 		score := scoreOffer(offer, tags, query)
-		if query != "" && score == 0 {
+		if score == 0 {
 			continue
 		}
 
@@ -560,6 +681,11 @@ func normalizeOfferCreate(payload offerCreateRequest) (offerCreateRequest, error
 		return offerCreateRequest{}, errors.New("invalid price_raw")
 	}
 
+	requestSchemaHint := strings.TrimSpace(payload.RequestSchemaHint)
+	if len(requestSchemaHint) > maxRequestSchemaHintBytes {
+		return offerCreateRequest{}, errors.New("request_schema_hint too long")
+	}
+
 	return offerCreateRequest{
 		Title:             title,
 		Description:       description,
@@ -567,7 +693,7 @@ func normalizeOfferCreate(payload offerCreateRequest) (offerCreateRequest, error
 		PriceRaw:          payload.PriceRaw,
 		TurnaroundSeconds: payload.TurnaroundSeconds,
 		ExpiresAt:         payload.ExpiresAt,
-		RequestSchemaHint: strings.TrimSpace(payload.RequestSchemaHint),
+		RequestSchemaHint: requestSchemaHint,
 	}, nil
 }
 
@@ -605,6 +731,14 @@ func parseTagFilter(raw string) []string {
 		filter = append(filter, trimmed)
 	}
 	return filter
+}
+
+func isFTSUnavailable(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "fts5") || strings.Contains(msg, "offers_fts")
 }
 
 func offerHasTags(tags []string, filter []string) bool {
@@ -927,3 +1061,12 @@ const selectOffersQuery = `
 SELECT offer_id, seller_bot_id, title, description, tags_json, price_raw, turnaround_seconds, created_at, expires_at, status, cancelled_at, request_schema_hint
 FROM offers
 WHERE (?1 = '' OR seller_bot_id = ?1) AND status = 'ACTIVE'`
+
+const selectOffersSearchQuery = `
+SELECT o.offer_id, o.seller_bot_id, o.title, o.description, o.tags_json, o.price_raw, o.turnaround_seconds, o.created_at, o.expires_at, o.status, o.cancelled_at, o.request_schema_hint,
+	CAST((1000000.0 / (1.0 + bm25(offers_fts, 10.0, 2.0, 5.0))) AS INTEGER) AS score
+FROM offers_fts
+JOIN offers o ON o.rowid = offers_fts.rowid
+WHERE offers_fts MATCH ?1
+	AND (?2 = '' OR o.seller_bot_id = ?2)
+	AND o.status = 'ACTIVE'`

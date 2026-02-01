@@ -226,9 +226,27 @@ WHERE buyer_bot_id = sqlc.arg(buyer_bot_id)
 ORDER BY created_at DESC, job_id DESC
 LIMIT sqlc.arg(limit);
 
+-- name: ListJobsByBuyerNewestWithStatus :many
+SELECT * FROM jobs
+WHERE buyer_bot_id = sqlc.arg(buyer_bot_id)
+	AND status IN (sqlc.slice(statuses))
+ORDER BY created_at DESC, job_id DESC
+LIMIT sqlc.arg(limit);
+
 -- name: ListJobsByBuyerNewestAfter :many
 SELECT * FROM jobs
 WHERE buyer_bot_id = sqlc.arg(buyer_bot_id)
+	AND (
+		created_at < sqlc.arg(cursor_created_at)
+		OR (created_at = sqlc.arg(cursor_created_at) AND job_id < sqlc.arg(cursor_job_id))
+	)
+ORDER BY created_at DESC, job_id DESC
+LIMIT sqlc.arg(limit);
+
+-- name: ListJobsByBuyerNewestAfterWithStatus :many
+SELECT * FROM jobs
+WHERE buyer_bot_id = sqlc.arg(buyer_bot_id)
+	AND status IN (sqlc.slice(statuses))
 	AND (
 		created_at < sqlc.arg(cursor_created_at)
 		OR (created_at = sqlc.arg(cursor_created_at) AND job_id < sqlc.arg(cursor_job_id))
@@ -243,10 +261,30 @@ WHERE buyer_bot_id = sqlc.arg(buyer_bot_id)
 ORDER BY created_at DESC, job_id DESC
 LIMIT sqlc.arg(limit);
 
+-- name: ListJobsByBuyerSinceWithStatus :many
+SELECT * FROM jobs
+WHERE buyer_bot_id = sqlc.arg(buyer_bot_id)
+	AND created_at >= sqlc.arg(created_since)
+	AND status IN (sqlc.slice(statuses))
+ORDER BY created_at DESC, job_id DESC
+LIMIT sqlc.arg(limit);
+
 -- name: ListJobsByBuyerSinceAfter :many
 SELECT * FROM jobs
 WHERE buyer_bot_id = sqlc.arg(buyer_bot_id)
 	AND created_at >= sqlc.arg(created_since)
+	AND (
+		created_at < sqlc.arg(cursor_created_at)
+		OR (created_at = sqlc.arg(cursor_created_at) AND job_id < sqlc.arg(cursor_job_id))
+	)
+ORDER BY created_at DESC, job_id DESC
+LIMIT sqlc.arg(limit);
+
+-- name: ListJobsByBuyerSinceAfterWithStatus :many
+SELECT * FROM jobs
+WHERE buyer_bot_id = sqlc.arg(buyer_bot_id)
+	AND created_at >= sqlc.arg(created_since)
+	AND status IN (sqlc.slice(statuses))
 	AND (
 		created_at < sqlc.arg(cursor_created_at)
 		OR (created_at = sqlc.arg(cursor_created_at) AND job_id < sqlc.arg(cursor_job_id))
@@ -260,9 +298,27 @@ WHERE seller_bot_id = sqlc.arg(seller_bot_id)
 ORDER BY created_at DESC, job_id DESC
 LIMIT sqlc.arg(limit);
 
+-- name: ListJobsBySellerNewestWithStatus :many
+SELECT * FROM jobs
+WHERE seller_bot_id = sqlc.arg(seller_bot_id)
+	AND status IN (sqlc.slice(statuses))
+ORDER BY created_at DESC, job_id DESC
+LIMIT sqlc.arg(limit);
+
 -- name: ListJobsBySellerNewestAfter :many
 SELECT * FROM jobs
 WHERE seller_bot_id = sqlc.arg(seller_bot_id)
+	AND (
+		created_at < sqlc.arg(cursor_created_at)
+		OR (created_at = sqlc.arg(cursor_created_at) AND job_id < sqlc.arg(cursor_job_id))
+	)
+ORDER BY created_at DESC, job_id DESC
+LIMIT sqlc.arg(limit);
+
+-- name: ListJobsBySellerNewestAfterWithStatus :many
+SELECT * FROM jobs
+WHERE seller_bot_id = sqlc.arg(seller_bot_id)
+	AND status IN (sqlc.slice(statuses))
 	AND (
 		created_at < sqlc.arg(cursor_created_at)
 		OR (created_at = sqlc.arg(cursor_created_at) AND job_id < sqlc.arg(cursor_job_id))
@@ -277,10 +333,30 @@ WHERE seller_bot_id = sqlc.arg(seller_bot_id)
 ORDER BY created_at DESC, job_id DESC
 LIMIT sqlc.arg(limit);
 
+-- name: ListJobsBySellerSinceWithStatus :many
+SELECT * FROM jobs
+WHERE seller_bot_id = sqlc.arg(seller_bot_id)
+	AND created_at >= sqlc.arg(created_since)
+	AND status IN (sqlc.slice(statuses))
+ORDER BY created_at DESC, job_id DESC
+LIMIT sqlc.arg(limit);
+
 -- name: ListJobsBySellerSinceAfter :many
 SELECT * FROM jobs
 WHERE seller_bot_id = sqlc.arg(seller_bot_id)
 	AND created_at >= sqlc.arg(created_since)
+	AND (
+		created_at < sqlc.arg(cursor_created_at)
+		OR (created_at = sqlc.arg(cursor_created_at) AND job_id < sqlc.arg(cursor_job_id))
+	)
+ORDER BY created_at DESC, job_id DESC
+LIMIT sqlc.arg(limit);
+
+-- name: ListJobsBySellerSinceAfterWithStatus :many
+SELECT * FROM jobs
+WHERE seller_bot_id = sqlc.arg(seller_bot_id)
+	AND created_at >= sqlc.arg(created_since)
+	AND status IN (sqlc.slice(statuses))
 	AND (
 		created_at < sqlc.arg(cursor_created_at)
 		OR (created_at = sqlc.arg(cursor_created_at) AND job_id < sqlc.arg(cursor_job_id))
@@ -539,6 +615,24 @@ WHERE recipient_bot_id = sqlc.arg(recipient_bot_id)
 	AND event_id > sqlc.arg(since_event_id)
 ORDER BY event_id ASC
 LIMIT sqlc.arg(limit);
+
+-- name: ListEventsAfterIDByTypes :many
+SELECT event_id,
+	recipient_bot_id,
+	event_type,
+	data_json,
+	created_at
+FROM events
+WHERE recipient_bot_id = sqlc.arg(recipient_bot_id)
+	AND event_id > sqlc.arg(since_event_id)
+	AND event_type IN (sqlc.slice(event_types))
+ORDER BY event_id ASC
+LIMIT sqlc.arg(limit);
+
+-- name: GetEventCreatedAt :one
+SELECT created_at FROM events
+WHERE recipient_bot_id = sqlc.arg(recipient_bot_id)
+	AND event_id = sqlc.arg(event_id);
 
 -- name: GetMinEventID :one
 SELECT MIN(event_id) FROM events

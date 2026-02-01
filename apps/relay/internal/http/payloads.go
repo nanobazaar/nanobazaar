@@ -12,17 +12,19 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/nanobazaar/relay/internal/metrics"
 	"github.com/nanobazaar/relay/internal/store"
 	"github.com/nanobazaar/relay/internal/store/sqlc"
 )
 
 type PayloadHandler struct {
-	Store *store.Store
-	Clock func() time.Time
+	Store   *store.Store
+	Metrics *metrics.Registry
+	Clock   func() time.Time
 }
 
-func NewPayloadHandler(store *store.Store) *PayloadHandler {
-	return &PayloadHandler{Store: store, Clock: time.Now}
+func NewPayloadHandler(store *store.Store, metrics *metrics.Registry) *PayloadHandler {
+	return &PayloadHandler{Store: store, Metrics: metrics, Clock: time.Now}
 }
 
 type payloadEnvelopeResponse struct {
@@ -102,6 +104,7 @@ func (h *PayloadHandler) Get(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "payload lookup failed")
 		return
 	}
+	wasFetched := payload.FetchedAt.Valid
 
 	now := h.now()
 	if err := h.Store.MarkPayloadFetched(r.Context(), sqlc.MarkPayloadFetchedParams{
@@ -111,6 +114,9 @@ func (h *PayloadHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "payload update failed")
 		return
+	}
+	if h.Metrics != nil && !wasFetched {
+		h.Metrics.AddPendingPayloads(-1)
 	}
 
 	writeJSON(w, http.StatusOK, payloadEnvelopeResponse{

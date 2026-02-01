@@ -19,6 +19,8 @@ import (
 
 	"github.com/nanobazaar/relay/internal/auth"
 	httpapi "github.com/nanobazaar/relay/internal/http"
+	"github.com/nanobazaar/relay/internal/metrics"
+	"github.com/nanobazaar/relay/internal/ratelimit"
 	"github.com/nanobazaar/relay/internal/retention"
 	"github.com/nanobazaar/relay/internal/store"
 )
@@ -28,6 +30,20 @@ type Config struct {
 	DBPath            string
 	RetentionEnabled  bool
 	RetentionInterval time.Duration
+	MetricsAddr       string
+	HealthPublic      bool
+	RateLimits        RateLimitConfig
+}
+
+type RateLimitConfig struct {
+	PollRPS      float64
+	PollBurst    int
+	OfferRPS     float64
+	OfferBurst   int
+	WritesRPS    float64
+	WritesBurst  int
+	PayloadRPS   float64
+	PayloadBurst int
 }
 
 func main() {
@@ -52,14 +68,43 @@ func main() {
 	}
 
 	store := store.New(db)
+	metricsRegistry := metrics.NewRegistry()
 	verifier := auth.NewVerifier(store)
+	verifier.Metrics = metricsRegistry
+
+	limiter := ratelimit.NewLimiter(ratelimit.Config{
+		PollAck: ratelimit.BucketConfig{
+			Rate:  cfg.RateLimits.PollRPS,
+			Burst: cfg.RateLimits.PollBurst,
+		},
+		OfferSearch: ratelimit.BucketConfig{
+			Rate:  cfg.RateLimits.OfferRPS,
+			Burst: cfg.RateLimits.OfferBurst,
+		},
+		Writes: ratelimit.BucketConfig{
+			Rate:  cfg.RateLimits.WritesRPS,
+			Burst: cfg.RateLimits.WritesBurst,
+		},
+		PayloadFetch: ratelimit.BucketConfig{
+			Rate:  cfg.RateLimits.PayloadRPS,
+			Burst: cfg.RateLimits.PayloadBurst,
+		},
+	})
 
 	stopRetention := retention.Start(cfg.RetentionEnabled, cfg.RetentionInterval, log.Default(), store)
 	defer stopRetention()
 
+	router := httpapi.NewRouter(httpapi.RouterConfig{
+		Verifier:     verifier,
+		Store:        store,
+		Metrics:      metricsRegistry,
+		Limiter:      limiter,
+		HealthPublic: cfg.HealthPublic,
+	})
+
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewRouter(verifier, store),
+		Handler:           router,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -75,6 +120,30 @@ func main() {
 		}
 	}()
 
+	var metricsServer *http.Server
+	if cfg.MetricsAddr != "" {
+		payloadStats := func(ctx context.Context) (int64, int64, error) {
+			var pending int64
+			var bytes int64
+			row := db.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN fetched_at IS NULL THEN 1 ELSE 0 END), 0), COALESCE(SUM(LENGTH(ciphertext_b64)), 0) FROM payloads`)
+			if err := row.Scan(&pending, &bytes); err != nil {
+				return 0, 0, err
+			}
+			return pending, bytes, nil
+		}
+		metricsServer = &http.Server{
+			Addr:              cfg.MetricsAddr,
+			Handler:           metrics.NewHandler(metricsRegistry, payloadStats),
+			ReadHeaderTimeout: 5 * time.Second,
+		}
+		go func() {
+			log.Printf("metrics listening on %s", cfg.MetricsAddr)
+			if err := metricsServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Fatalf("metrics server: %v", err)
+			}
+		}()
+	}
+
 	shutdownCh := make(chan os.Signal, 1)
 	signal.Notify(shutdownCh, syscall.SIGINT, syscall.SIGTERM)
 	<-shutdownCh
@@ -83,6 +152,11 @@ func main() {
 	defer cancel()
 	if err := server.Shutdown(ctx); err != nil {
 		log.Printf("shutdown: %v", err)
+	}
+	if metricsServer != nil {
+		if err := metricsServer.Shutdown(ctx); err != nil {
+			log.Printf("metrics shutdown: %v", err)
+		}
 	}
 }
 
@@ -102,11 +176,28 @@ func loadConfig() (Config, error) {
 		return Config{}, err
 	}
 
+	metricsAddr := os.Getenv("NBR_METRICS_ADDR")
+	healthPublic := parseBoolEnv("NBR_HEALTH_PUBLIC", false)
+
+	rateLimits := RateLimitConfig{
+		PollRPS:      parseFloatEnv("NBR_RL_POLL_RPS", 5),
+		PollBurst:    parseIntEnv("NBR_RL_POLL_BURST", 10),
+		OfferRPS:     parseFloatEnv("NBR_RL_OFFER_RPS", 2),
+		OfferBurst:   parseIntEnv("NBR_RL_OFFER_BURST", 5),
+		WritesRPS:    parseFloatEnv("NBR_RL_WRITES_RPS", 2),
+		WritesBurst:  parseIntEnv("NBR_RL_WRITES_BURST", 5),
+		PayloadRPS:   parseFloatEnv("NBR_RL_PAYLOAD_RPS", 5),
+		PayloadBurst: parseIntEnv("NBR_RL_PAYLOAD_BURST", 10),
+	}
+
 	return Config{
 		HTTPAddr:          addr,
 		DBPath:            envOrDefault("NBR_DB_PATH", "./data/relay.db"),
 		RetentionEnabled:  retentionEnabled,
 		RetentionInterval: retentionInterval,
+		MetricsAddr:       metricsAddr,
+		HealthPublic:      healthPublic,
+		RateLimits:        rateLimits,
 	}, nil
 }
 
@@ -157,4 +248,28 @@ func parseDurationEnv(key string, def time.Duration) (time.Duration, error) {
 		return 0, fmt.Errorf("%s: %w", key, err)
 	}
 	return parsed, nil
+}
+
+func parseIntEnv(key string, def int) int {
+	value := os.Getenv(key)
+	if value == "" {
+		return def
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return def
+	}
+	return parsed
+}
+
+func parseFloatEnv(key string, def float64) float64 {
+	value := os.Getenv(key)
+	if value == "" {
+		return def
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return def
+	}
+	return parsed
 }

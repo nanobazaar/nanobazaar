@@ -8,6 +8,7 @@ package sqlc
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"time"
 )
 
@@ -449,6 +450,24 @@ func (q *Queries) GetBot(ctx context.Context, botID string) (Bot, error) {
 	return i, err
 }
 
+const getEventCreatedAt = `-- name: GetEventCreatedAt :one
+SELECT created_at FROM events
+WHERE recipient_bot_id = ?1
+	AND event_id = ?2
+`
+
+type GetEventCreatedAtParams struct {
+	RecipientBotID string `json:"recipient_bot_id"`
+	EventID        int64  `json:"event_id"`
+}
+
+func (q *Queries) GetEventCreatedAt(ctx context.Context, arg GetEventCreatedAtParams) (time.Time, error) {
+	row := q.queryRow(ctx, q.getEventCreatedAtStmt, getEventCreatedAt, arg.RecipientBotID, arg.EventID)
+	var created_at time.Time
+	err := row.Scan(&created_at)
+	return created_at, err
+}
+
 const getIdempotency = `-- name: GetIdempotency :one
 SELECT bot_id, endpoint, idempotency_key, request_hash, response_code, response_body, response_headers, created_at FROM idempotency_keys
 WHERE bot_id = ?1
@@ -744,6 +763,69 @@ func (q *Queries) ListEventsAfterID(ctx context.Context, arg ListEventsAfterIDPa
 	return items, nil
 }
 
+const listEventsAfterIDByTypes = `-- name: ListEventsAfterIDByTypes :many
+SELECT event_id,
+	recipient_bot_id,
+	event_type,
+	data_json,
+	created_at
+FROM events
+WHERE recipient_bot_id = ?1
+	AND event_id > ?2
+	AND event_type IN (/*SLICE:event_types*/?)
+ORDER BY event_id ASC
+LIMIT ?4
+`
+
+type ListEventsAfterIDByTypesParams struct {
+	RecipientBotID string   `json:"recipient_bot_id"`
+	SinceEventID   int64    `json:"since_event_id"`
+	EventTypes     []string `json:"event_types"`
+	Limit          int64    `json:"limit"`
+}
+
+func (q *Queries) ListEventsAfterIDByTypes(ctx context.Context, arg ListEventsAfterIDByTypesParams) ([]Event, error) {
+	query := listEventsAfterIDByTypes
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.RecipientBotID)
+	queryParams = append(queryParams, arg.SinceEventID)
+	if len(arg.EventTypes) > 0 {
+		for _, v := range arg.EventTypes {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:event_types*/?", strings.Repeat(",?", len(arg.EventTypes))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:event_types*/?", "NULL", 1)
+	}
+	queryParams = append(queryParams, arg.Limit)
+	rows, err := q.query(ctx, nil, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Event
+	for rows.Next() {
+		var i Event
+		if err := rows.Scan(
+			&i.EventID,
+			&i.RecipientBotID,
+			&i.EventType,
+			&i.DataJson,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listJobsByBuyerNewest = `-- name: ListJobsByBuyerNewest :many
 SELECT job_id, offer_id, buyer_bot_id, seller_bot_id, status, price_raw, turnaround_seconds, created_at, job_expires_at, request_payload_id, charge_id, charge_address, charge_amount_raw, charge_expires_at, charge_sig_ed25519, paid_at, delivered_at, cancelled_at, expired_at, payment_verifier, payment_block_hash, payment_observed_at, amount_raw_received FROM jobs
 WHERE buyer_bot_id = ?1
@@ -828,6 +910,160 @@ func (q *Queries) ListJobsByBuyerNewestAfter(ctx context.Context, arg ListJobsBy
 		arg.CursorJobID,
 		arg.Limit,
 	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Job
+	for rows.Next() {
+		var i Job
+		if err := rows.Scan(
+			&i.JobID,
+			&i.OfferID,
+			&i.BuyerBotID,
+			&i.SellerBotID,
+			&i.Status,
+			&i.PriceRaw,
+			&i.TurnaroundSeconds,
+			&i.CreatedAt,
+			&i.JobExpiresAt,
+			&i.RequestPayloadID,
+			&i.ChargeID,
+			&i.ChargeAddress,
+			&i.ChargeAmountRaw,
+			&i.ChargeExpiresAt,
+			&i.ChargeSigEd25519,
+			&i.PaidAt,
+			&i.DeliveredAt,
+			&i.CancelledAt,
+			&i.ExpiredAt,
+			&i.PaymentVerifier,
+			&i.PaymentBlockHash,
+			&i.PaymentObservedAt,
+			&i.AmountRawReceived,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listJobsByBuyerNewestAfterWithStatus = `-- name: ListJobsByBuyerNewestAfterWithStatus :many
+SELECT job_id, offer_id, buyer_bot_id, seller_bot_id, status, price_raw, turnaround_seconds, created_at, job_expires_at, request_payload_id, charge_id, charge_address, charge_amount_raw, charge_expires_at, charge_sig_ed25519, paid_at, delivered_at, cancelled_at, expired_at, payment_verifier, payment_block_hash, payment_observed_at, amount_raw_received FROM jobs
+WHERE buyer_bot_id = ?1
+	AND status IN (/*SLICE:statuses*/?)
+	AND (
+		created_at < ?3
+		OR (created_at = ?3 AND job_id < ?4)
+	)
+ORDER BY created_at DESC, job_id DESC
+LIMIT ?5
+`
+
+type ListJobsByBuyerNewestAfterWithStatusParams struct {
+	BuyerBotID      string    `json:"buyer_bot_id"`
+	Statuses        []string  `json:"statuses"`
+	CursorCreatedAt time.Time `json:"cursor_created_at"`
+	CursorJobID     string    `json:"cursor_job_id"`
+	Limit           int64     `json:"limit"`
+}
+
+func (q *Queries) ListJobsByBuyerNewestAfterWithStatus(ctx context.Context, arg ListJobsByBuyerNewestAfterWithStatusParams) ([]Job, error) {
+	query := listJobsByBuyerNewestAfterWithStatus
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.BuyerBotID)
+	if len(arg.Statuses) > 0 {
+		for _, v := range arg.Statuses {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:statuses*/?", strings.Repeat(",?", len(arg.Statuses))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:statuses*/?", "NULL", 1)
+	}
+	queryParams = append(queryParams, arg.CursorCreatedAt)
+	queryParams = append(queryParams, arg.CursorJobID)
+	queryParams = append(queryParams, arg.Limit)
+	rows, err := q.query(ctx, nil, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Job
+	for rows.Next() {
+		var i Job
+		if err := rows.Scan(
+			&i.JobID,
+			&i.OfferID,
+			&i.BuyerBotID,
+			&i.SellerBotID,
+			&i.Status,
+			&i.PriceRaw,
+			&i.TurnaroundSeconds,
+			&i.CreatedAt,
+			&i.JobExpiresAt,
+			&i.RequestPayloadID,
+			&i.ChargeID,
+			&i.ChargeAddress,
+			&i.ChargeAmountRaw,
+			&i.ChargeExpiresAt,
+			&i.ChargeSigEd25519,
+			&i.PaidAt,
+			&i.DeliveredAt,
+			&i.CancelledAt,
+			&i.ExpiredAt,
+			&i.PaymentVerifier,
+			&i.PaymentBlockHash,
+			&i.PaymentObservedAt,
+			&i.AmountRawReceived,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listJobsByBuyerNewestWithStatus = `-- name: ListJobsByBuyerNewestWithStatus :many
+SELECT job_id, offer_id, buyer_bot_id, seller_bot_id, status, price_raw, turnaround_seconds, created_at, job_expires_at, request_payload_id, charge_id, charge_address, charge_amount_raw, charge_expires_at, charge_sig_ed25519, paid_at, delivered_at, cancelled_at, expired_at, payment_verifier, payment_block_hash, payment_observed_at, amount_raw_received FROM jobs
+WHERE buyer_bot_id = ?1
+	AND status IN (/*SLICE:statuses*/?)
+ORDER BY created_at DESC, job_id DESC
+LIMIT ?3
+`
+
+type ListJobsByBuyerNewestWithStatusParams struct {
+	BuyerBotID string   `json:"buyer_bot_id"`
+	Statuses   []string `json:"statuses"`
+	Limit      int64    `json:"limit"`
+}
+
+func (q *Queries) ListJobsByBuyerNewestWithStatus(ctx context.Context, arg ListJobsByBuyerNewestWithStatusParams) ([]Job, error) {
+	query := listJobsByBuyerNewestWithStatus
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.BuyerBotID)
+	if len(arg.Statuses) > 0 {
+		for _, v := range arg.Statuses {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:statuses*/?", strings.Repeat(",?", len(arg.Statuses))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:statuses*/?", "NULL", 1)
+	}
+	queryParams = append(queryParams, arg.Limit)
+	rows, err := q.query(ctx, nil, query, queryParams...)
 	if err != nil {
 		return nil, err
 	}
@@ -1007,6 +1243,166 @@ func (q *Queries) ListJobsByBuyerSinceAfter(ctx context.Context, arg ListJobsByB
 	return items, nil
 }
 
+const listJobsByBuyerSinceAfterWithStatus = `-- name: ListJobsByBuyerSinceAfterWithStatus :many
+SELECT job_id, offer_id, buyer_bot_id, seller_bot_id, status, price_raw, turnaround_seconds, created_at, job_expires_at, request_payload_id, charge_id, charge_address, charge_amount_raw, charge_expires_at, charge_sig_ed25519, paid_at, delivered_at, cancelled_at, expired_at, payment_verifier, payment_block_hash, payment_observed_at, amount_raw_received FROM jobs
+WHERE buyer_bot_id = ?1
+	AND created_at >= ?2
+	AND status IN (/*SLICE:statuses*/?)
+	AND (
+		created_at < ?4
+		OR (created_at = ?4 AND job_id < ?5)
+	)
+ORDER BY created_at DESC, job_id DESC
+LIMIT ?6
+`
+
+type ListJobsByBuyerSinceAfterWithStatusParams struct {
+	BuyerBotID      string    `json:"buyer_bot_id"`
+	CreatedSince    time.Time `json:"created_since"`
+	Statuses        []string  `json:"statuses"`
+	CursorCreatedAt time.Time `json:"cursor_created_at"`
+	CursorJobID     string    `json:"cursor_job_id"`
+	Limit           int64     `json:"limit"`
+}
+
+func (q *Queries) ListJobsByBuyerSinceAfterWithStatus(ctx context.Context, arg ListJobsByBuyerSinceAfterWithStatusParams) ([]Job, error) {
+	query := listJobsByBuyerSinceAfterWithStatus
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.BuyerBotID)
+	queryParams = append(queryParams, arg.CreatedSince)
+	if len(arg.Statuses) > 0 {
+		for _, v := range arg.Statuses {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:statuses*/?", strings.Repeat(",?", len(arg.Statuses))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:statuses*/?", "NULL", 1)
+	}
+	queryParams = append(queryParams, arg.CursorCreatedAt)
+	queryParams = append(queryParams, arg.CursorJobID)
+	queryParams = append(queryParams, arg.Limit)
+	rows, err := q.query(ctx, nil, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Job
+	for rows.Next() {
+		var i Job
+		if err := rows.Scan(
+			&i.JobID,
+			&i.OfferID,
+			&i.BuyerBotID,
+			&i.SellerBotID,
+			&i.Status,
+			&i.PriceRaw,
+			&i.TurnaroundSeconds,
+			&i.CreatedAt,
+			&i.JobExpiresAt,
+			&i.RequestPayloadID,
+			&i.ChargeID,
+			&i.ChargeAddress,
+			&i.ChargeAmountRaw,
+			&i.ChargeExpiresAt,
+			&i.ChargeSigEd25519,
+			&i.PaidAt,
+			&i.DeliveredAt,
+			&i.CancelledAt,
+			&i.ExpiredAt,
+			&i.PaymentVerifier,
+			&i.PaymentBlockHash,
+			&i.PaymentObservedAt,
+			&i.AmountRawReceived,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listJobsByBuyerSinceWithStatus = `-- name: ListJobsByBuyerSinceWithStatus :many
+SELECT job_id, offer_id, buyer_bot_id, seller_bot_id, status, price_raw, turnaround_seconds, created_at, job_expires_at, request_payload_id, charge_id, charge_address, charge_amount_raw, charge_expires_at, charge_sig_ed25519, paid_at, delivered_at, cancelled_at, expired_at, payment_verifier, payment_block_hash, payment_observed_at, amount_raw_received FROM jobs
+WHERE buyer_bot_id = ?1
+	AND created_at >= ?2
+	AND status IN (/*SLICE:statuses*/?)
+ORDER BY created_at DESC, job_id DESC
+LIMIT ?4
+`
+
+type ListJobsByBuyerSinceWithStatusParams struct {
+	BuyerBotID   string    `json:"buyer_bot_id"`
+	CreatedSince time.Time `json:"created_since"`
+	Statuses     []string  `json:"statuses"`
+	Limit        int64     `json:"limit"`
+}
+
+func (q *Queries) ListJobsByBuyerSinceWithStatus(ctx context.Context, arg ListJobsByBuyerSinceWithStatusParams) ([]Job, error) {
+	query := listJobsByBuyerSinceWithStatus
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.BuyerBotID)
+	queryParams = append(queryParams, arg.CreatedSince)
+	if len(arg.Statuses) > 0 {
+		for _, v := range arg.Statuses {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:statuses*/?", strings.Repeat(",?", len(arg.Statuses))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:statuses*/?", "NULL", 1)
+	}
+	queryParams = append(queryParams, arg.Limit)
+	rows, err := q.query(ctx, nil, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Job
+	for rows.Next() {
+		var i Job
+		if err := rows.Scan(
+			&i.JobID,
+			&i.OfferID,
+			&i.BuyerBotID,
+			&i.SellerBotID,
+			&i.Status,
+			&i.PriceRaw,
+			&i.TurnaroundSeconds,
+			&i.CreatedAt,
+			&i.JobExpiresAt,
+			&i.RequestPayloadID,
+			&i.ChargeID,
+			&i.ChargeAddress,
+			&i.ChargeAmountRaw,
+			&i.ChargeExpiresAt,
+			&i.ChargeSigEd25519,
+			&i.PaidAt,
+			&i.DeliveredAt,
+			&i.CancelledAt,
+			&i.ExpiredAt,
+			&i.PaymentVerifier,
+			&i.PaymentBlockHash,
+			&i.PaymentObservedAt,
+			&i.AmountRawReceived,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listJobsBySellerNewest = `-- name: ListJobsBySellerNewest :many
 SELECT job_id, offer_id, buyer_bot_id, seller_bot_id, status, price_raw, turnaround_seconds, created_at, job_expires_at, request_payload_id, charge_id, charge_address, charge_amount_raw, charge_expires_at, charge_sig_ed25519, paid_at, delivered_at, cancelled_at, expired_at, payment_verifier, payment_block_hash, payment_observed_at, amount_raw_received FROM jobs
 WHERE seller_bot_id = ?1
@@ -1091,6 +1487,160 @@ func (q *Queries) ListJobsBySellerNewestAfter(ctx context.Context, arg ListJobsB
 		arg.CursorJobID,
 		arg.Limit,
 	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Job
+	for rows.Next() {
+		var i Job
+		if err := rows.Scan(
+			&i.JobID,
+			&i.OfferID,
+			&i.BuyerBotID,
+			&i.SellerBotID,
+			&i.Status,
+			&i.PriceRaw,
+			&i.TurnaroundSeconds,
+			&i.CreatedAt,
+			&i.JobExpiresAt,
+			&i.RequestPayloadID,
+			&i.ChargeID,
+			&i.ChargeAddress,
+			&i.ChargeAmountRaw,
+			&i.ChargeExpiresAt,
+			&i.ChargeSigEd25519,
+			&i.PaidAt,
+			&i.DeliveredAt,
+			&i.CancelledAt,
+			&i.ExpiredAt,
+			&i.PaymentVerifier,
+			&i.PaymentBlockHash,
+			&i.PaymentObservedAt,
+			&i.AmountRawReceived,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listJobsBySellerNewestAfterWithStatus = `-- name: ListJobsBySellerNewestAfterWithStatus :many
+SELECT job_id, offer_id, buyer_bot_id, seller_bot_id, status, price_raw, turnaround_seconds, created_at, job_expires_at, request_payload_id, charge_id, charge_address, charge_amount_raw, charge_expires_at, charge_sig_ed25519, paid_at, delivered_at, cancelled_at, expired_at, payment_verifier, payment_block_hash, payment_observed_at, amount_raw_received FROM jobs
+WHERE seller_bot_id = ?1
+	AND status IN (/*SLICE:statuses*/?)
+	AND (
+		created_at < ?3
+		OR (created_at = ?3 AND job_id < ?4)
+	)
+ORDER BY created_at DESC, job_id DESC
+LIMIT ?5
+`
+
+type ListJobsBySellerNewestAfterWithStatusParams struct {
+	SellerBotID     string    `json:"seller_bot_id"`
+	Statuses        []string  `json:"statuses"`
+	CursorCreatedAt time.Time `json:"cursor_created_at"`
+	CursorJobID     string    `json:"cursor_job_id"`
+	Limit           int64     `json:"limit"`
+}
+
+func (q *Queries) ListJobsBySellerNewestAfterWithStatus(ctx context.Context, arg ListJobsBySellerNewestAfterWithStatusParams) ([]Job, error) {
+	query := listJobsBySellerNewestAfterWithStatus
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.SellerBotID)
+	if len(arg.Statuses) > 0 {
+		for _, v := range arg.Statuses {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:statuses*/?", strings.Repeat(",?", len(arg.Statuses))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:statuses*/?", "NULL", 1)
+	}
+	queryParams = append(queryParams, arg.CursorCreatedAt)
+	queryParams = append(queryParams, arg.CursorJobID)
+	queryParams = append(queryParams, arg.Limit)
+	rows, err := q.query(ctx, nil, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Job
+	for rows.Next() {
+		var i Job
+		if err := rows.Scan(
+			&i.JobID,
+			&i.OfferID,
+			&i.BuyerBotID,
+			&i.SellerBotID,
+			&i.Status,
+			&i.PriceRaw,
+			&i.TurnaroundSeconds,
+			&i.CreatedAt,
+			&i.JobExpiresAt,
+			&i.RequestPayloadID,
+			&i.ChargeID,
+			&i.ChargeAddress,
+			&i.ChargeAmountRaw,
+			&i.ChargeExpiresAt,
+			&i.ChargeSigEd25519,
+			&i.PaidAt,
+			&i.DeliveredAt,
+			&i.CancelledAt,
+			&i.ExpiredAt,
+			&i.PaymentVerifier,
+			&i.PaymentBlockHash,
+			&i.PaymentObservedAt,
+			&i.AmountRawReceived,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listJobsBySellerNewestWithStatus = `-- name: ListJobsBySellerNewestWithStatus :many
+SELECT job_id, offer_id, buyer_bot_id, seller_bot_id, status, price_raw, turnaround_seconds, created_at, job_expires_at, request_payload_id, charge_id, charge_address, charge_amount_raw, charge_expires_at, charge_sig_ed25519, paid_at, delivered_at, cancelled_at, expired_at, payment_verifier, payment_block_hash, payment_observed_at, amount_raw_received FROM jobs
+WHERE seller_bot_id = ?1
+	AND status IN (/*SLICE:statuses*/?)
+ORDER BY created_at DESC, job_id DESC
+LIMIT ?3
+`
+
+type ListJobsBySellerNewestWithStatusParams struct {
+	SellerBotID string   `json:"seller_bot_id"`
+	Statuses    []string `json:"statuses"`
+	Limit       int64    `json:"limit"`
+}
+
+func (q *Queries) ListJobsBySellerNewestWithStatus(ctx context.Context, arg ListJobsBySellerNewestWithStatusParams) ([]Job, error) {
+	query := listJobsBySellerNewestWithStatus
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.SellerBotID)
+	if len(arg.Statuses) > 0 {
+		for _, v := range arg.Statuses {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:statuses*/?", strings.Repeat(",?", len(arg.Statuses))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:statuses*/?", "NULL", 1)
+	}
+	queryParams = append(queryParams, arg.Limit)
+	rows, err := q.query(ctx, nil, query, queryParams...)
 	if err != nil {
 		return nil, err
 	}
@@ -1225,6 +1775,166 @@ func (q *Queries) ListJobsBySellerSinceAfter(ctx context.Context, arg ListJobsBy
 		arg.CursorJobID,
 		arg.Limit,
 	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Job
+	for rows.Next() {
+		var i Job
+		if err := rows.Scan(
+			&i.JobID,
+			&i.OfferID,
+			&i.BuyerBotID,
+			&i.SellerBotID,
+			&i.Status,
+			&i.PriceRaw,
+			&i.TurnaroundSeconds,
+			&i.CreatedAt,
+			&i.JobExpiresAt,
+			&i.RequestPayloadID,
+			&i.ChargeID,
+			&i.ChargeAddress,
+			&i.ChargeAmountRaw,
+			&i.ChargeExpiresAt,
+			&i.ChargeSigEd25519,
+			&i.PaidAt,
+			&i.DeliveredAt,
+			&i.CancelledAt,
+			&i.ExpiredAt,
+			&i.PaymentVerifier,
+			&i.PaymentBlockHash,
+			&i.PaymentObservedAt,
+			&i.AmountRawReceived,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listJobsBySellerSinceAfterWithStatus = `-- name: ListJobsBySellerSinceAfterWithStatus :many
+SELECT job_id, offer_id, buyer_bot_id, seller_bot_id, status, price_raw, turnaround_seconds, created_at, job_expires_at, request_payload_id, charge_id, charge_address, charge_amount_raw, charge_expires_at, charge_sig_ed25519, paid_at, delivered_at, cancelled_at, expired_at, payment_verifier, payment_block_hash, payment_observed_at, amount_raw_received FROM jobs
+WHERE seller_bot_id = ?1
+	AND created_at >= ?2
+	AND status IN (/*SLICE:statuses*/?)
+	AND (
+		created_at < ?4
+		OR (created_at = ?4 AND job_id < ?5)
+	)
+ORDER BY created_at DESC, job_id DESC
+LIMIT ?6
+`
+
+type ListJobsBySellerSinceAfterWithStatusParams struct {
+	SellerBotID     string    `json:"seller_bot_id"`
+	CreatedSince    time.Time `json:"created_since"`
+	Statuses        []string  `json:"statuses"`
+	CursorCreatedAt time.Time `json:"cursor_created_at"`
+	CursorJobID     string    `json:"cursor_job_id"`
+	Limit           int64     `json:"limit"`
+}
+
+func (q *Queries) ListJobsBySellerSinceAfterWithStatus(ctx context.Context, arg ListJobsBySellerSinceAfterWithStatusParams) ([]Job, error) {
+	query := listJobsBySellerSinceAfterWithStatus
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.SellerBotID)
+	queryParams = append(queryParams, arg.CreatedSince)
+	if len(arg.Statuses) > 0 {
+		for _, v := range arg.Statuses {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:statuses*/?", strings.Repeat(",?", len(arg.Statuses))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:statuses*/?", "NULL", 1)
+	}
+	queryParams = append(queryParams, arg.CursorCreatedAt)
+	queryParams = append(queryParams, arg.CursorJobID)
+	queryParams = append(queryParams, arg.Limit)
+	rows, err := q.query(ctx, nil, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Job
+	for rows.Next() {
+		var i Job
+		if err := rows.Scan(
+			&i.JobID,
+			&i.OfferID,
+			&i.BuyerBotID,
+			&i.SellerBotID,
+			&i.Status,
+			&i.PriceRaw,
+			&i.TurnaroundSeconds,
+			&i.CreatedAt,
+			&i.JobExpiresAt,
+			&i.RequestPayloadID,
+			&i.ChargeID,
+			&i.ChargeAddress,
+			&i.ChargeAmountRaw,
+			&i.ChargeExpiresAt,
+			&i.ChargeSigEd25519,
+			&i.PaidAt,
+			&i.DeliveredAt,
+			&i.CancelledAt,
+			&i.ExpiredAt,
+			&i.PaymentVerifier,
+			&i.PaymentBlockHash,
+			&i.PaymentObservedAt,
+			&i.AmountRawReceived,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listJobsBySellerSinceWithStatus = `-- name: ListJobsBySellerSinceWithStatus :many
+SELECT job_id, offer_id, buyer_bot_id, seller_bot_id, status, price_raw, turnaround_seconds, created_at, job_expires_at, request_payload_id, charge_id, charge_address, charge_amount_raw, charge_expires_at, charge_sig_ed25519, paid_at, delivered_at, cancelled_at, expired_at, payment_verifier, payment_block_hash, payment_observed_at, amount_raw_received FROM jobs
+WHERE seller_bot_id = ?1
+	AND created_at >= ?2
+	AND status IN (/*SLICE:statuses*/?)
+ORDER BY created_at DESC, job_id DESC
+LIMIT ?4
+`
+
+type ListJobsBySellerSinceWithStatusParams struct {
+	SellerBotID  string    `json:"seller_bot_id"`
+	CreatedSince time.Time `json:"created_since"`
+	Statuses     []string  `json:"statuses"`
+	Limit        int64     `json:"limit"`
+}
+
+func (q *Queries) ListJobsBySellerSinceWithStatus(ctx context.Context, arg ListJobsBySellerSinceWithStatusParams) ([]Job, error) {
+	query := listJobsBySellerSinceWithStatus
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.SellerBotID)
+	queryParams = append(queryParams, arg.CreatedSince)
+	if len(arg.Statuses) > 0 {
+		for _, v := range arg.Statuses {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:statuses*/?", strings.Repeat(",?", len(arg.Statuses))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:statuses*/?", "NULL", 1)
+	}
+	queryParams = append(queryParams, arg.Limit)
+	rows, err := q.query(ctx, nil, query, queryParams...)
 	if err != nil {
 		return nil, err
 	}

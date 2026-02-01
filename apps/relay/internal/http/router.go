@@ -8,6 +8,8 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/nanobazaar/relay/internal/auth"
+	"github.com/nanobazaar/relay/internal/metrics"
+	"github.com/nanobazaar/relay/internal/ratelimit"
 	"github.com/nanobazaar/relay/internal/store"
 )
 
@@ -19,48 +21,62 @@ func WithClock(clock func() time.Time) Option {
 	}
 }
 
-func NewRouter(verifier *auth.Verifier, store *store.Store, opts ...Option) http.Handler {
+type RouterConfig struct {
+	Verifier     *auth.Verifier
+	Store        *store.Store
+	Metrics      *metrics.Registry
+	Limiter      *ratelimit.Limiter
+	HealthPublic bool
+}
+
+func NewRouter(cfg RouterConfig, opts ...Option) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
+	r.Use(metricsMiddleware(cfg.Metrics))
 
-	bots := NewBotHandler(store)
-	offers := NewOfferHandler(store)
-	jobs := NewJobHandler(store)
-	payloads := NewPayloadHandler(store)
-	poll := NewPollHandler(store)
+	bots := NewBotHandler(cfg.Store)
+	offers := NewOfferHandler(cfg.Store)
+	jobs := NewJobHandler(cfg.Store, cfg.Metrics)
+	payloads := NewPayloadHandler(cfg.Store, cfg.Metrics)
+	poll := NewPollHandler(cfg.Store, cfg.Metrics)
 	for _, opt := range opts {
 		opt(jobs)
 	}
 
-	r.Get("/healthz", healthz)
-	r.Get("/readyz", readyz)
+	r.With(healthMiddleware(cfg.HealthPublic)).Get("/healthz", healthz)
+	r.With(healthMiddleware(cfg.HealthPublic)).Get("/readyz", readyz)
 
 	r.Route("/v0", func(r chi.Router) {
-		r.Use(auth.Middleware(verifier))
+		r.Use(auth.Middleware(cfg.Verifier))
 
-		r.Post("/bots", bots.Register)
+		rlPoll := rateLimitMiddleware(cfg.Limiter, ratelimit.BucketPollAck, cfg.Metrics)
+		rlOffers := rateLimitMiddleware(cfg.Limiter, ratelimit.BucketOfferSearch, cfg.Metrics)
+		rlWrites := rateLimitMiddleware(cfg.Limiter, ratelimit.BucketWrites, cfg.Metrics)
+		rlPayloads := rateLimitMiddleware(cfg.Limiter, ratelimit.BucketPayloadFetch, cfg.Metrics)
+
+		r.With(rlWrites).Post("/bots", bots.Register)
 		r.Get("/bots/{bot_id}", bots.Get)
 
-		r.Post("/offers", offers.Create)
+		r.With(rlWrites).Post("/offers", offers.Create)
 		r.Get("/offers/{offer_id}", offers.Get)
-		r.Post("/offers/{offer_id}/cancel", offers.Cancel)
-		r.Get("/offers", offers.List)
+		r.With(rlWrites).Post("/offers/{offer_id}/cancel", offers.Cancel)
+		r.With(rlOffers).Get("/offers", offers.List)
 
-		r.Post("/jobs", jobs.Create)
+		r.With(rlWrites).Post("/jobs", jobs.Create)
 		r.Get("/jobs/{job_id}", jobs.Get)
 		r.Get("/jobs", jobs.List)
-		r.Post("/jobs/{job_id}/cancel", jobs.Cancel)
-		r.Post("/jobs/{job_id}/charge", jobs.Charge)
-		r.Post("/jobs/{job_id}/mark_paid", jobs.MarkPaid)
-		r.Post("/jobs/{job_id}/deliver", jobs.Deliver)
+		r.With(rlWrites).Post("/jobs/{job_id}/cancel", jobs.Cancel)
+		r.With(rlWrites).Post("/jobs/{job_id}/charge", jobs.Charge)
+		r.With(rlWrites).Post("/jobs/{job_id}/mark_paid", jobs.MarkPaid)
+		r.With(rlWrites).Post("/jobs/{job_id}/deliver", jobs.Deliver)
 
-		r.Get("/payloads/{payload_id}", payloads.Get)
-		r.Get("/payloads", payloads.List)
+		r.With(rlPayloads).Get("/payloads/{payload_id}", payloads.Get)
+		r.With(rlPayloads).Get("/payloads", payloads.List)
 
-		r.Get("/poll", poll.Poll)
-		r.Post("/poll/ack", poll.Ack)
+		r.With(rlPoll).Get("/poll", poll.Poll)
+		r.With(rlPoll).Post("/poll/ack", poll.Ack)
 	})
 
 	return r

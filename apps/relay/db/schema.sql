@@ -64,6 +64,39 @@ CREATE TABLE IF NOT EXISTS offer_tags (
 
 CREATE INDEX IF NOT EXISTS idx_offer_tags_tag ON offer_tags(tag);
 
+-- FTS BEGIN
+CREATE VIRTUAL TABLE IF NOT EXISTS offers_fts USING fts5(
+	offer_id UNINDEXED,
+	title,
+	description,
+	tags,
+	tokenize = 'unicode61'
+);
+
+CREATE TRIGGER IF NOT EXISTS offers_fts_ai
+AFTER INSERT ON offers
+BEGIN
+	INSERT INTO offers_fts(rowid, offer_id, title, description, tags)
+	VALUES (new.rowid, new.offer_id, new.title, new.description, new.tags_json);
+END;
+
+CREATE TRIGGER IF NOT EXISTS offers_fts_ad
+AFTER DELETE ON offers
+BEGIN
+	INSERT INTO offers_fts(offers_fts, rowid, offer_id, title, description, tags)
+	VALUES ('delete', old.rowid, old.offer_id, old.title, old.description, old.tags_json);
+END;
+
+CREATE TRIGGER IF NOT EXISTS offers_fts_au
+AFTER UPDATE ON offers
+BEGIN
+	INSERT INTO offers_fts(offers_fts, rowid, offer_id, title, description, tags)
+	VALUES ('delete', old.rowid, old.offer_id, old.title, old.description, old.tags_json);
+	INSERT INTO offers_fts(rowid, offer_id, title, description, tags)
+	VALUES (new.rowid, new.offer_id, new.title, new.description, new.tags_json);
+END;
+-- FTS END
+
 CREATE TABLE IF NOT EXISTS jobs (
 	job_id TEXT PRIMARY KEY,
 	offer_id TEXT NOT NULL,

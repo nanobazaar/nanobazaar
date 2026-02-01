@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,7 +41,7 @@ func TestOffersCreateGet(t *testing.T) {
 	req := signedRequest(t, priv, botID, http.MethodPost, "/v0/offers", "", body, now, "nonce-1")
 	req.Header.Set(headerIdempotency, "idem-1")
 
-	rec := httptestRequest(t, NewRouter(verifier, store), req)
+	rec := httptestRequest(t, NewRouter(RouterConfig{Verifier: verifier, Store: store}), req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -63,7 +64,7 @@ func TestOffersCreateGet(t *testing.T) {
 	}
 
 	getReq := signedRequest(t, priv, botID, http.MethodGet, "/v0/offers/"+resp.OfferID, "", nil, now, "nonce-2")
-	getRec := httptestRequest(t, NewRouter(verifier, store), getReq)
+	getRec := httptestRequest(t, NewRouter(RouterConfig{Verifier: verifier, Store: store}), getReq)
 	if getRec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", getRec.Code, getRec.Body.String())
 	}
@@ -74,6 +75,38 @@ func TestOffersCreateGet(t *testing.T) {
 	}
 	if getResp.OfferID != resp.OfferID {
 		t.Fatalf("expected offer_id %q, got %q", resp.OfferID, getResp.OfferID)
+	}
+}
+
+func TestOffersCreateRejectsLargeSchemaHint(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	store := store.New(db)
+	verifier := auth.NewVerifier(store)
+	now := time.Now().UTC().Truncate(time.Second)
+	verifier.Clock = func() time.Time { return now }
+
+	pub, priv := generateSigningKey(t)
+	botID := seedBotWithKey(t, store, pub)
+
+	bigHint := strings.Repeat("a", maxRequestSchemaHintBytes+1)
+	payload := offerCreateRequest{
+		Title:             "Nano summary",
+		Description:       "Summarize a Nano paper",
+		Tags:              []string{"nano", "summary"},
+		PriceRaw:          "1000",
+		TurnaroundSeconds: 3600,
+		RequestSchemaHint: bigHint,
+	}
+	body := mustJSONBytes(t, payload)
+
+	req := signedRequest(t, priv, botID, http.MethodPost, "/v0/offers", "", body, now, "nonce-1")
+	req.Header.Set(headerIdempotency, "idem-1")
+
+	rec := httptestRequest(t, NewRouter(RouterConfig{Verifier: verifier, Store: store}), req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -93,7 +126,7 @@ func TestOffersCancel(t *testing.T) {
 
 	cancelReq := signedRequest(t, priv, botID, http.MethodPost, "/v0/offers/"+offerID+"/cancel", "", []byte(`{}`), now, "nonce-1")
 	cancelReq.Header.Set(headerIdempotency, "idem-1")
-	cancelRec := httptestRequest(t, NewRouter(verifier, store), cancelReq)
+	cancelRec := httptestRequest(t, NewRouter(RouterConfig{Verifier: verifier, Store: store}), cancelReq)
 	if cancelRec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", cancelRec.Code, cancelRec.Body.String())
 	}
@@ -111,7 +144,7 @@ func TestOffersCancel(t *testing.T) {
 
 	secondReq := signedRequest(t, priv, botID, http.MethodPost, "/v0/offers/"+offerID+"/cancel", "", []byte(`{}`), now, "nonce-2")
 	secondReq.Header.Set(headerIdempotency, "idem-2")
-	secondRec := httptestRequest(t, NewRouter(verifier, store), secondReq)
+	secondRec := httptestRequest(t, NewRouter(RouterConfig{Verifier: verifier, Store: store}), secondReq)
 	if secondRec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", secondRec.Code, secondRec.Body.String())
 	}
@@ -136,7 +169,7 @@ func TestOffersCancelForbidden(t *testing.T) {
 	cancelReq := signedRequest(t, privB, botB, http.MethodPost, "/v0/offers/"+offerID+"/cancel", "", []byte(`{}`), now, "nonce-1")
 	cancelReq.Header.Set(headerIdempotency, "idem-1")
 
-	cancelRec := httptestRequest(t, NewRouter(verifier, store), cancelReq)
+	cancelRec := httptestRequest(t, NewRouter(RouterConfig{Verifier: verifier, Store: store}), cancelReq)
 	if cancelRec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d: %s", cancelRec.Code, cancelRec.Body.String())
 	}
@@ -159,7 +192,7 @@ func TestOffersCancelExpired(t *testing.T) {
 
 	cancelReq := signedRequest(t, priv, botID, http.MethodPost, "/v0/offers/"+offerID+"/cancel", "", []byte(`{}`), now, "nonce-1")
 	cancelReq.Header.Set(headerIdempotency, "idem-1")
-	cancelRec := httptestRequest(t, NewRouter(verifier, store), cancelReq)
+	cancelRec := httptestRequest(t, NewRouter(RouterConfig{Verifier: verifier, Store: store}), cancelReq)
 	if cancelRec.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d: %s", cancelRec.Code, cancelRec.Body.String())
 	}
@@ -183,7 +216,7 @@ func TestOffersListPagination(t *testing.T) {
 	insertOfferWithExpiry(t, store, botID, "offer_c", base.Add(-time.Hour), now.Add(24*time.Hour))
 
 	listReq := signedRequest(t, priv, botID, http.MethodGet, "/v0/offers", "limit=2", nil, now, "nonce-1")
-	listRec := httptestRequest(t, NewRouter(verifier, store), listReq)
+	listRec := httptestRequest(t, NewRouter(RouterConfig{Verifier: verifier, Store: store}), listReq)
 	if listRec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", listRec.Code, listRec.Body.String())
 	}
@@ -203,7 +236,7 @@ func TestOffersListPagination(t *testing.T) {
 	}
 
 	secondReq := signedRequest(t, priv, botID, http.MethodGet, "/v0/offers", "cursor="+listResp.NextCursor, nil, now, "nonce-2")
-	secondRec := httptestRequest(t, NewRouter(verifier, store), secondReq)
+	secondRec := httptestRequest(t, NewRouter(RouterConfig{Verifier: verifier, Store: store}), secondReq)
 	if secondRec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", secondRec.Code, secondRec.Body.String())
 	}
@@ -240,7 +273,7 @@ func TestOffersListRelevance(t *testing.T) {
 	_, _ = store.DB.Exec(`UPDATE offers SET title = 'No match', description = 'nothing', tags_json = '[]' WHERE offer_id = 'offer_none'`)
 
 	listReq := signedRequest(t, priv, botID, http.MethodGet, "/v0/offers", "q=nano&sort=relevance", nil, now, "nonce-1")
-	listRec := httptestRequest(t, NewRouter(verifier, store), listReq)
+	listRec := httptestRequest(t, NewRouter(RouterConfig{Verifier: verifier, Store: store}), listReq)
 	if listRec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", listRec.Code, listRec.Body.String())
 	}

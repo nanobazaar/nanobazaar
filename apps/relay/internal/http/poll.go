@@ -5,22 +5,25 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/nanobazaar/relay/internal/metrics"
 	"github.com/nanobazaar/relay/internal/store"
 	"github.com/nanobazaar/relay/internal/store/sqlc"
 )
 
 type PollHandler struct {
-	Store *store.Store
-	Clock func() time.Time
+	Store   *store.Store
+	Metrics *metrics.Registry
+	Clock   func() time.Time
 }
 
-func NewPollHandler(store *store.Store) *PollHandler {
-	return &PollHandler{Store: store, Clock: time.Now}
+func NewPollHandler(store *store.Store, metrics *metrics.Registry) *PollHandler {
+	return &PollHandler{Store: store, Metrics: metrics, Clock: time.Now}
 }
 
 type pollEvent struct {
@@ -74,19 +77,20 @@ func (h *PollHandler) Poll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	lastAcked := sinceID
-	if strings.TrimSpace(sinceRaw) == "" {
-		ack, err := h.Store.GetPollAck(r.Context(), caller)
-		if err != nil {
-			if !errors.Is(err, sql.ErrNoRows) {
-				writeJSONError(w, http.StatusInternalServerError, "poll ack lookup failed")
-				return
-			}
-			lastAcked = 0
-		} else {
-			lastAcked = ack.LastAckedEventID
+	lastAcked := int64(0)
+	ack, err := h.Store.GetPollAck(r.Context(), caller)
+	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			writeJSONError(w, http.StatusInternalServerError, "poll ack lookup failed")
+			return
 		}
-		sinceID = lastAcked
+	} else {
+		lastAcked = ack.LastAckedEventID
+	}
+
+	cursor := sinceID
+	if strings.TrimSpace(sinceRaw) == "" {
+		cursor = lastAcked
 	}
 
 	minEventID, err := h.getMinEventID(r.Context(), caller)
@@ -94,7 +98,11 @@ func (h *PollHandler) Poll(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "poll min lookup failed")
 		return
 	}
-	if minEventID > 0 && sinceID < minEventID-1 {
+	if minEventID > 0 && cursor < minEventID-1 {
+		if h.Metrics != nil {
+			h.Metrics.IncPollGone()
+		}
+		logPollGone(caller, cursor, minEventID)
 		writeJSON(w, http.StatusGone, pollGoneResponse{
 			Code:               "gone",
 			Message:            "cursor too old",
@@ -105,10 +113,13 @@ func (h *PollHandler) Poll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	types := parseEventTypes(r.URL.Query().Get("types"))
-	events, err := h.fetchEvents(r.Context(), caller, sinceID, limit, types)
+	events, newestEventTime, err := h.fetchEvents(r.Context(), caller, cursor, limit, types)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "poll failed")
 		return
+	}
+	if h.Metrics != nil && newestEventTime != nil {
+		h.Metrics.ObservePollLag(time.Since(*newestEventTime))
 	}
 
 	writeJSON(w, http.StatusOK, pollResponse{
@@ -162,6 +173,15 @@ func (h *PollHandler) Ack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.Metrics != nil && current > 0 {
+		if createdAt, err := h.Store.GetEventCreatedAt(r.Context(), sqlc.GetEventCreatedAtParams{
+			RecipientBotID: caller,
+			EventID:        current,
+		}); err == nil {
+			h.Metrics.ObserveAckLag(now.Sub(createdAt))
+		}
+	}
+
 	writeJSON(w, http.StatusOK, pollAckResponse{LastAckedEventID: current})
 }
 
@@ -197,48 +217,47 @@ func (h *PollHandler) getMinEventID(ctx context.Context, recipient string) (int6
 	}
 }
 
-func (h *PollHandler) fetchEvents(ctx context.Context, recipient string, sinceID int64, limit int, types map[string]struct{}) ([]pollEvent, error) {
-	results := make([]pollEvent, 0, limit)
-	cursor := sinceID
-	for len(results) < limit {
-		batch, err := h.Store.ListEventsAfterID(ctx, sqlc.ListEventsAfterIDParams{
+func (h *PollHandler) fetchEvents(ctx context.Context, recipient string, sinceID int64, limit int, types map[string]struct{}) ([]pollEvent, *time.Time, error) {
+	var (
+		batch []sqlc.Event
+		err   error
+	)
+	if len(types) > 0 {
+		batch, err = h.Store.ListEventsAfterIDByTypes(ctx, sqlc.ListEventsAfterIDByTypesParams{
 			RecipientBotID: recipient,
-			SinceEventID:   cursor,
+			SinceEventID:   sinceID,
+			EventTypes:     mapKeys(types),
 			Limit:          int64(limit),
 		})
-		if err != nil {
-			return nil, err
-		}
-		if len(batch) == 0 {
-			break
-		}
+	} else {
+		batch, err = h.Store.ListEventsAfterID(ctx, sqlc.ListEventsAfterIDParams{
+			RecipientBotID: recipient,
+			SinceEventID:   sinceID,
+			Limit:          int64(limit),
+		})
+	}
+	if err != nil {
+		return nil, nil, err
+	}
 
-		for _, event := range batch {
-			if len(types) > 0 {
-				if _, ok := types[event.EventType]; !ok {
-					continue
-				}
-			}
-			if !json.Valid([]byte(event.DataJson)) {
-				return nil, errors.New("invalid event payload")
-			}
-			results = append(results, pollEvent{
-				EventID:   event.EventID,
-				EventType: event.EventType,
-				Data:      json.RawMessage(event.DataJson),
-			})
-			if len(results) == limit {
-				break
-			}
+	results := make([]pollEvent, 0, len(batch))
+	var newest *time.Time
+	for _, event := range batch {
+		if !json.Valid([]byte(event.DataJson)) {
+			return nil, nil, errors.New("invalid event payload")
 		}
-
-		cursor = batch[len(batch)-1].EventID
-		if len(types) == 0 || len(batch) < limit {
-			break
+		results = append(results, pollEvent{
+			EventID:   event.EventID,
+			EventType: event.EventType,
+			Data:      json.RawMessage(event.DataJson),
+		})
+		if newest == nil || event.CreatedAt.After(*newest) {
+			t := event.CreatedAt
+			newest = &t
 		}
 	}
 
-	return results, nil
+	return results, newest, nil
 }
 
 func parseSinceEventID(value string) (int64, error) {
@@ -269,4 +288,19 @@ func parseEventTypes(raw string) map[string]struct{} {
 		return nil
 	}
 	return result
+}
+
+func mapKeys(values map[string]struct{}) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+func logPollGone(botID string, sinceID, minEventID int64) {
+	log.Printf("poll_gone bot_id=%s since_event_id=%d min_event_id_retained=%d", botID, sinceID, minEventID)
 }

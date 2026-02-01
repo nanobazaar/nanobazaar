@@ -69,6 +69,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getBotStmt, err = db.PrepareContext(ctx, getBot); err != nil {
 		return nil, fmt.Errorf("error preparing query GetBot: %w", err)
 	}
+	if q.getEventCreatedAtStmt, err = db.PrepareContext(ctx, getEventCreatedAt); err != nil {
+		return nil, fmt.Errorf("error preparing query GetEventCreatedAt: %w", err)
+	}
 	if q.getIdempotencyStmt, err = db.PrepareContext(ctx, getIdempotency); err != nil {
 		return nil, fmt.Errorf("error preparing query GetIdempotency: %w", err)
 	}
@@ -102,11 +105,20 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listEventsAfterIDStmt, err = db.PrepareContext(ctx, listEventsAfterID); err != nil {
 		return nil, fmt.Errorf("error preparing query ListEventsAfterID: %w", err)
 	}
+	if q.listEventsAfterIDByTypesStmt, err = db.PrepareContext(ctx, listEventsAfterIDByTypes); err != nil {
+		return nil, fmt.Errorf("error preparing query ListEventsAfterIDByTypes: %w", err)
+	}
 	if q.listJobsByBuyerNewestStmt, err = db.PrepareContext(ctx, listJobsByBuyerNewest); err != nil {
 		return nil, fmt.Errorf("error preparing query ListJobsByBuyerNewest: %w", err)
 	}
 	if q.listJobsByBuyerNewestAfterStmt, err = db.PrepareContext(ctx, listJobsByBuyerNewestAfter); err != nil {
 		return nil, fmt.Errorf("error preparing query ListJobsByBuyerNewestAfter: %w", err)
+	}
+	if q.listJobsByBuyerNewestAfterWithStatusStmt, err = db.PrepareContext(ctx, listJobsByBuyerNewestAfterWithStatus); err != nil {
+		return nil, fmt.Errorf("error preparing query ListJobsByBuyerNewestAfterWithStatus: %w", err)
+	}
+	if q.listJobsByBuyerNewestWithStatusStmt, err = db.PrepareContext(ctx, listJobsByBuyerNewestWithStatus); err != nil {
+		return nil, fmt.Errorf("error preparing query ListJobsByBuyerNewestWithStatus: %w", err)
 	}
 	if q.listJobsByBuyerSinceStmt, err = db.PrepareContext(ctx, listJobsByBuyerSince); err != nil {
 		return nil, fmt.Errorf("error preparing query ListJobsByBuyerSince: %w", err)
@@ -114,17 +126,35 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listJobsByBuyerSinceAfterStmt, err = db.PrepareContext(ctx, listJobsByBuyerSinceAfter); err != nil {
 		return nil, fmt.Errorf("error preparing query ListJobsByBuyerSinceAfter: %w", err)
 	}
+	if q.listJobsByBuyerSinceAfterWithStatusStmt, err = db.PrepareContext(ctx, listJobsByBuyerSinceAfterWithStatus); err != nil {
+		return nil, fmt.Errorf("error preparing query ListJobsByBuyerSinceAfterWithStatus: %w", err)
+	}
+	if q.listJobsByBuyerSinceWithStatusStmt, err = db.PrepareContext(ctx, listJobsByBuyerSinceWithStatus); err != nil {
+		return nil, fmt.Errorf("error preparing query ListJobsByBuyerSinceWithStatus: %w", err)
+	}
 	if q.listJobsBySellerNewestStmt, err = db.PrepareContext(ctx, listJobsBySellerNewest); err != nil {
 		return nil, fmt.Errorf("error preparing query ListJobsBySellerNewest: %w", err)
 	}
 	if q.listJobsBySellerNewestAfterStmt, err = db.PrepareContext(ctx, listJobsBySellerNewestAfter); err != nil {
 		return nil, fmt.Errorf("error preparing query ListJobsBySellerNewestAfter: %w", err)
 	}
+	if q.listJobsBySellerNewestAfterWithStatusStmt, err = db.PrepareContext(ctx, listJobsBySellerNewestAfterWithStatus); err != nil {
+		return nil, fmt.Errorf("error preparing query ListJobsBySellerNewestAfterWithStatus: %w", err)
+	}
+	if q.listJobsBySellerNewestWithStatusStmt, err = db.PrepareContext(ctx, listJobsBySellerNewestWithStatus); err != nil {
+		return nil, fmt.Errorf("error preparing query ListJobsBySellerNewestWithStatus: %w", err)
+	}
 	if q.listJobsBySellerSinceStmt, err = db.PrepareContext(ctx, listJobsBySellerSince); err != nil {
 		return nil, fmt.Errorf("error preparing query ListJobsBySellerSince: %w", err)
 	}
 	if q.listJobsBySellerSinceAfterStmt, err = db.PrepareContext(ctx, listJobsBySellerSinceAfter); err != nil {
 		return nil, fmt.Errorf("error preparing query ListJobsBySellerSinceAfter: %w", err)
+	}
+	if q.listJobsBySellerSinceAfterWithStatusStmt, err = db.PrepareContext(ctx, listJobsBySellerSinceAfterWithStatus); err != nil {
+		return nil, fmt.Errorf("error preparing query ListJobsBySellerSinceAfterWithStatus: %w", err)
+	}
+	if q.listJobsBySellerSinceWithStatusStmt, err = db.PrepareContext(ctx, listJobsBySellerSinceWithStatus); err != nil {
+		return nil, fmt.Errorf("error preparing query ListJobsBySellerSinceWithStatus: %w", err)
 	}
 	if q.listOfferIDsByTagStmt, err = db.PrepareContext(ctx, listOfferIDsByTag); err != nil {
 		return nil, fmt.Errorf("error preparing query ListOfferIDsByTag: %w", err)
@@ -266,6 +296,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing getBotStmt: %w", cerr)
 		}
 	}
+	if q.getEventCreatedAtStmt != nil {
+		if cerr := q.getEventCreatedAtStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getEventCreatedAtStmt: %w", cerr)
+		}
+	}
 	if q.getIdempotencyStmt != nil {
 		if cerr := q.getIdempotencyStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getIdempotencyStmt: %w", cerr)
@@ -321,6 +356,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listEventsAfterIDStmt: %w", cerr)
 		}
 	}
+	if q.listEventsAfterIDByTypesStmt != nil {
+		if cerr := q.listEventsAfterIDByTypesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listEventsAfterIDByTypesStmt: %w", cerr)
+		}
+	}
 	if q.listJobsByBuyerNewestStmt != nil {
 		if cerr := q.listJobsByBuyerNewestStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listJobsByBuyerNewestStmt: %w", cerr)
@@ -329,6 +369,16 @@ func (q *Queries) Close() error {
 	if q.listJobsByBuyerNewestAfterStmt != nil {
 		if cerr := q.listJobsByBuyerNewestAfterStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listJobsByBuyerNewestAfterStmt: %w", cerr)
+		}
+	}
+	if q.listJobsByBuyerNewestAfterWithStatusStmt != nil {
+		if cerr := q.listJobsByBuyerNewestAfterWithStatusStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listJobsByBuyerNewestAfterWithStatusStmt: %w", cerr)
+		}
+	}
+	if q.listJobsByBuyerNewestWithStatusStmt != nil {
+		if cerr := q.listJobsByBuyerNewestWithStatusStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listJobsByBuyerNewestWithStatusStmt: %w", cerr)
 		}
 	}
 	if q.listJobsByBuyerSinceStmt != nil {
@@ -341,6 +391,16 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listJobsByBuyerSinceAfterStmt: %w", cerr)
 		}
 	}
+	if q.listJobsByBuyerSinceAfterWithStatusStmt != nil {
+		if cerr := q.listJobsByBuyerSinceAfterWithStatusStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listJobsByBuyerSinceAfterWithStatusStmt: %w", cerr)
+		}
+	}
+	if q.listJobsByBuyerSinceWithStatusStmt != nil {
+		if cerr := q.listJobsByBuyerSinceWithStatusStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listJobsByBuyerSinceWithStatusStmt: %w", cerr)
+		}
+	}
 	if q.listJobsBySellerNewestStmt != nil {
 		if cerr := q.listJobsBySellerNewestStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listJobsBySellerNewestStmt: %w", cerr)
@@ -351,6 +411,16 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listJobsBySellerNewestAfterStmt: %w", cerr)
 		}
 	}
+	if q.listJobsBySellerNewestAfterWithStatusStmt != nil {
+		if cerr := q.listJobsBySellerNewestAfterWithStatusStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listJobsBySellerNewestAfterWithStatusStmt: %w", cerr)
+		}
+	}
+	if q.listJobsBySellerNewestWithStatusStmt != nil {
+		if cerr := q.listJobsBySellerNewestWithStatusStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listJobsBySellerNewestWithStatusStmt: %w", cerr)
+		}
+	}
 	if q.listJobsBySellerSinceStmt != nil {
 		if cerr := q.listJobsBySellerSinceStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listJobsBySellerSinceStmt: %w", cerr)
@@ -359,6 +429,16 @@ func (q *Queries) Close() error {
 	if q.listJobsBySellerSinceAfterStmt != nil {
 		if cerr := q.listJobsBySellerSinceAfterStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listJobsBySellerSinceAfterStmt: %w", cerr)
+		}
+	}
+	if q.listJobsBySellerSinceAfterWithStatusStmt != nil {
+		if cerr := q.listJobsBySellerSinceAfterWithStatusStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listJobsBySellerSinceAfterWithStatusStmt: %w", cerr)
+		}
+	}
+	if q.listJobsBySellerSinceWithStatusStmt != nil {
+		if cerr := q.listJobsBySellerSinceWithStatusStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listJobsBySellerSinceWithStatusStmt: %w", cerr)
 		}
 	}
 	if q.listOfferIDsByTagStmt != nil {
@@ -498,121 +578,141 @@ func (q *Queries) queryRow(ctx context.Context, stmt *sql.Stmt, query string, ar
 }
 
 type Queries struct {
-	db                                    DBTX
-	tx                                    *sql.Tx
-	countActiveJobsByChargeAddressStmt    *sql.Stmt
-	countNonceStmt                        *sql.Stmt
-	createBotStmt                         *sql.Stmt
-	createEventStmt                       *sql.Stmt
-	createJobStmt                         *sql.Stmt
-	createOfferStmt                       *sql.Stmt
-	createPayloadStmt                     *sql.Stmt
-	deleteEventsBeforeStmt                *sql.Stmt
-	deleteIdempotencyBeforeStmt           *sql.Stmt
-	deleteJobsTerminalBeforeStmt          *sql.Stmt
-	deleteNoncesBeforeStmt                *sql.Stmt
-	deleteOffersBeforeStmt                *sql.Stmt
-	deletePayloadsBeforeStmt              *sql.Stmt
-	deletePayloadsFetchedBeforeStmt       *sql.Stmt
-	getBotStmt                            *sql.Stmt
-	getIdempotencyStmt                    *sql.Stmt
-	getJobStmt                            *sql.Stmt
-	getMinEventIDStmt                     *sql.Stmt
-	getOfferStmt                          *sql.Stmt
-	getPayloadStmt                        *sql.Stmt
-	getPayloadRecipientStmt               *sql.Stmt
-	getPollAckStmt                        *sql.Stmt
-	insertIdempotencyStmt                 *sql.Stmt
-	insertNonceStmt                       *sql.Stmt
-	insertOfferTagStmt                    *sql.Stmt
-	listEventsAfterIDStmt                 *sql.Stmt
-	listJobsByBuyerNewestStmt             *sql.Stmt
-	listJobsByBuyerNewestAfterStmt        *sql.Stmt
-	listJobsByBuyerSinceStmt              *sql.Stmt
-	listJobsByBuyerSinceAfterStmt         *sql.Stmt
-	listJobsBySellerNewestStmt            *sql.Stmt
-	listJobsBySellerNewestAfterStmt       *sql.Stmt
-	listJobsBySellerSinceStmt             *sql.Stmt
-	listJobsBySellerSinceAfterStmt        *sql.Stmt
-	listOfferIDsByTagStmt                 *sql.Stmt
-	listOfferTagsStmt                     *sql.Stmt
-	listOffersNewestStmt                  *sql.Stmt
-	listOffersNewestAfterStmt             *sql.Stmt
-	listPayloadMetadataAllStmt            *sql.Stmt
-	listPayloadMetadataAllAfterStmt       *sql.Stmt
-	listPayloadMetadataFetchedStmt        *sql.Stmt
-	listPayloadMetadataFetchedAfterStmt   *sql.Stmt
-	listPayloadMetadataUnfetchedStmt      *sql.Stmt
-	listPayloadMetadataUnfetchedAfterStmt *sql.Stmt
-	markPayloadFetchedStmt                *sql.Stmt
-	updateBotLastSeenStmt                 *sql.Stmt
-	updateJobCancelStmt                   *sql.Stmt
-	updateJobChargeStmt                   *sql.Stmt
-	updateJobDeliverStmt                  *sql.Stmt
-	updateJobExpireStmt                   *sql.Stmt
-	updateJobMarkPaidStmt                 *sql.Stmt
-	updateOfferCancelStmt                 *sql.Stmt
-	updateOfferExpireStmt                 *sql.Stmt
-	upsertPollAckStmt                     *sql.Stmt
+	db                                        DBTX
+	tx                                        *sql.Tx
+	countActiveJobsByChargeAddressStmt        *sql.Stmt
+	countNonceStmt                            *sql.Stmt
+	createBotStmt                             *sql.Stmt
+	createEventStmt                           *sql.Stmt
+	createJobStmt                             *sql.Stmt
+	createOfferStmt                           *sql.Stmt
+	createPayloadStmt                         *sql.Stmt
+	deleteEventsBeforeStmt                    *sql.Stmt
+	deleteIdempotencyBeforeStmt               *sql.Stmt
+	deleteJobsTerminalBeforeStmt              *sql.Stmt
+	deleteNoncesBeforeStmt                    *sql.Stmt
+	deleteOffersBeforeStmt                    *sql.Stmt
+	deletePayloadsBeforeStmt                  *sql.Stmt
+	deletePayloadsFetchedBeforeStmt           *sql.Stmt
+	getBotStmt                                *sql.Stmt
+	getEventCreatedAtStmt                     *sql.Stmt
+	getIdempotencyStmt                        *sql.Stmt
+	getJobStmt                                *sql.Stmt
+	getMinEventIDStmt                         *sql.Stmt
+	getOfferStmt                              *sql.Stmt
+	getPayloadStmt                            *sql.Stmt
+	getPayloadRecipientStmt                   *sql.Stmt
+	getPollAckStmt                            *sql.Stmt
+	insertIdempotencyStmt                     *sql.Stmt
+	insertNonceStmt                           *sql.Stmt
+	insertOfferTagStmt                        *sql.Stmt
+	listEventsAfterIDStmt                     *sql.Stmt
+	listEventsAfterIDByTypesStmt              *sql.Stmt
+	listJobsByBuyerNewestStmt                 *sql.Stmt
+	listJobsByBuyerNewestAfterStmt            *sql.Stmt
+	listJobsByBuyerNewestAfterWithStatusStmt  *sql.Stmt
+	listJobsByBuyerNewestWithStatusStmt       *sql.Stmt
+	listJobsByBuyerSinceStmt                  *sql.Stmt
+	listJobsByBuyerSinceAfterStmt             *sql.Stmt
+	listJobsByBuyerSinceAfterWithStatusStmt   *sql.Stmt
+	listJobsByBuyerSinceWithStatusStmt        *sql.Stmt
+	listJobsBySellerNewestStmt                *sql.Stmt
+	listJobsBySellerNewestAfterStmt           *sql.Stmt
+	listJobsBySellerNewestAfterWithStatusStmt *sql.Stmt
+	listJobsBySellerNewestWithStatusStmt      *sql.Stmt
+	listJobsBySellerSinceStmt                 *sql.Stmt
+	listJobsBySellerSinceAfterStmt            *sql.Stmt
+	listJobsBySellerSinceAfterWithStatusStmt  *sql.Stmt
+	listJobsBySellerSinceWithStatusStmt       *sql.Stmt
+	listOfferIDsByTagStmt                     *sql.Stmt
+	listOfferTagsStmt                         *sql.Stmt
+	listOffersNewestStmt                      *sql.Stmt
+	listOffersNewestAfterStmt                 *sql.Stmt
+	listPayloadMetadataAllStmt                *sql.Stmt
+	listPayloadMetadataAllAfterStmt           *sql.Stmt
+	listPayloadMetadataFetchedStmt            *sql.Stmt
+	listPayloadMetadataFetchedAfterStmt       *sql.Stmt
+	listPayloadMetadataUnfetchedStmt          *sql.Stmt
+	listPayloadMetadataUnfetchedAfterStmt     *sql.Stmt
+	markPayloadFetchedStmt                    *sql.Stmt
+	updateBotLastSeenStmt                     *sql.Stmt
+	updateJobCancelStmt                       *sql.Stmt
+	updateJobChargeStmt                       *sql.Stmt
+	updateJobDeliverStmt                      *sql.Stmt
+	updateJobExpireStmt                       *sql.Stmt
+	updateJobMarkPaidStmt                     *sql.Stmt
+	updateOfferCancelStmt                     *sql.Stmt
+	updateOfferExpireStmt                     *sql.Stmt
+	upsertPollAckStmt                         *sql.Stmt
 }
 
 func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 	return &Queries{
-		db:                                    tx,
-		tx:                                    tx,
-		countActiveJobsByChargeAddressStmt:    q.countActiveJobsByChargeAddressStmt,
-		countNonceStmt:                        q.countNonceStmt,
-		createBotStmt:                         q.createBotStmt,
-		createEventStmt:                       q.createEventStmt,
-		createJobStmt:                         q.createJobStmt,
-		createOfferStmt:                       q.createOfferStmt,
-		createPayloadStmt:                     q.createPayloadStmt,
-		deleteEventsBeforeStmt:                q.deleteEventsBeforeStmt,
-		deleteIdempotencyBeforeStmt:           q.deleteIdempotencyBeforeStmt,
-		deleteJobsTerminalBeforeStmt:          q.deleteJobsTerminalBeforeStmt,
-		deleteNoncesBeforeStmt:                q.deleteNoncesBeforeStmt,
-		deleteOffersBeforeStmt:                q.deleteOffersBeforeStmt,
-		deletePayloadsBeforeStmt:              q.deletePayloadsBeforeStmt,
-		deletePayloadsFetchedBeforeStmt:       q.deletePayloadsFetchedBeforeStmt,
-		getBotStmt:                            q.getBotStmt,
-		getIdempotencyStmt:                    q.getIdempotencyStmt,
-		getJobStmt:                            q.getJobStmt,
-		getMinEventIDStmt:                     q.getMinEventIDStmt,
-		getOfferStmt:                          q.getOfferStmt,
-		getPayloadStmt:                        q.getPayloadStmt,
-		getPayloadRecipientStmt:               q.getPayloadRecipientStmt,
-		getPollAckStmt:                        q.getPollAckStmt,
-		insertIdempotencyStmt:                 q.insertIdempotencyStmt,
-		insertNonceStmt:                       q.insertNonceStmt,
-		insertOfferTagStmt:                    q.insertOfferTagStmt,
-		listEventsAfterIDStmt:                 q.listEventsAfterIDStmt,
-		listJobsByBuyerNewestStmt:             q.listJobsByBuyerNewestStmt,
-		listJobsByBuyerNewestAfterStmt:        q.listJobsByBuyerNewestAfterStmt,
-		listJobsByBuyerSinceStmt:              q.listJobsByBuyerSinceStmt,
-		listJobsByBuyerSinceAfterStmt:         q.listJobsByBuyerSinceAfterStmt,
-		listJobsBySellerNewestStmt:            q.listJobsBySellerNewestStmt,
-		listJobsBySellerNewestAfterStmt:       q.listJobsBySellerNewestAfterStmt,
-		listJobsBySellerSinceStmt:             q.listJobsBySellerSinceStmt,
-		listJobsBySellerSinceAfterStmt:        q.listJobsBySellerSinceAfterStmt,
-		listOfferIDsByTagStmt:                 q.listOfferIDsByTagStmt,
-		listOfferTagsStmt:                     q.listOfferTagsStmt,
-		listOffersNewestStmt:                  q.listOffersNewestStmt,
-		listOffersNewestAfterStmt:             q.listOffersNewestAfterStmt,
-		listPayloadMetadataAllStmt:            q.listPayloadMetadataAllStmt,
-		listPayloadMetadataAllAfterStmt:       q.listPayloadMetadataAllAfterStmt,
-		listPayloadMetadataFetchedStmt:        q.listPayloadMetadataFetchedStmt,
-		listPayloadMetadataFetchedAfterStmt:   q.listPayloadMetadataFetchedAfterStmt,
-		listPayloadMetadataUnfetchedStmt:      q.listPayloadMetadataUnfetchedStmt,
-		listPayloadMetadataUnfetchedAfterStmt: q.listPayloadMetadataUnfetchedAfterStmt,
-		markPayloadFetchedStmt:                q.markPayloadFetchedStmt,
-		updateBotLastSeenStmt:                 q.updateBotLastSeenStmt,
-		updateJobCancelStmt:                   q.updateJobCancelStmt,
-		updateJobChargeStmt:                   q.updateJobChargeStmt,
-		updateJobDeliverStmt:                  q.updateJobDeliverStmt,
-		updateJobExpireStmt:                   q.updateJobExpireStmt,
-		updateJobMarkPaidStmt:                 q.updateJobMarkPaidStmt,
-		updateOfferCancelStmt:                 q.updateOfferCancelStmt,
-		updateOfferExpireStmt:                 q.updateOfferExpireStmt,
-		upsertPollAckStmt:                     q.upsertPollAckStmt,
+		db:                                        tx,
+		tx:                                        tx,
+		countActiveJobsByChargeAddressStmt:        q.countActiveJobsByChargeAddressStmt,
+		countNonceStmt:                            q.countNonceStmt,
+		createBotStmt:                             q.createBotStmt,
+		createEventStmt:                           q.createEventStmt,
+		createJobStmt:                             q.createJobStmt,
+		createOfferStmt:                           q.createOfferStmt,
+		createPayloadStmt:                         q.createPayloadStmt,
+		deleteEventsBeforeStmt:                    q.deleteEventsBeforeStmt,
+		deleteIdempotencyBeforeStmt:               q.deleteIdempotencyBeforeStmt,
+		deleteJobsTerminalBeforeStmt:              q.deleteJobsTerminalBeforeStmt,
+		deleteNoncesBeforeStmt:                    q.deleteNoncesBeforeStmt,
+		deleteOffersBeforeStmt:                    q.deleteOffersBeforeStmt,
+		deletePayloadsBeforeStmt:                  q.deletePayloadsBeforeStmt,
+		deletePayloadsFetchedBeforeStmt:           q.deletePayloadsFetchedBeforeStmt,
+		getBotStmt:                                q.getBotStmt,
+		getEventCreatedAtStmt:                     q.getEventCreatedAtStmt,
+		getIdempotencyStmt:                        q.getIdempotencyStmt,
+		getJobStmt:                                q.getJobStmt,
+		getMinEventIDStmt:                         q.getMinEventIDStmt,
+		getOfferStmt:                              q.getOfferStmt,
+		getPayloadStmt:                            q.getPayloadStmt,
+		getPayloadRecipientStmt:                   q.getPayloadRecipientStmt,
+		getPollAckStmt:                            q.getPollAckStmt,
+		insertIdempotencyStmt:                     q.insertIdempotencyStmt,
+		insertNonceStmt:                           q.insertNonceStmt,
+		insertOfferTagStmt:                        q.insertOfferTagStmt,
+		listEventsAfterIDStmt:                     q.listEventsAfterIDStmt,
+		listEventsAfterIDByTypesStmt:              q.listEventsAfterIDByTypesStmt,
+		listJobsByBuyerNewestStmt:                 q.listJobsByBuyerNewestStmt,
+		listJobsByBuyerNewestAfterStmt:            q.listJobsByBuyerNewestAfterStmt,
+		listJobsByBuyerNewestAfterWithStatusStmt:  q.listJobsByBuyerNewestAfterWithStatusStmt,
+		listJobsByBuyerNewestWithStatusStmt:       q.listJobsByBuyerNewestWithStatusStmt,
+		listJobsByBuyerSinceStmt:                  q.listJobsByBuyerSinceStmt,
+		listJobsByBuyerSinceAfterStmt:             q.listJobsByBuyerSinceAfterStmt,
+		listJobsByBuyerSinceAfterWithStatusStmt:   q.listJobsByBuyerSinceAfterWithStatusStmt,
+		listJobsByBuyerSinceWithStatusStmt:        q.listJobsByBuyerSinceWithStatusStmt,
+		listJobsBySellerNewestStmt:                q.listJobsBySellerNewestStmt,
+		listJobsBySellerNewestAfterStmt:           q.listJobsBySellerNewestAfterStmt,
+		listJobsBySellerNewestAfterWithStatusStmt: q.listJobsBySellerNewestAfterWithStatusStmt,
+		listJobsBySellerNewestWithStatusStmt:      q.listJobsBySellerNewestWithStatusStmt,
+		listJobsBySellerSinceStmt:                 q.listJobsBySellerSinceStmt,
+		listJobsBySellerSinceAfterStmt:            q.listJobsBySellerSinceAfterStmt,
+		listJobsBySellerSinceAfterWithStatusStmt:  q.listJobsBySellerSinceAfterWithStatusStmt,
+		listJobsBySellerSinceWithStatusStmt:       q.listJobsBySellerSinceWithStatusStmt,
+		listOfferIDsByTagStmt:                     q.listOfferIDsByTagStmt,
+		listOfferTagsStmt:                         q.listOfferTagsStmt,
+		listOffersNewestStmt:                      q.listOffersNewestStmt,
+		listOffersNewestAfterStmt:                 q.listOffersNewestAfterStmt,
+		listPayloadMetadataAllStmt:                q.listPayloadMetadataAllStmt,
+		listPayloadMetadataAllAfterStmt:           q.listPayloadMetadataAllAfterStmt,
+		listPayloadMetadataFetchedStmt:            q.listPayloadMetadataFetchedStmt,
+		listPayloadMetadataFetchedAfterStmt:       q.listPayloadMetadataFetchedAfterStmt,
+		listPayloadMetadataUnfetchedStmt:          q.listPayloadMetadataUnfetchedStmt,
+		listPayloadMetadataUnfetchedAfterStmt:     q.listPayloadMetadataUnfetchedAfterStmt,
+		markPayloadFetchedStmt:                    q.markPayloadFetchedStmt,
+		updateBotLastSeenStmt:                     q.updateBotLastSeenStmt,
+		updateJobCancelStmt:                       q.updateJobCancelStmt,
+		updateJobChargeStmt:                       q.updateJobChargeStmt,
+		updateJobDeliverStmt:                      q.updateJobDeliverStmt,
+		updateJobExpireStmt:                       q.updateJobExpireStmt,
+		updateJobMarkPaidStmt:                     q.updateJobMarkPaidStmt,
+		updateOfferCancelStmt:                     q.updateOfferCancelStmt,
+		updateOfferExpireStmt:                     q.updateOfferExpireStmt,
+		upsertPollAckStmt:                         q.upsertPollAckStmt,
 	}
 }
