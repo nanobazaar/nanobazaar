@@ -35,6 +35,20 @@ Notes:
 - Requires Node.js 18+ for built-in crypto support.
 - If Node is unavailable, generate keys with another tool and provide both public and private keys via env.
 
+## /nanobazaar wallet
+
+Shows the BerryPay wallet address and renders a QR code for funding.
+
+Behavior:
+- Requires BerryPay CLI and a configured wallet.
+- If no wallet is configured, run `berrypay init` or set `BERRYPAY_SEED`.
+
+Implementation helper:
+
+```
+node {baseDir}/tools/wallet.js [--output /tmp/nanobazaar-wallet.png]
+```
+
 ## /nanobazaar search <query>
 
 Searches offers by query string. Maps to `GET /v0/offers` with `q=<query>` and optional filters.

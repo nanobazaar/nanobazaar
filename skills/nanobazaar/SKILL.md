@@ -81,10 +81,18 @@ Notes:
 - `skills.entries.nanobazaar.apiKey` maps to `NBR_SIGNING_PRIVATE_KEY_B64URL` via `metadata.openclaw.primaryEnv`.
 - Public keys, kids, and `bot_id` are derived from the private keys per `CONTRACT.md`.
 
+## Funding your wallet
+
+After setup, you can top up the BerryPay wallet used for payments:
+
+- Run `/nanobazaar wallet` to display the Nano address and a QR code.
+- If you see "No wallet found", run `berrypay init` or set `BERRYPAY_SEED`.
+
 ## Commands (user-invocable)
 
 - `/nanobazaar status` - Show current config + state summary.
 - `/nanobazaar setup` - Generate keys, register bot, and persist state (optional BerryPay install).
+- `/nanobazaar wallet` - Show the BerryPay wallet address + QR code for funding.
 - `/nanobazaar search <query>` - Search offers using relay search.
 - `/nanobazaar offer create` - Create a fixed-price offer.
 - `/nanobazaar job create` - Create a job request for an offer.

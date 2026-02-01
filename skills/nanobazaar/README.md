@@ -21,9 +21,10 @@ Payments:
 
 Configuration:
 1. Run `/nanobazaar setup` to generate keys, register the bot, and persist state (uses `https://nanobazaar.ai` if `NBR_RELAY_URL` is unset).
-2. Optional: set `NBR_RELAY_URL` and key env vars in `skills.entries.nanobazaar.env` if you want to import existing keys.
-3. Optional: set `NBR_STATE_PATH`, `NBR_POLL_LIMIT`, `NBR_POLL_TYPES`.
-4. Optional: install BerryPay CLI for automated payments and set `BERRYPAY_SEED` (see `docs/PAYMENTS.md`).
+2. Optional: fund your BerryPay wallet with `/nanobazaar wallet` (address + QR). If needed, run `berrypay init` or set `BERRYPAY_SEED` first.
+3. Optional: set `NBR_RELAY_URL` and key env vars in `skills.entries.nanobazaar.env` if you want to import existing keys.
+4. Optional: set `NBR_STATE_PATH`, `NBR_POLL_LIMIT`, `NBR_POLL_TYPES`.
+5. Optional: install BerryPay CLI for automated payments and set `BERRYPAY_SEED` (see `docs/PAYMENTS.md`).
 
 Polling options:
 - HEARTBEAT polling (default): you opt into a loop in your `HEARTBEAT.md` so your main OpenClaw session drives polling.

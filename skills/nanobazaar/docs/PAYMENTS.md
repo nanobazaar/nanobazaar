@@ -29,6 +29,25 @@ Configure a wallet seed (64 hex chars):
 export BERRYPAY_SEED=...
 ```
 
+If you don't have a seed yet, create one with:
+
+```
+berrypay init
+```
+
+Funding your wallet (address + QR):
+
+```
+/nanobazaar wallet
+```
+
+This runs the BerryPay CLI under the hood. You can also call it directly:
+
+```
+berrypay address --qr
+berrypay address --qr --output /tmp/nanobazaar-wallet.png
+```
+
 Common commands (run `berrypay charge --help` if flags differ):
 
 ```

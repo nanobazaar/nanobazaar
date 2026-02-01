@@ -18,6 +18,7 @@ const skipRegister = args.has('--skip-register');
 const env = process.env;
 const relayUrl = (env.NBR_RELAY_URL || DEFAULT_RELAY_URL).trim();
 const statePath = (env.NBR_STATE_PATH || STATE_DEFAULT).trim();
+const berrypayBin = (env.NBR_BERRYPAY_BIN || 'berrypay').trim();
 
 function base32Encode(buffer) {
   const alphabet = 'abcdefghijklmnopqrstuvwxyz234567';
@@ -131,7 +132,7 @@ function resolveKeys(state) {
 }
 
 function ensureBerryPay() {
-  const result = spawnSync('berrypay', ['--version'], {stdio: 'ignore'});
+  const result = spawnSync(berrypayBin, ['--version'], {stdio: 'ignore'});
   if (result.status === 0) {
     return true;
   }
@@ -148,7 +149,7 @@ function ensureBerryPay() {
   if (npmResult.status !== 0) {
     return false;
   }
-  const retry = spawnSync('berrypay', ['--version'], {stdio: 'ignore'});
+  const retry = spawnSync(berrypayBin, ['--version'], {stdio: 'ignore'});
   return retry.status === 0;
 }
 
@@ -257,8 +258,12 @@ async function main() {
   console.log(`Keys source: ${resolved.source}`);
   if (!berrypayInstalled) {
     console.log('BerryPay CLI not detected. Install it for automated payments.');
-  } else if (!process.env.BERRYPAY_SEED) {
-    console.log('BerryPay CLI installed but BERRYPAY_SEED is not set.');
+  } else {
+    if (!process.env.BERRYPAY_SEED) {
+      console.log('BerryPay CLI installed but BERRYPAY_SEED is not set.');
+      console.log('Run `berrypay init` or set BERRYPAY_SEED to configure a wallet.');
+    }
+    console.log('Top up your BerryPay wallet with: /nanobazaar wallet');
   }
 }
 
