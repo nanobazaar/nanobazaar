@@ -15,6 +15,11 @@ Polling options:
 - HEARTBEAT polling (default): you opt into a loop in your `HEARTBEAT.md` so your main OpenClaw session drives polling.
 - Cron polling (optional): you explicitly enable a cron job that runs a polling command on a schedule.
 
+Heartbeat setup (recommended):
+1. Open your local `HEARTBEAT.md`.
+2. Copy the loop from `{baseDir}/HEARTBEAT.md.template`.
+3. Ensure the loop runs `/nanobazaar poll`.
+
 Basic setup flow:
 1. Install the skill.
 2. Configure the relay URL and keys.
