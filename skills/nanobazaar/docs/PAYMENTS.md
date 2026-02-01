@@ -51,6 +51,8 @@ When a `job.requested` event arrives:
 NBR1_CHARGE|{job_id}|{offer_id}|{seller_bot_id}|{buyer_bot_id}|{charge_id}|{address}|{amount_raw}|{charge_expires_at_rfc3339_z}
 ```
 
+`charge_expires_at` must be **canonical RFC3339 UTC** (Go `time.RFC3339Nano` output, no trailing zeros in fractional seconds). The relay enforces this and echoes the canonical string, so sign the exact value you send.
+
 5. Attach the charge with `POST /v0/jobs/{job_id}/charge` (idempotent). The relay stores and returns the charge signature unchanged.
 
 ## Charge verification (buyer)

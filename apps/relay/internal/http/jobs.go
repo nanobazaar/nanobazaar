@@ -261,7 +261,7 @@ func (h *JobHandler) Create(w http.ResponseWriter, r *http.Request) {
 		"price_raw":          offer.PriceRaw,
 		"turnaround_seconds": offer.TurnaroundSeconds,
 		"request_payload_id": payload.RequestPayload.PayloadID,
-		"job_expires_at":     jobExpiresAt.UTC().Format(time.RFC3339),
+		"job_expires_at":     jobExpiresAt.UTC().Format(time.RFC3339Nano),
 	}); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "event create failed")
 		return
@@ -489,7 +489,7 @@ func (h *JobHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := emitEvent(r.Context(), h.Store, updated.SellerBotID, jobCancelledEventType, map[string]any{
 		"job_id":       updated.JobID,
-		"cancelled_at": updated.CancelledAt.Time.UTC().Format(time.RFC3339),
+		"cancelled_at": updated.CancelledAt.Time.UTC().Format(time.RFC3339Nano),
 	}); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "event create failed")
 		return
@@ -605,7 +605,7 @@ func (h *JobHandler) Charge(w http.ResponseWriter, r *http.Request) {
 		"charge_id":          payload.ChargeID,
 		"address":            payload.Address,
 		"amount_raw":         payload.AmountRaw,
-		"charge_expires_at":  chargeExpiresAt.UTC().Format(time.RFC3339),
+		"charge_expires_at":  chargeExpiresAt.UTC().Format(time.RFC3339Nano),
 		"charge_sig_ed25519": payload.ChargeSig,
 	}); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "event create failed")
@@ -701,7 +701,7 @@ func (h *JobHandler) MarkPaid(w http.ResponseWriter, r *http.Request) {
 
 	eventPayload := map[string]any{
 		"job_id":  updated.JobID,
-		"paid_at": updated.PaidAt.Time.UTC().Format(time.RFC3339),
+		"paid_at": updated.PaidAt.Time.UTC().Format(time.RFC3339Nano),
 	}
 	if payload.Verifier != "" {
 		eventPayload["verifier"] = payload.Verifier
@@ -1083,7 +1083,7 @@ func (h *JobHandler) expireJob(ctx context.Context, job sqlc.Job, now time.Time)
 func (h *JobHandler) emitJobExpired(ctx context.Context, job sqlc.Job, now time.Time, previousStatus string) error {
 	data := map[string]any{
 		"job_id":     job.JobID,
-		"expired_at": now.UTC().Format(time.RFC3339),
+		"expired_at": now.UTC().Format(time.RFC3339Nano),
 	}
 	if previousStatus != "" {
 		data["previous_status"] = previousStatus
@@ -1156,6 +1156,10 @@ func parseTime(value string) (time.Time, error) {
 	parsed, err := time.Parse(time.RFC3339Nano, value)
 	if err != nil {
 		return time.Time{}, err
+	}
+	canonical := parsed.UTC().Format(time.RFC3339Nano)
+	if canonical != value {
+		return time.Time{}, errors.New("timestamp must be canonical RFC3339")
 	}
 	return parsed.UTC(), nil
 }
@@ -1233,8 +1237,8 @@ func jobToResponse(job sqlc.Job) jobResponse {
 		Status:            job.Status,
 		PriceRaw:          job.PriceRaw,
 		TurnaroundSeconds: job.TurnaroundSeconds,
-		CreatedAt:         job.CreatedAt.UTC().Format(time.RFC3339),
-		JobExpiresAt:      job.JobExpiresAt.UTC().Format(time.RFC3339),
+		CreatedAt:         job.CreatedAt.UTC().Format(time.RFC3339Nano),
+		JobExpiresAt:      job.JobExpiresAt.UTC().Format(time.RFC3339Nano),
 		RequestPayloadID:  job.RequestPayloadID,
 		PaidAt:            formatTime(job.PaidAt),
 		DeliveredAt:       formatTime(job.DeliveredAt),
@@ -1255,7 +1259,7 @@ func formatTime(value sql.NullTime) string {
 	if !value.Valid {
 		return ""
 	}
-	return value.Time.UTC().Format(time.RFC3339)
+	return value.Time.UTC().Format(time.RFC3339Nano)
 }
 
 func nullString(value string) sql.NullString {

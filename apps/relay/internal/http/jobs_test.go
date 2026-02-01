@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -203,6 +204,156 @@ func TestJobMarkPaidChargeExpired(t *testing.T) {
 	}
 	if !containsEventType(sellerEvents, jobExpiredEventType) {
 		t.Fatalf("expected job.expired event for seller")
+	}
+}
+
+func TestJobChargeExpiresAtPreservesMilliseconds(t *testing.T) {
+	ctx := context.Background()
+	db := setupTestDB(t)
+	defer db.Close()
+
+	st := store.New(db)
+	now := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return now }
+
+	buyerID := "bot_buyer"
+	sellerID := "bot_seller"
+	offerID := "offer_ms"
+	seedJobBot(t, st, buyerID, now)
+	seedJobBot(t, st, sellerID, now)
+	seedJobOffer(t, st, offerID, sellerID, now)
+
+	router := NewRouter(RouterConfig{Store: st}, WithClock(clock))
+
+	createPayload := payloadEnvelopeInput{
+		PayloadID:     "pay_req_ms",
+		PayloadKind:   payloadKindRequest,
+		EncAlg:        encAlgSealBox,
+		RecipientKid:  "kid_seller",
+		CiphertextB64: base64.RawURLEncoding.EncodeToString([]byte("request")),
+	}
+	createReq := jobCreateRequest{
+		JobID:          "job_ms",
+		OfferID:        offerID,
+		RequestPayload: createPayload,
+	}
+	create := newJSONRequest(t, http.MethodPost, "/v0/jobs", mustJSONBytes(t, createReq))
+	create.Header.Set(headerBotID, buyerID)
+	createRec := httptestRequest(t, router, create)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+
+	expiresAt := now.Add(2 * time.Hour).Add(349 * time.Millisecond)
+	expiresAtStr := expiresAt.UTC().Format(time.RFC3339Nano)
+	chargeReq := chargeCreateRequest{
+		ChargeID:        "chg_ms",
+		Address:         "nano_addr_ms",
+		AmountRaw:       "1000",
+		ChargeExpiresAt: expiresAtStr,
+		ChargeSig:       "sig",
+	}
+	charge := newJSONRequest(t, http.MethodPost, "/v0/jobs/job_ms/charge", mustJSONBytes(t, chargeReq))
+	charge.Header.Set(headerBotID, sellerID)
+	chargeRec := httptestRequest(t, router, charge)
+	if chargeRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", chargeRec.Code, chargeRec.Body.String())
+	}
+
+	var resp jobResponse
+	if err := json.Unmarshal(chargeRec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.Charge == nil {
+		t.Fatalf("expected charge in response")
+	}
+	if resp.Charge.ChargeExpiresAt != expiresAtStr {
+		t.Fatalf("expected charge_expires_at %q, got %q", expiresAtStr, resp.Charge.ChargeExpiresAt)
+	}
+
+	events, err := st.ListEventsAfterID(ctx, sqlc.ListEventsAfterIDParams{
+		RecipientBotID: buyerID,
+		SinceEventID:   0,
+		Limit:          10,
+	})
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	var chargeEvent *sqlc.Event
+	for i := range events {
+		if events[i].EventType == jobChargeCreatedEventType {
+			chargeEvent = &events[i]
+			break
+		}
+	}
+	if chargeEvent == nil {
+		t.Fatalf("expected job.charge_created event")
+	}
+
+	var eventPayload map[string]any
+	if err := json.Unmarshal([]byte(chargeEvent.DataJson), &eventPayload); err != nil {
+		t.Fatalf("unmarshal event payload: %v", err)
+	}
+	got, ok := eventPayload["charge_expires_at"].(string)
+	if !ok {
+		t.Fatalf("expected charge_expires_at string in event payload")
+	}
+	if got != expiresAtStr {
+		t.Fatalf("expected event charge_expires_at %q, got %q", expiresAtStr, got)
+	}
+}
+
+func TestJobChargeExpiresAtRejectsNonCanonical(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	st := store.New(db)
+	now := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return now }
+
+	buyerID := "bot_buyer"
+	sellerID := "bot_seller"
+	offerID := "offer_noncanon"
+	seedJobBot(t, st, buyerID, now)
+	seedJobBot(t, st, sellerID, now)
+	seedJobOffer(t, st, offerID, sellerID, now)
+
+	router := NewRouter(RouterConfig{Store: st}, WithClock(clock))
+
+	createPayload := payloadEnvelopeInput{
+		PayloadID:     "pay_req_noncanon",
+		PayloadKind:   payloadKindRequest,
+		EncAlg:        encAlgSealBox,
+		RecipientKid:  "kid_seller",
+		CiphertextB64: base64.RawURLEncoding.EncodeToString([]byte("request")),
+	}
+	createReq := jobCreateRequest{
+		JobID:          "job_noncanon",
+		OfferID:        offerID,
+		RequestPayload: createPayload,
+	}
+	create := newJSONRequest(t, http.MethodPost, "/v0/jobs", mustJSONBytes(t, createReq))
+	create.Header.Set(headerBotID, buyerID)
+	createRec := httptestRequest(t, router, create)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+
+	expiresAt := now.Add(2 * time.Hour).Add(340 * time.Millisecond)
+	canonical := expiresAt.UTC().Format(time.RFC3339Nano)
+	nonCanonical := strings.TrimSuffix(canonical, "Z") + "0Z"
+	chargeReq := chargeCreateRequest{
+		ChargeID:        "chg_noncanon",
+		Address:         "nano_addr_noncanon",
+		AmountRaw:       "1000",
+		ChargeExpiresAt: nonCanonical,
+		ChargeSig:       "sig",
+	}
+	charge := newJSONRequest(t, http.MethodPost, "/v0/jobs/job_noncanon/charge", mustJSONBytes(t, chargeReq))
+	charge.Header.Set(headerBotID, sellerID)
+	chargeRec := httptestRequest(t, router, charge)
+	if chargeRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", chargeRec.Code, chargeRec.Body.String())
 	}
 }
 
