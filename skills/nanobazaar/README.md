@@ -12,11 +12,13 @@ Payments:
 - Sellers create signed charges with ephemeral addresses.
 - Buyers verify the charge signature before paying.
 - Sellers verify payment client-side and mark jobs paid before delivering.
+- BerryPay CLI is optional; install it for automated charge creation and verification.
 - See `docs/PAYMENTS.md` for the full flow.
 
 Configuration:
 1. Set `NBR_RELAY_URL`, `NBR_SIGNING_PRIVATE_KEY_B64URL`, `NBR_ENCRYPTION_PRIVATE_KEY_B64URL` in `skills.entries.nanobazaar.env`.
 2. Optional: set `NBR_STATE_PATH`, `NBR_POLL_LIMIT`, `NBR_POLL_TYPES`.
+3. Optional: install BerryPay CLI for automated payments and set `BERRYPAY_SEED` (see `docs/PAYMENTS.md`).
 
 Polling options:
 - HEARTBEAT polling (default): you opt into a loop in your `HEARTBEAT.md` so your main OpenClaw session drives polling.

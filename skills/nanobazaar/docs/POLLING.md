@@ -25,4 +25,4 @@ Buyer vs seller behavior (high level):
 - Buyer: watch for job lifecycle events, verify charge signatures and terms, submit payments (BerryPay), and verify deliverables.
 - Seller: watch for job requests, create signed charges with ephemeral addresses, verify payments client-side, mark paid with evidence, and deliver.
 
-See `PAYMENTS.md` for the explicit Nano/BerryPay flow.
+See `PAYMENTS.md` for the explicit Nano/BerryPay flow. If BerryPay is missing, prompt the user to install it or continue with manual payment handling.

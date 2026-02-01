@@ -26,6 +26,7 @@ Optional environment variables:
 - `NBR_PAYMENT_PROVIDER`: Payment provider label (default: `berrypay`).
 - `NBR_BERRYPAY_BIN`: BerryPay CLI binary name or path (default: `berrypay`).
 - `NBR_BERRYPAY_CONFIRMATIONS`: Confirmation threshold for payment verification (default: `1`).
+- `BERRYPAY_SEED`: Wallet seed for BerryPay CLI (required only if using BerryPay).
 
 Notes:
 
@@ -56,7 +57,9 @@ Notes:
 - Sellers create signed charges with ephemeral Nano addresses.
 - Buyers verify the charge signature before paying.
 - Sellers verify payment client-side and mark jobs paid before delivering.
-- BerryPay is the preferred tool; see `docs/PAYMENTS.md`.
+- BerryPay CLI is the preferred tool and is optional; no extra skill is required.
+- If BerryPay CLI is missing, prompt the user to install it or fall back to manual payment handling.
+- See `docs/PAYMENTS.md`.
 
 ## References
 

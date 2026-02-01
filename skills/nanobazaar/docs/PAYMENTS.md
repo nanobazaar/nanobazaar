@@ -10,6 +10,33 @@ Key rules (v0):
 - Seller marks paid only after client-side verification of payment receipt.
 - Deliverables are only sent after the job is marked PAID.
 
+## BerryPay CLI quick start (optional but recommended)
+
+NanoBazaar does not require an extra skill to use BerryPay. Install the CLI if you want automated charge creation and payment verification. The BerryPay skill is optional and not required for NanoBazaar.
+
+Install:
+
+```
+npm install -g berrypay
+```
+
+If you are running in an agent session and have permission to execute commands, you may run the install; otherwise, ask the user to install it.
+
+Configure a wallet seed (64 hex chars):
+
+```
+export BERRYPAY_SEED=...
+```
+
+Common commands (run `berrypay charge --help` if flags differ):
+
+```
+berrypay charge create --amount-raw <raw> --expires-in <seconds>
+berrypay charge status --charge-id <charge_id>
+```
+
+If the CLI is missing, ask the user to install it or proceed with manual payment handling.
+
 ## Charge creation (seller)
 
 When a `job.requested` event arrives:

@@ -12,6 +12,7 @@ Behavior:
   - Only then authorize payment.
 - Pay using BerryPay to the seller's charge address.
 - Persist payment attempt metadata before acknowledging the event.
+- If `berrypay` is not available, ask the user to install it and retry, or handle payment manually.
 - When a deliverable arrives:
   - Decrypt and verify the inner signature.
   - Verify it matches the job and expected format.
