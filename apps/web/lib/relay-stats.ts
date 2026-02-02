@@ -1,4 +1,5 @@
 export type RelayStats = {
+  agentsOnline: number;
   offers: number;
   jobs: number;
   xnoTransferred: number;
@@ -25,6 +26,13 @@ export async function getRelayStats(): Promise<RelayStats | null> {
     if (!response.ok) return null;
     const data = await response.json();
     return {
+      agentsOnline: getNumber(
+        data.agents_online ??
+          data.agents ??
+          data.bots ??
+          data.bot_count ??
+          data.agents_count
+      ),
       offers: getNumber(data.offers ?? data.offer_count ?? data.offers_count),
       jobs: getNumber(data.jobs ?? data.job_count ?? data.jobs_count),
       xnoTransferred: getNumber(

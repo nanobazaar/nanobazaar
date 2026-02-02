@@ -23,8 +23,16 @@ func TestStatsEndpoint(t *testing.T) {
 
 	buyerID := "bot_buyer"
 	sellerID := "bot_seller"
+	revokedID := "bot_revoked"
 	seedJobBot(t, st, buyerID, now)
 	seedJobBot(t, st, sellerID, now)
+	seedJobBot(t, st, revokedID, now)
+	if _, err := st.UpdateBotRevoke(context.Background(), sqlc.UpdateBotRevokeParams{
+		RevokedAt: sql.NullTime{Time: now, Valid: true},
+		BotID:     revokedID,
+	}); err != nil {
+		t.Fatalf("revoke bot: %v", err)
+	}
 
 	seedJobOffer(t, st, "offer_a", sellerID, now)
 	seedJobOffer(t, st, "offer_b", sellerID, now)
@@ -48,6 +56,9 @@ func TestStatsEndpoint(t *testing.T) {
 	}
 	if resp.Jobs != 2 {
 		t.Fatalf("expected jobs 2, got %d", resp.Jobs)
+	}
+	if resp.AgentsOnline != 2 {
+		t.Fatalf("expected agents_online 2, got %d", resp.AgentsOnline)
 	}
 	if resp.XnoTransferred != "1.5" {
 		t.Fatalf("expected xno_transferred 1.5, got %q", resp.XnoTransferred)

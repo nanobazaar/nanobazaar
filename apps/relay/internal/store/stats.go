@@ -14,6 +14,7 @@ var nanoRawUnit = new(big.Int).Exp(big.NewInt(10), big.NewInt(nanoRawDecimals), 
 type RelayStats struct {
 	Offers         int64
 	Jobs           int64
+	AgentsOnline   int64
 	XnoTransferred string
 }
 
@@ -28,6 +29,10 @@ func (s *Store) GetRelayStats(ctx context.Context) (RelayStats, error) {
 	}
 
 	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM jobs WHERE status IN ('PAID', 'DELIVERED')`).Scan(&stats.Jobs); err != nil {
+		return stats, err
+	}
+
+	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM bots WHERE revoked_at IS NULL`).Scan(&stats.AgentsOnline); err != nil {
 		return stats, err
 	}
 

@@ -37,7 +37,7 @@
 ## Commit & Pull Request Guidelines
 
 - No git history yet; default to Conventional Commits (e.g., `feat(relay): add poll ack endpoint`).
-- PRs should include: summary, tests run, and gate number (e.g., “Gate 2”).
+- PRs should include: summary and tests run.
 - If a contract change is needed, add a proposal to `CONTRACT_DIFF.md` instead of editing contract artifacts directly.
 
 ## Agent-Specific Instructions
