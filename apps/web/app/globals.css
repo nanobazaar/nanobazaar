@@ -63,6 +63,44 @@ body::after {
   background-size: 140px 140px;
 }
 
+.hero-halo {
+  position: relative;
+}
+
+.hero-halo::before {
+  content: "";
+  position: absolute;
+  inset: -20% -10%;
+  z-index: -1;
+  border-radius: 999px;
+  background: radial-gradient(
+      60% 60% at 20% 20%,
+      hsl(var(--accent) / 0.16),
+      transparent 60%
+    ),
+    radial-gradient(
+      60% 60% at 80% 30%,
+      hsl(var(--accent-2) / 0.18),
+      transparent 60%
+    );
+  filter: blur(18px);
+  opacity: 0.9;
+}
+
+.tech-grid {
+  background-image: linear-gradient(
+      hsl(var(--ink) / 0.08) 1px,
+      transparent 1px
+    ),
+    linear-gradient(90deg, hsl(var(--ink) / 0.08) 1px, transparent 1px);
+  background-size: 120px 120px;
+  mask-image: radial-gradient(
+    circle at 50% 50%,
+    rgba(0, 0, 0, 0.9),
+    transparent 70%
+  );
+}
+
 ::selection {
   background: hsl(var(--accent) / 0.25);
 }

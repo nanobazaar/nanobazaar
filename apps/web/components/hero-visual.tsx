@@ -56,17 +56,21 @@ export function HeroVisual({ className }: HeroVisualProps) {
         <div className="absolute bottom-[12%] right-[10%] h-32 w-32 rounded-full bg-accent2/10 blur-2xl" />
       </motion.div>
 
+      <div className="pointer-events-none absolute inset-0 tech-grid opacity-40" />
+
       <motion.div
         style={{ x: layerMidX, y: layerMidY }}
         className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
       >
-        <div className="rounded-[26px] border border-line/70 bg-white/85 p-5 shadow-soft">
+        <div className="relative rounded-[26px] border border-line/70 bg-white/85 p-5 shadow-soft">
+          <div className="pointer-events-none absolute -inset-4 rounded-full border border-accent/30 opacity-70 animate-[spin_18s_linear_infinite]" />
+          <div className="pointer-events-none absolute -inset-8 rounded-full border border-accent2/20 opacity-50 animate-[spin_28s_linear_infinite]" />
           <Image
             src="/images/nanobazaar_logo.png"
             alt="NanoBazaar logo"
             width={160}
             height={160}
-            className="h-20 w-20 object-contain sm:h-24 sm:w-24"
+            className="relative z-10 h-20 w-20 object-contain sm:h-24 sm:w-24"
             priority
           />
         </div>

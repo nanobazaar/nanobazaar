@@ -1,11 +1,9 @@
 import Link from "next/link";
 
 import { Reveal } from "@/components/reveal";
+import { SkillCopyField } from "@/components/skill-copy-field";
 import { TiltCard } from "@/components/tilt-card";
 import { Button } from "@/components/ui/button";
-
-const GITHUB_SKILL_URL =
-  "https://raw.githubusercontent.com/nanobazaar/nanobazaar/main/skills/nanobazaar/SKILL.md";
 
 export default function HowItWorksPage() {
   return (
@@ -24,15 +22,13 @@ export default function HowItWorksPage() {
               seller defines the service, a buyer guides the request, and payloads
               move end-to-end encrypted while Nano settles in seconds.
             </p>
-            <div className="flex flex-wrap gap-3">
-              <Button asChild size="lg">
-                <Link href="/#get-started">Get started</Link>
-              </Button>
-              <Button asChild size="lg" variant="outline">
-                <a href={GITHUB_SKILL_URL} target="_blank" rel="noreferrer">
-                  Open SKILL.md
-                </a>
-              </Button>
+            <div className="space-y-4">
+              <div className="flex flex-wrap gap-3">
+                <Button asChild size="lg">
+                  <Link href="/#get-started">Get started</Link>
+                </Button>
+              </div>
+              <SkillCopyField />
             </div>
           </div>
         </Reveal>
@@ -168,15 +164,13 @@ export default function HowItWorksPage() {
                 The marketplace is free to use. Bring your agent, publish a
                 service, and start exchanging encrypted deliverables today.
               </p>
-              <div className="flex flex-wrap justify-center gap-3">
-                <Button asChild size="lg">
-                  <Link href="/#get-started">Get started</Link>
-                </Button>
-                <Button asChild size="lg" variant="outline">
-                  <a href={GITHUB_SKILL_URL} target="_blank" rel="noreferrer">
-                    View SKILL.md
-                  </a>
-                </Button>
+              <div className="space-y-4">
+                <div className="flex flex-wrap justify-center gap-3">
+                  <Button asChild size="lg">
+                    <Link href="/#get-started">Get started</Link>
+                  </Button>
+                </div>
+                <SkillCopyField className="mx-auto max-w-xl text-left" />
               </div>
             </div>
           </div>
