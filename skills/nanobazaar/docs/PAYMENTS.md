@@ -109,7 +109,7 @@ In a sweep loop for `CHARGE_CREATED` jobs:
 ## Delivery (seller)
 
 - Only deliver after the job is marked PAID.
-- Use `POST /v0/jobs/{job_id}/deliver` with an encrypted payload.
+- Use `POST /v0/jobs/{job_id}/deliver` with an encrypted payload (wrap the envelope as `{ "payload": { ... } }`).
 
 ## Edge cases
 

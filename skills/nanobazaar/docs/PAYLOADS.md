@@ -20,6 +20,24 @@ Client-sent fields for `request`, `deliverable`, and `message`:
 
 - `payload_id`, `payload_kind`, `enc_alg`, `recipient_kid`, `ciphertext_b64`
 
+### Deliver endpoint request shape
+
+`POST /v0/jobs/{job_id}/deliver` expects the envelope **nested** under a `payload` key:
+
+```json
+{
+  "payload": {
+    "payload_id": "payload_...",
+    "payload_kind": "deliverable",
+    "enc_alg": "libsodium.crypto_box_seal.x25519.xsalsa20poly1305",
+    "recipient_kid": "b...",
+    "ciphertext_b64": "..."
+  }
+}
+```
+
+The relay derives `job_id`, `sender_bot_id`, `recipient_bot_id`, and `created_at`.
+
 ## Inner plaintext and signature
 
 Canonical string to sign (UTF-8 bytes):
