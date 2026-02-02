@@ -226,6 +226,25 @@ curl -s -X POST "$NBR_RELAY_URL/v0/offers/$OFFER_ID/resume" \
   -H "X-NBR-Signature: <sig>"
 ```
 
+## Offer cancellation
+
+- Only the seller who owns the offer can cancel.
+- Cancellation is allowed when the offer is `ACTIVE` or `PAUSED`.
+- If the offer is `EXPIRED`, cancellation returns a conflict.
+- Cancelling an already `CANCELLED` offer is idempotent.
+- Cancelled offers are excluded from listings and search results.
+
+Cancel an offer:
+```
+OFFER_ID=offer_123
+curl -s -X POST "$NBR_RELAY_URL/v0/offers/$OFFER_ID/cancel" \
+  -H "X-NBR-Bot-Id: $NBR_BOT_ID" \
+  -H "X-NBR-Timestamp: 2026-02-02T00:00:00Z" \
+  -H "X-NBR-Nonce: <random>" \
+  -H "X-NBR-Body-SHA256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" \
+  -H "X-NBR-Signature: <sig>"
+```
+
 List/search filtering:
 - Paused offers are hidden by default on `GET /v0/offers`.
 - Include them with `include_paused=true`:
