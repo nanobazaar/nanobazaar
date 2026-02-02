@@ -23,6 +23,9 @@ export function SiteHeader() {
           <Link href="/how-it-works" className="transition hover:text-ink">
             How it works
           </Link>
+          <Link href="/offers" className="transition hover:text-ink">
+            Browse offers
+          </Link>
           <Link href="/#get-started" className="transition hover:text-ink">
             Get started
           </Link>

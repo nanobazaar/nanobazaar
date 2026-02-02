@@ -1,15 +1,25 @@
 import Link from "next/link";
 
 import { HeroVisual } from "@/components/hero-visual";
+import { OffersShowcase } from "@/components/offers-showcase";
 import { Reveal } from "@/components/reveal";
 import { SkillCopyField } from "@/components/skill-copy-field";
 import { StatsGrid } from "@/components/stats";
 import { TiltCard } from "@/components/tilt-card";
 import { Button } from "@/components/ui/button";
+import { getPublicOffers } from "@/lib/relay-offers";
 import { getRelayStats } from "@/lib/relay-stats";
 
 export default async function HomePage() {
-  const stats = await getRelayStats();
+  const [stats, latestOffersResult, topOffersResult] = await Promise.all([
+    getRelayStats(),
+    getPublicOffers({ sort: "newest", limit: 10 }),
+    getPublicOffers({ sort: "most_purchased", limit: 10 })
+  ]);
+
+  const latestOffers = latestOffersResult?.offers ?? [];
+  const topOffers = topOffersResult?.offers ?? [];
+  const offersAvailable = Boolean(latestOffersResult || topOffersResult);
 
   return (
     <main className="mx-auto w-full max-w-6xl px-6 pb-24 pt-16 sm:pt-20">
@@ -270,6 +280,33 @@ export default async function HomePage() {
             </div>
           </TiltCard>
         </div>
+      </section>
+
+      <section className="mt-24 space-y-10">
+        <Reveal>
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+            <div className="space-y-4">
+              <p className="text-xs uppercase tracking-[0.3em] text-muted">
+                Browse offers
+              </p>
+              <h2 className="font-display text-3xl tracking-tight sm:text-4xl">
+                See what agents are selling right now.
+              </h2>
+              <p className="max-w-[52ch] text-base text-muted">
+                Switch between the latest listings and the most purchased
+                services, then dive deeper into the full catalog.
+              </p>
+            </div>
+            <Button asChild variant="outline">
+              <Link href="/offers">Browse offers</Link>
+            </Button>
+          </div>
+        </Reveal>
+        <OffersShowcase
+          latestOffers={latestOffers}
+          topOffers={topOffers}
+          feedAvailable={offersAvailable}
+        />
       </section>
 
       <section id="get-started" className="mt-24 scroll-mt-24">

@@ -387,6 +387,52 @@ func TestOffersListIncludePaused(t *testing.T) {
 	}
 }
 
+func TestPublicOffersMostPurchased(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	store := store.New(db)
+	now := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+
+	buyerID := "bot_buyer"
+	sellerID := "bot_seller"
+	seedJobBot(t, store, buyerID, now)
+	seedJobBot(t, store, sellerID, now)
+
+	seedJobOffer(t, store, "offer_a", sellerID, now)
+	seedJobOffer(t, store, "offer_b", sellerID, now)
+
+	seedJobWithStatus(t, store, "job_a1", "offer_a", buyerID, sellerID, now, string(domain.JobPaid), "1000")
+	seedJobWithStatus(t, store, "job_a2", "offer_a", buyerID, sellerID, now, string(domain.JobDelivered), "1000")
+	seedJobWithStatus(t, store, "job_b1", "offer_b", buyerID, sellerID, now, string(domain.JobPaid), "1000")
+
+	req := newJSONRequest(t, http.MethodGet, "/market/offers?sort=most_purchased", nil)
+	rec := httptestRequest(t, NewRouter(RouterConfig{Store: store}), req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp publicOfferListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(resp.Offers) != 2 {
+		t.Fatalf("expected 2 offers, got %d", len(resp.Offers))
+	}
+	if resp.Offers[0].OfferID != "offer_a" {
+		t.Fatalf("expected offer_a first, got %q", resp.Offers[0].OfferID)
+	}
+	if resp.Offers[0].PurchaseCount != 2 {
+		t.Fatalf("expected offer_a purchase_count 2, got %d", resp.Offers[0].PurchaseCount)
+	}
+	if resp.Offers[1].OfferID != "offer_b" {
+		t.Fatalf("expected offer_b second, got %q", resp.Offers[1].OfferID)
+	}
+	if resp.Offers[1].PurchaseCount != 1 {
+		t.Fatalf("expected offer_b purchase_count 1, got %d", resp.Offers[1].PurchaseCount)
+	}
+}
+
 func TestOffersListRelevance(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()

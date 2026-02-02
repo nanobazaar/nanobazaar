@@ -69,11 +69,27 @@ type offerListResponse struct {
 	NextCursor string          `json:"next_cursor,omitempty"`
 }
 
+type publicOfferResponse struct {
+	OfferID       string    `json:"offer_id"`
+	Title         string    `json:"title"`
+	Description   string    `json:"description"`
+	Tags          []string  `json:"tags"`
+	PriceRaw      string    `json:"price_raw"`
+	PurchaseCount int       `json:"purchase_count"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+type publicOfferListResponse struct {
+	Offers     []publicOfferResponse `json:"offers"`
+	NextCursor string                `json:"next_cursor,omitempty"`
+}
+
 type offerCursor struct {
 	Sort              string     `json:"sort"`
 	CreatedAt         time.Time  `json:"created_at"`
 	OfferID           string     `json:"offer_id"`
 	Score             int        `json:"score,omitempty"`
+	PurchaseCount     int        `json:"purchase_count,omitempty"`
 	PriceRaw          string     `json:"price_raw,omitempty"`
 	TurnaroundSeconds int64      `json:"turnaround_seconds,omitempty"`
 	ExpiresAt         *time.Time `json:"expires_at,omitempty"`
@@ -81,10 +97,11 @@ type offerCursor struct {
 }
 
 type offerEntry struct {
-	Offer sqlc.Offer
-	Tags  []string
-	Score int
-	Price *big.Int
+	Offer         sqlc.Offer
+	Tags          []string
+	Score         int
+	Price         *big.Int
+	PurchaseCount int
 }
 
 func (h *OfferHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -507,6 +524,92 @@ func (h *OfferHandler) List(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *OfferHandler) PublicList(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.Store == nil {
+		writeJSONError(w, http.StatusInternalServerError, "store unavailable")
+		return
+	}
+
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	sortParam := strings.TrimSpace(r.URL.Query().Get("sort"))
+	if sortParam == "" {
+		if query != "" {
+			sortParam = "relevance"
+		} else {
+			sortParam = "newest"
+		}
+	}
+
+	limit, err := parseLimit(r.URL.Query().Get("limit"))
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid limit")
+		return
+	}
+
+	cursorValue := strings.TrimSpace(r.URL.Query().Get("cursor"))
+	var cursor *offerCursor
+	if cursorValue != "" {
+		decoded, err := decodeOfferCursor(cursorValue)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid cursor")
+			return
+		}
+		if decoded.Sort != "" && decoded.Sort != sortParam {
+			writeJSONError(w, http.StatusBadRequest, "cursor sort mismatch")
+			return
+		}
+		if decoded.Query != "" && decoded.Query != query {
+			writeJSONError(w, http.StatusBadRequest, "cursor query mismatch")
+			return
+		}
+		cursor = &decoded
+	}
+
+	sellerBotID := strings.TrimSpace(r.URL.Query().Get("seller_bot_id"))
+	filterTags := parseTagFilter(r.URL.Query().Get("tags"))
+
+	entries, err := h.loadOfferEntries(r.Context(), sellerBotID, query, filterTags, false)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "offer list failed")
+		return
+	}
+
+	if err := sortOfferEntries(entries, sortParam); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if cursor != nil {
+		start := findCursorStart(entries, *cursor, sortParam)
+		if start >= len(entries) {
+			writeJSON(w, http.StatusOK, publicOfferListResponse{Offers: []publicOfferResponse{}})
+			return
+		}
+		entries = entries[start:]
+	}
+
+	nextCursor := ""
+	if len(entries) > limit {
+		next, err := encodeOfferCursor(cursorFromEntry(entries[limit-1], sortParam, query))
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "cursor encode failed")
+			return
+		}
+		nextCursor = next
+		entries = entries[:limit]
+	}
+
+	respOffers := make([]publicOfferResponse, 0, len(entries))
+	for _, entry := range entries {
+		respOffers = append(respOffers, publicOfferToResponse(entry))
+	}
+
+	writeJSON(w, http.StatusOK, publicOfferListResponse{
+		Offers:     respOffers,
+		NextCursor: nextCursor,
+	})
+}
+
 func (h *OfferHandler) insertOffer(ctx context.Context, offerID, sellerBotID string, payload offerCreateRequest, createdAt time.Time, expiresAt time.Time) error {
 	tx, err := h.Store.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -559,6 +662,7 @@ func (h *OfferHandler) loadOfferEntries(ctx context.Context, sellerBotID, query 
 	entries := make([]offerEntry, 0)
 	for rows.Next() {
 		var offer sqlc.Offer
+		var purchaseCount int64
 		if err := rows.Scan(
 			&offer.OfferID,
 			&offer.SellerBotID,
@@ -572,6 +676,7 @@ func (h *OfferHandler) loadOfferEntries(ctx context.Context, sellerBotID, query 
 			&offer.Status,
 			&offer.CancelledAt,
 			&offer.RequestSchemaHint,
+			&purchaseCount,
 		); err != nil {
 			return nil, err
 		}
@@ -593,10 +698,11 @@ func (h *OfferHandler) loadOfferEntries(ctx context.Context, sellerBotID, query 
 		}
 
 		entries = append(entries, offerEntry{
-			Offer: offer,
-			Tags:  tags,
-			Score: 0,
-			Price: parsePrice(offer.PriceRaw),
+			Offer:         offer,
+			Tags:          tags,
+			Score:         0,
+			Price:         parsePrice(offer.PriceRaw),
+			PurchaseCount: int(purchaseCount),
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -618,6 +724,7 @@ func (h *OfferHandler) loadOfferEntriesSearch(ctx context.Context, sellerBotID, 
 	entries := make([]offerEntry, 0)
 	for rows.Next() {
 		var offer sqlc.Offer
+		var purchaseCount int64
 		var score int64
 		if err := rows.Scan(
 			&offer.OfferID,
@@ -632,6 +739,7 @@ func (h *OfferHandler) loadOfferEntriesSearch(ctx context.Context, sellerBotID, 
 			&offer.Status,
 			&offer.CancelledAt,
 			&offer.RequestSchemaHint,
+			&purchaseCount,
 			&score,
 		); err != nil {
 			return nil, err
@@ -654,10 +762,11 @@ func (h *OfferHandler) loadOfferEntriesSearch(ctx context.Context, sellerBotID, 
 		}
 
 		entries = append(entries, offerEntry{
-			Offer: offer,
-			Tags:  tags,
-			Score: int(score),
-			Price: parsePrice(offer.PriceRaw),
+			Offer:         offer,
+			Tags:          tags,
+			Score:         int(score),
+			Price:         parsePrice(offer.PriceRaw),
+			PurchaseCount: int(purchaseCount),
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -676,6 +785,7 @@ func (h *OfferHandler) loadOfferEntriesSearchFallback(ctx context.Context, selle
 	entries := make([]offerEntry, 0)
 	for rows.Next() {
 		var offer sqlc.Offer
+		var purchaseCount int64
 		if err := rows.Scan(
 			&offer.OfferID,
 			&offer.SellerBotID,
@@ -689,6 +799,7 @@ func (h *OfferHandler) loadOfferEntriesSearchFallback(ctx context.Context, selle
 			&offer.Status,
 			&offer.CancelledAt,
 			&offer.RequestSchemaHint,
+			&purchaseCount,
 		); err != nil {
 			return nil, err
 		}
@@ -715,10 +826,11 @@ func (h *OfferHandler) loadOfferEntriesSearchFallback(ctx context.Context, selle
 		}
 
 		entries = append(entries, offerEntry{
-			Offer: offer,
-			Tags:  tags,
-			Score: score,
-			Price: parsePrice(offer.PriceRaw),
+			Offer:         offer,
+			Tags:          tags,
+			Score:         score,
+			Price:         parsePrice(offer.PriceRaw),
+			PurchaseCount: int(purchaseCount),
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -780,6 +892,18 @@ func offerToResponse(offer sqlc.Offer, tags []string) offerResponse {
 		ExpiresAt:         expiresAt,
 		Status:            offer.Status,
 		CancelledAt:       cancelledAt,
+	}
+}
+
+func publicOfferToResponse(entry offerEntry) publicOfferResponse {
+	return publicOfferResponse{
+		OfferID:       entry.Offer.OfferID,
+		Title:         entry.Offer.Title,
+		Description:   entry.Offer.Description,
+		Tags:          entry.Tags,
+		PriceRaw:      entry.Offer.PriceRaw,
+		PurchaseCount: entry.PurchaseCount,
+		CreatedAt:     entry.Offer.CreatedAt,
 	}
 }
 
@@ -950,6 +1074,10 @@ func sortOfferEntries(entries []offerEntry, sortParam string) error {
 		sort.SliceStable(entries, func(i, j int) bool {
 			return compareRelevance(entries[i], entries[j]) < 0
 		})
+	case "most_purchased":
+		sort.SliceStable(entries, func(i, j int) bool {
+			return compareMostPurchased(entries[i], entries[j]) < 0
+		})
 	case "price_asc":
 		sort.SliceStable(entries, func(i, j int) bool {
 			return comparePrice(entries[i], entries[j], true) < 0
@@ -993,6 +1121,16 @@ func compareRelevance(a, b offerEntry) int {
 		return -1
 	}
 	if a.Score < b.Score {
+		return 1
+	}
+	return compareNewest(a, b)
+}
+
+func compareMostPurchased(a, b offerEntry) int {
+	if a.PurchaseCount > b.PurchaseCount {
+		return -1
+	}
+	if a.PurchaseCount < b.PurchaseCount {
 		return 1
 	}
 	return compareNewest(a, b)
@@ -1059,6 +1197,8 @@ func compareEntryToCursor(entry offerEntry, cursor offerCursor, sortParam string
 		return compareEntryNewestCursor(entry, cursor)
 	case "relevance":
 		return compareEntryRelevanceCursor(entry, cursor)
+	case "most_purchased":
+		return compareEntryMostPurchasedCursor(entry, cursor)
 	case "price_asc", "price_desc":
 		return compareEntryPriceCursor(entry, cursor, sortParam == "price_asc")
 	case "turnaround_asc":
@@ -1092,6 +1232,16 @@ func compareEntryRelevanceCursor(entry offerEntry, cursor offerCursor) int {
 		return -1
 	}
 	if entry.Score < cursor.Score {
+		return 1
+	}
+	return compareEntryNewestCursor(entry, cursor)
+}
+
+func compareEntryMostPurchasedCursor(entry offerEntry, cursor offerCursor) int {
+	if entry.PurchaseCount > cursor.PurchaseCount {
+		return -1
+	}
+	if entry.PurchaseCount < cursor.PurchaseCount {
 		return 1
 	}
 	return compareEntryNewestCursor(entry, cursor)
@@ -1150,6 +1300,8 @@ func cursorFromEntry(entry offerEntry, sortParam, query string) offerCursor {
 	switch sortParam {
 	case "relevance":
 		cursor.Score = entry.Score
+	case "most_purchased":
+		cursor.PurchaseCount = entry.PurchaseCount
 	case "price_asc", "price_desc":
 		cursor.PriceRaw = entry.Offer.PriceRaw
 	case "turnaround_asc":
@@ -1220,16 +1372,30 @@ func newOfferID(now time.Time) (string, error) {
 }
 
 const selectOffersQuery = `
-SELECT offer_id, seller_bot_id, title, description, tags_json, price_raw, turnaround_seconds, created_at, expires_at, status, cancelled_at, request_schema_hint
-FROM offers
-WHERE (?1 = '' OR seller_bot_id = ?1)
-	AND (status = 'ACTIVE' OR (?2 = 1 AND status = 'PAUSED'))`
+SELECT o.offer_id, o.seller_bot_id, o.title, o.description, o.tags_json, o.price_raw, o.turnaround_seconds, o.created_at, o.expires_at, o.status, o.cancelled_at, o.request_schema_hint,
+	COALESCE(p.purchase_count, 0) AS purchase_count
+FROM offers o
+LEFT JOIN (
+	SELECT offer_id, COUNT(1) AS purchase_count
+	FROM jobs
+	WHERE status IN ('PAID', 'DELIVERED')
+	GROUP BY offer_id
+) p ON p.offer_id = o.offer_id
+WHERE (?1 = '' OR o.seller_bot_id = ?1)
+	AND (o.status = 'ACTIVE' OR (?2 = 1 AND o.status = 'PAUSED'))`
 
 const selectOffersSearchQuery = `
 SELECT o.offer_id, o.seller_bot_id, o.title, o.description, o.tags_json, o.price_raw, o.turnaround_seconds, o.created_at, o.expires_at, o.status, o.cancelled_at, o.request_schema_hint,
+	COALESCE(p.purchase_count, 0) AS purchase_count,
 	CAST((1000000.0 / (1.0 + bm25(offers_fts, 10.0, 2.0, 5.0))) AS INTEGER) AS score
 FROM offers_fts
 JOIN offers o ON o.rowid = offers_fts.rowid
+LEFT JOIN (
+	SELECT offer_id, COUNT(1) AS purchase_count
+	FROM jobs
+	WHERE status IN ('PAID', 'DELIVERED')
+	GROUP BY offer_id
+) p ON p.offer_id = o.offer_id
 WHERE offers_fts MATCH ?1
 	AND (?2 = '' OR o.seller_bot_id = ?2)
 	AND (o.status = 'ACTIVE' OR (?3 = 1 AND o.status = 'PAUSED'))`
