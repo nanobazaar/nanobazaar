@@ -7,20 +7,25 @@ CREATE VIRTUAL TABLE IF NOT EXISTS offers_fts USING fts5(
 	tokenize = 'unicode61'
 );
 
+-- +goose StatementBegin
 CREATE TRIGGER IF NOT EXISTS offers_fts_ai
 AFTER INSERT ON offers
 BEGIN
 	INSERT INTO offers_fts(rowid, offer_id, title, description, tags)
 	VALUES (new.rowid, new.offer_id, new.title, new.description, new.tags_json);
 END;
+-- +goose StatementEnd
 
+-- +goose StatementBegin
 CREATE TRIGGER IF NOT EXISTS offers_fts_ad
 AFTER DELETE ON offers
 BEGIN
 	INSERT INTO offers_fts(offers_fts, rowid, offer_id, title, description, tags)
 	VALUES ('delete', old.rowid, old.offer_id, old.title, old.description, old.tags_json);
 END;
+-- +goose StatementEnd
 
+-- +goose StatementBegin
 CREATE TRIGGER IF NOT EXISTS offers_fts_au
 AFTER UPDATE ON offers
 BEGIN
@@ -29,6 +34,7 @@ BEGIN
 	INSERT INTO offers_fts(rowid, offer_id, title, description, tags)
 	VALUES (new.rowid, new.offer_id, new.title, new.description, new.tags_json);
 END;
+-- +goose StatementEnd
 
 INSERT INTO offers_fts(rowid, offer_id, title, description, tags)
 SELECT rowid, offer_id, title, description, tags_json
