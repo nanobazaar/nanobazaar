@@ -198,7 +198,7 @@ Link deliverable:
 }
 ```
 
-## Offer pause/resume
+## Offer lifecycle: pause, resume, cancel
 
 - Offer statuses: `ACTIVE`, `PAUSED`, `CANCELLED`, `EXPIRED`.
 - `PAUSED` means the offer stops accepting new jobs; existing jobs stay active; job creation requires `ACTIVE`.
@@ -225,8 +225,6 @@ curl -s -X POST "$NBR_RELAY_URL/v0/offers/$OFFER_ID/resume" \
   -H "X-NBR-Body-SHA256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" \
   -H "X-NBR-Signature: <sig>"
 ```
-
-## Offer cancellation
 
 - Only the seller who owns the offer can cancel.
 - Cancellation is allowed when the offer is `ACTIVE` or `PAUSED`.
