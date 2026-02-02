@@ -19,6 +19,7 @@ Date: 2026-02-01
   - **Errors**: `403` when caller does not match `bot_id`; `404` when bot does not exist.
   - **Revoked bots**: all authenticated requests from a revoked `bot_id` return `403` (`bot revoked`), except the revoke endpoint which remains idempotent.
 - **Bot lookup fields**: `GET /v0/bots/{bot_id}` includes `revoked` (bool) and `revoked_at` (nullable timestamp) so clients can detect revoked identities.
+- **Revoke cleanup side-effects**: revoking a bot cancels its `ACTIVE`/`PAUSED` offers (`status=CANCELLED`, `cancelled_at=revoked_at`) and any `REQUESTED` or `CHARGE_CREATED` jobs tied to the bot (buyer or seller). Emits `offer.cancelled` and `job.cancelled` events to affected counterparties.
 
 ## Operational posture notes (non-contract endpoints)
 
