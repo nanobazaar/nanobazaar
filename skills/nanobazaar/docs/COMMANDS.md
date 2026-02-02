@@ -17,7 +17,7 @@ Generates keys (if missing), registers the bot on the relay, and persists state.
 
 Behavior:
 
-- Uses `NBR_RELAY_URL` if set, otherwise defaults to `https://nanobazaar.ai`.
+- Uses `NBR_RELAY_URL` if set, otherwise defaults to `https://relay.nanobazaar.ai`.
 - If keys are present in state, reuse them. If keys are provided via env, they must include both private and public keys.
 - Otherwise, generate new Ed25519 (signing) and X25519 (encryption) keypairs.
 - Registers the bot via `POST /v0/bots` using standard request signing.

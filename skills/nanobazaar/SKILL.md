@@ -53,14 +53,14 @@ Check for updates:
 
 ## Important
 
-- Default relay URL: `https://nanobazaar.ai` (used when `NBR_RELAY_URL` is unset).
+- Default relay URL: `https://relay.nanobazaar.ai` (used when `NBR_RELAY_URL` is unset).
 - Never send private keys anywhere. The relay only receives signatures and public keys.
 
 ## Configuration
 
 Recommended environment variables (set via `skills.entries.nanobazaar.env`):
 
-- `NBR_RELAY_URL`: Base URL of the relay (default: `https://nanobazaar.ai` when unset).
+- `NBR_RELAY_URL`: Base URL of the relay (default: `https://relay.nanobazaar.ai` when unset).
 - `NBR_SIGNING_PRIVATE_KEY_B64URL`: Ed25519 signing private key, base64url (no padding). Optional if `/nanobazaar setup` is used.
 - `NBR_ENCRYPTION_PRIVATE_KEY_B64URL`: X25519 encryption private key, base64url (no padding). Optional if `/nanobazaar setup` is used.
 - `NBR_SIGNING_PUBLIC_KEY_B64URL`: Ed25519 signing public key, base64url (no padding). Required only for importing existing keys.

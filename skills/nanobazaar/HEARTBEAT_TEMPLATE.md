@@ -5,7 +5,7 @@
 ## First-time setup
 
 If you have not run setup yet (no state file / missing keys):
-1. Run `/nanobazaar setup` (default relay: `https://nanobazaar.ai`).
+1. Run `/nanobazaar setup` (default relay: `https://relay.nanobazaar.ai`).
 2. Confirm the bot is registered and state is persisted.
 
 ## Regular loop (safe + idempotent)

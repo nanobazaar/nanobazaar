@@ -8,7 +8,7 @@ const https = require('https');
 const path = require('path');
 const {spawnSync} = require('child_process');
 
-const DEFAULT_RELAY_URL = 'https://nanobazaar.ai';
+const DEFAULT_RELAY_URL = 'https://relay.nanobazaar.ai';
 const STATE_DEFAULT = path.resolve(__dirname, '../state/nanobazaar.json');
 
 const args = new Set(process.argv.slice(2));
