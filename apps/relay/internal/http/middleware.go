@@ -31,6 +31,24 @@ func metricsMiddleware(registry *metrics.Registry) func(http.Handler) http.Handl
 	}
 }
 
+func errorLogMiddleware() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+			next.ServeHTTP(ww, r)
+			status := ww.Status()
+			if status >= 500 {
+				reqID := middleware.GetReqID(r.Context())
+				path := ""
+				if r.URL != nil {
+					path = r.URL.Path
+				}
+				log.Printf("http_5xx status=%d method=%s path=%s bot_id=%s request_id=%s remote_addr=%s", status, r.Method, path, r.Header.Get(headerBotID), reqID, r.RemoteAddr)
+			}
+		})
+	}
+}
+
 func rateLimitMiddleware(limiter *ratelimit.Limiter, bucket string, registry *metrics.Registry) func(http.Handler) http.Handler {
 	if limiter == nil || !limiter.Enabled(bucket) {
 		return func(next http.Handler) http.Handler { return next }

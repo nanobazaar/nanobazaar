@@ -34,6 +34,7 @@ func NewRouter(cfg RouterConfig, opts ...Option) http.Handler {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
+	r.Use(errorLogMiddleware())
 	r.Use(metricsMiddleware(cfg.Metrics))
 
 	bots := NewBotHandler(cfg.Store)
