@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+
+	"github.com/nanobazaar/relay/internal/domain"
 )
 
 const nanoRawDecimals = 30
@@ -24,7 +26,7 @@ func (s *Store) GetRelayStats(ctx context.Context) (RelayStats, error) {
 		return stats, fmt.Errorf("stats store unavailable")
 	}
 
-	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM offers`).Scan(&stats.Offers); err != nil {
+	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM offers WHERE status IN (?1, ?2)`, domain.OfferActive, domain.OfferPaused).Scan(&stats.Offers); err != nil {
 		return stats, err
 	}
 
