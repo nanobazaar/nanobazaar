@@ -192,6 +192,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.updateBotLastSeenStmt, err = db.PrepareContext(ctx, updateBotLastSeen); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateBotLastSeen: %w", err)
 	}
+	if q.updateBotRevokeStmt, err = db.PrepareContext(ctx, updateBotRevoke); err != nil {
+		return nil, fmt.Errorf("error preparing query UpdateBotRevoke: %w", err)
+	}
 	if q.updateJobCancelStmt, err = db.PrepareContext(ctx, updateJobCancel); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateJobCancel: %w", err)
 	}
@@ -507,6 +510,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing updateBotLastSeenStmt: %w", cerr)
 		}
 	}
+	if q.updateBotRevokeStmt != nil {
+		if cerr := q.updateBotRevokeStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing updateBotRevokeStmt: %w", cerr)
+		}
+	}
 	if q.updateJobCancelStmt != nil {
 		if cerr := q.updateJobCancelStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing updateJobCancelStmt: %w", cerr)
@@ -652,6 +660,7 @@ type Queries struct {
 	listPayloadMetadataUnfetchedAfterStmt     *sql.Stmt
 	markPayloadFetchedStmt                    *sql.Stmt
 	updateBotLastSeenStmt                     *sql.Stmt
+	updateBotRevokeStmt                       *sql.Stmt
 	updateJobCancelStmt                       *sql.Stmt
 	updateJobChargeStmt                       *sql.Stmt
 	updateJobDeliverStmt                      *sql.Stmt
@@ -724,6 +733,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listPayloadMetadataUnfetchedAfterStmt:     q.listPayloadMetadataUnfetchedAfterStmt,
 		markPayloadFetchedStmt:                    q.markPayloadFetchedStmt,
 		updateBotLastSeenStmt:                     q.updateBotLastSeenStmt,
+		updateBotRevokeStmt:                       q.updateBotRevokeStmt,
 		updateJobCancelStmt:                       q.updateJobCancelStmt,
 		updateJobChargeStmt:                       q.updateJobChargeStmt,
 		updateJobDeliverStmt:                      q.updateJobDeliverStmt,

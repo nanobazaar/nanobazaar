@@ -170,9 +170,9 @@ func (v *Verifier) verifyRequest(r *http.Request, bodyBytes []byte, bodyHash str
 		return &HTTPError{Status: http.StatusUnauthorized, Message: "stale timestamp"}
 	}
 
-	pubkey, err := v.resolveSigningKey(r, bodyBytes)
-	if err != nil {
-		return &HTTPError{Status: http.StatusUnauthorized, Message: "unknown bot"}
+	pubkey, authErr := v.resolveSigningKey(r, bodyBytes)
+	if authErr != nil {
+		return authErr
 	}
 
 	canonical := canonicalString(r.Method, canonicalPath(r), r.URL.RawQuery, timestamp, nonce, bodyHash)
@@ -201,22 +201,55 @@ func (v *Verifier) verifyRequest(r *http.Request, bodyBytes []byte, bodyHash str
 	return nil
 }
 
-func (v *Verifier) resolveSigningKey(r *http.Request, bodyBytes []byte) (ed25519.PublicKey, error) {
+func (v *Verifier) resolveSigningKey(r *http.Request, bodyBytes []byte) (ed25519.PublicKey, *HTTPError) {
 	if r.Method == http.MethodPost && r.URL.Path == "/v0/bots" {
 		var payload struct {
 			SigningPubkeyEd25519 string `json:"signing_pubkey_ed25519"`
 		}
 		if err := json.Unmarshal(bodyBytes, &payload); err != nil {
-			return nil, err
+			return nil, &HTTPError{Status: http.StatusUnauthorized, Message: "unknown bot"}
 		}
-		return decodePublicKey(payload.SigningPubkeyEd25519)
+		pub, err := decodePublicKey(payload.SigningPubkeyEd25519)
+		if err != nil {
+			return nil, &HTTPError{Status: http.StatusUnauthorized, Message: "unknown bot"}
+		}
+		if !isRevokeEndpoint(r) {
+			botID := r.Header.Get(headerBotID)
+			if botID != "" {
+				bot, err := v.Store.GetBot(r.Context(), botID)
+				switch {
+				case err == nil:
+					if bot.RevokedAt.Valid {
+						return nil, &HTTPError{Status: http.StatusForbidden, Message: "bot revoked"}
+					}
+				case errors.Is(err, sql.ErrNoRows):
+					// allow new registration
+				default:
+					return nil, &HTTPError{Status: http.StatusInternalServerError, Message: "bot lookup failed"}
+				}
+			}
+		}
+		return pub, nil
 	}
 
 	bot, err := v.Store.GetBot(r.Context(), r.Header.Get(headerBotID))
 	if err != nil {
-		return nil, err
+		if errors.Is(err, sql.ErrNoRows) {
+			if isRevokeEndpoint(r) {
+				return nil, &HTTPError{Status: http.StatusNotFound, Message: "bot not found"}
+			}
+			return nil, &HTTPError{Status: http.StatusUnauthorized, Message: "unknown bot"}
+		}
+		return nil, &HTTPError{Status: http.StatusInternalServerError, Message: "bot lookup failed"}
 	}
-	return decodePublicKey(bot.SigningPubkeyEd25519)
+	if bot.RevokedAt.Valid && !isRevokeEndpoint(r) {
+		return nil, &HTTPError{Status: http.StatusForbidden, Message: "bot revoked"}
+	}
+	pub, err := decodePublicKey(bot.SigningPubkeyEd25519)
+	if err != nil {
+		return nil, &HTTPError{Status: http.StatusUnauthorized, Message: "unknown bot"}
+	}
+	return pub, nil
 }
 
 func (v *Verifier) resolveIdempotencyKey(r *http.Request, bodyBytes []byte) (string, *HTTPError) {
@@ -292,6 +325,17 @@ func canonicalPath(r *http.Request) string {
 		path = "/"
 	}
 	return path
+}
+
+func isRevokeEndpoint(r *http.Request) bool {
+	if r == nil || r.URL == nil {
+		return false
+	}
+	if r.Method != http.MethodPost {
+		return false
+	}
+	path := r.URL.Path
+	return strings.HasPrefix(path, "/v0/bots/") && strings.HasSuffix(path, "/revoke")
 }
 
 func withinWindow(now, ts time.Time, window time.Duration) bool {

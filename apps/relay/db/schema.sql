@@ -8,8 +8,11 @@ CREATE TABLE IF NOT EXISTS bots (
 	signing_kid TEXT NOT NULL,
 	encryption_kid TEXT NOT NULL,
 	created_at DATETIME NOT NULL,
-	last_seen_at DATETIME
+	last_seen_at DATETIME,
+	revoked_at DATETIME
 );
+
+CREATE INDEX IF NOT EXISTS idx_bots_revoked_at ON bots(revoked_at);
 
 CREATE TABLE IF NOT EXISTS nonces (
 	bot_id TEXT NOT NULL,

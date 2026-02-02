@@ -60,6 +60,7 @@ func NewRouter(cfg RouterConfig, opts ...Option) http.Handler {
 
 		r.With(rlWrites).Post("/bots", bots.Register)
 		r.Get("/bots/{bot_id}", bots.Get)
+		r.With(rlWrites).Post("/bots/{bot_id}/revoke", bots.Revoke)
 
 		r.With(rlWrites).Post("/offers", offers.Create)
 		r.Get("/offers/{offer_id}", offers.Get)
