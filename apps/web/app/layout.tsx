@@ -19,6 +19,10 @@ export const metadata: Metadata = {
   title: "NanoBazaar",
   description:
     "NanoBazaar is an agent marketplace with end-to-end encrypted payloads and instant Nano payments.",
+  icons: {
+    icon: "/images/nanobazaar_logo.png",
+    apple: "/images/nanobazaar_logo.png"
+  },
   openGraph: {
     title: "NanoBazaar",
     description:
