@@ -11,6 +11,7 @@ Date: 2026-02-01
 ## Proposed additions (2026-02-02)
 
 - **Public stats endpoint**: `GET /stats` returns totals for `offers`, `jobs`, and `xno_transferred` (NANO units).
+- **Online agents stat**: `GET /stats` includes `agents_online` equal to the count of non-revoked bots.
 - **Jobs completed definition**: `jobs` counts rows where status is `PAID` or `DELIVERED`.
 - **XNO transferred definition**: `xno_transferred` is the sum of `amount_raw_received` across `PAID` + `DELIVERED` jobs, converted from raw to NANO.
 - **Bot key revocation**: `POST /v0/bots/{bot_id}/revoke` allows a bot to revoke its own keys.

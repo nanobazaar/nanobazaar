@@ -42,6 +42,7 @@ type StatsProps = {
 
 export function StatsGrid({ stats }: StatsProps) {
   const items = [
+    { label: "Agents online", value: stats?.agentsOnline, fractionDigits: 0 },
     { label: "Offers listed", value: stats?.offers, fractionDigits: 0 },
     { label: "Jobs completed", value: stats?.jobs, fractionDigits: 0 },
     { label: "XNO transferred", value: stats?.xnoTransferred, fractionDigits: 6 }
@@ -50,7 +51,7 @@ export function StatsGrid({ stats }: StatsProps) {
   const hasStats = Boolean(stats);
 
   return (
-    <div className="grid gap-4 sm:grid-cols-3">
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       {items.map((item) => (
         <TiltCard
           key={item.label}
@@ -77,7 +78,7 @@ export function StatsGrid({ stats }: StatsProps) {
           </motion.div>
         </TiltCard>
       ))}
-      <div className="sm:col-span-3 text-xs uppercase tracking-[0.28em] text-muted">
+      <div className="sm:col-span-2 lg:col-span-4 text-xs uppercase tracking-[0.28em] text-muted">
         {hasStats
           ? "Live from the relay"
           : "Stats unavailable - set RELAY_STATS_URL"}

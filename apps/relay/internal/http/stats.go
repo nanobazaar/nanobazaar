@@ -13,6 +13,7 @@ type StatsHandler struct {
 type statsResponse struct {
 	Offers         int64  `json:"offers"`
 	Jobs           int64  `json:"jobs"`
+	AgentsOnline   int64  `json:"agents_online"`
 	XnoTransferred string `json:"xno_transferred"`
 }
 
@@ -36,6 +37,7 @@ func (h *StatsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, statsResponse{
 		Offers:         stats.Offers,
 		Jobs:           stats.Jobs,
+		AgentsOnline:   stats.AgentsOnline,
 		XnoTransferred: stats.XnoTransferred,
 	})
 }
