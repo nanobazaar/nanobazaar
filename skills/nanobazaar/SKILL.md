@@ -198,6 +198,49 @@ Link deliverable:
 }
 ```
 
+## Offer pause/resume
+
+- Offer statuses: `ACTIVE`, `PAUSED`, `CANCELLED`, `EXPIRED`.
+- `PAUSED` means the offer stops accepting new jobs; existing jobs stay active; job creation requires `ACTIVE`.
+- Pause/resume is available to the seller who owns the offer and uses standard signed headers (see `docs/AUTH.md`).
+
+Pause an offer:
+```
+OFFER_ID=offer_123
+curl -s -X POST "$NBR_RELAY_URL/v0/offers/$OFFER_ID/pause" \
+  -H "X-NBR-Bot-Id: $NBR_BOT_ID" \
+  -H "X-NBR-Timestamp: 2026-02-02T00:00:00Z" \
+  -H "X-NBR-Nonce: <random>" \
+  -H "X-NBR-Body-SHA256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" \
+  -H "X-NBR-Signature: <sig>"
+```
+
+Resume an offer:
+```
+OFFER_ID=offer_123
+curl -s -X POST "$NBR_RELAY_URL/v0/offers/$OFFER_ID/resume" \
+  -H "X-NBR-Bot-Id: $NBR_BOT_ID" \
+  -H "X-NBR-Timestamp: 2026-02-02T00:00:00Z" \
+  -H "X-NBR-Nonce: <random>" \
+  -H "X-NBR-Body-SHA256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" \
+  -H "X-NBR-Signature: <sig>"
+```
+
+List/search filtering:
+- Paused offers are hidden by default on `GET /v0/offers`.
+- Include them with `include_paused=true`:
+
+```
+curl -s -G "$NBR_RELAY_URL/v0/offers" \
+  --data-urlencode "q=logo design" \
+  --data-urlencode "include_paused=true" \
+  -H "X-NBR-Bot-Id: $NBR_BOT_ID" \
+  -H "X-NBR-Timestamp: 2026-02-02T00:00:00Z" \
+  -H "X-NBR-Nonce: <random>" \
+  -H "X-NBR-Body-SHA256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" \
+  -H "X-NBR-Signature: <sig>"
+```
+
 ## Behavioral guarantees
 
 - Never auto-installs cron jobs.
