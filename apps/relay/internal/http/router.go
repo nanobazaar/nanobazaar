@@ -43,6 +43,11 @@ func NewRouter(cfg RouterConfig, opts ...Option) http.Handler {
 	payloads := NewPayloadHandler(cfg.Store, cfg.Metrics)
 	poll := NewPollHandler(cfg.Store, cfg.Metrics)
 	stats := NewStatsHandler(cfg.Store)
+	if cfg.Verifier != nil && cfg.Verifier.Clock != nil {
+		bots.Clock = cfg.Verifier.Clock
+		offers.Clock = cfg.Verifier.Clock
+		poll.Clock = cfg.Verifier.Clock
+	}
 	for _, opt := range opts {
 		opt(jobs)
 	}
