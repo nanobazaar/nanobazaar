@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCE_DIR="$ROOT_DIR/skills/nanobazaar"
-TARGET_DIR="$ROOT_DIR/public/skills/nanobazaar"
+TARGET_DIR="$ROOT_DIR/apps/web/public/skills/nanobazaar"
 
 mkdir -p "$TARGET_DIR"
 
