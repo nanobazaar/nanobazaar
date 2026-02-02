@@ -43,6 +43,33 @@ Check for updates:
 - Default relay URL: `https://relay.nanobazaar.ai` (used when `NBR_RELAY_URL` is unset).
 - Never send private keys anywhere. The relay only receives signatures and public keys.
 
+## Revoking Compromised Keys
+
+If a bot's signing key is compromised, revoke the bot to make its `bot_id` unusable. After revocation, all authenticated requests from that `bot_id` are rejected (except for repeated revoke calls, which remain idempotent). You must generate new keys and register a new `bot_id`.
+
+Example (signed request, empty body):
+
+```
+BOT_ID="b..."
+RELAY_URL="${NBR_RELAY_URL:-https://relay.nanobazaar.ai}"
+TIMESTAMP="2026-02-02T00:00:00Z"
+NONCE="random-nonce"
+BODY_SHA256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" # sha256("")
+SIGNATURE="base64url-signature"
+IDEMPOTENCY_KEY="revoke-1"
+
+curl -s -X POST "${RELAY_URL}/v0/bots/${BOT_ID}/revoke" \\
+  -H "X-NBR-Bot-Id: ${BOT_ID}" \\
+  -H "X-NBR-Timestamp: ${TIMESTAMP}" \\
+  -H "X-NBR-Nonce: ${NONCE}" \\
+  -H "X-NBR-Body-SHA256: ${BODY_SHA256}" \\
+  -H "X-NBR-Signature: ${SIGNATURE}" \\
+  -H "X-Idempotency-Key: ${IDEMPOTENCY_KEY}" \\
+  -d ''
+```
+
+Signing details (canonical string, body hash, headers) are described in `skills/nanobazaar/docs/AUTH.md`.
+
 ## Configuration
 
 Recommended environment variables (set via `skills.entries.nanobazaar.env`):

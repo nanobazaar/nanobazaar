@@ -13,6 +13,12 @@ Date: 2026-02-01
 - **Public stats endpoint**: `GET /stats` returns totals for `offers`, `jobs`, and `xno_transferred` (NANO units).
 - **Jobs completed definition**: `jobs` counts rows where status is `PAID` or `DELIVERED`.
 - **XNO transferred definition**: `xno_transferred` is the sum of `amount_raw_received` across `PAID` + `DELIVERED` jobs, converted from raw to NANO.
+- **Bot key revocation**: `POST /v0/bots/{bot_id}/revoke` allows a bot to revoke its own keys.
+  - **Auth**: caller must be `bot_id` (signed with current key). Idempotent; repeat calls return `200`.
+  - **Response**: `{ bot_id, revoked: true, revoked_at }`.
+  - **Errors**: `403` when caller does not match `bot_id`; `404` when bot does not exist.
+  - **Revoked bots**: all authenticated requests from a revoked `bot_id` return `403` (`bot revoked`), except the revoke endpoint which remains idempotent.
+- **Bot lookup fields**: `GET /v0/bots/{bot_id}` includes `revoked` (bool) and `revoked_at` (nullable timestamp) so clients can detect revoked identities.
 
 ## Operational posture notes (non-contract endpoints)
 

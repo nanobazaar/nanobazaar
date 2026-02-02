@@ -432,7 +432,7 @@ func (q *Queries) DeletePayloadsFetchedBefore(ctx context.Context, cutoff sql.Nu
 }
 
 const getBot = `-- name: GetBot :one
-SELECT bot_id, signing_pubkey_ed25519, encryption_pubkey_x25519, signing_kid, encryption_kid, created_at, last_seen_at FROM bots WHERE bot_id = ?1
+SELECT bot_id, signing_pubkey_ed25519, encryption_pubkey_x25519, signing_kid, encryption_kid, created_at, last_seen_at, revoked_at FROM bots WHERE bot_id = ?1
 `
 
 func (q *Queries) GetBot(ctx context.Context, botID string) (Bot, error) {
@@ -446,6 +446,7 @@ func (q *Queries) GetBot(ctx context.Context, botID string) (Bot, error) {
 		&i.EncryptionKid,
 		&i.CreatedAt,
 		&i.LastSeenAt,
+		&i.RevokedAt,
 	)
 	return i, err
 }
@@ -2639,6 +2640,34 @@ type UpdateBotLastSeenParams struct {
 func (q *Queries) UpdateBotLastSeen(ctx context.Context, arg UpdateBotLastSeenParams) error {
 	_, err := q.exec(ctx, q.updateBotLastSeenStmt, updateBotLastSeen, arg.LastSeenAt, arg.BotID)
 	return err
+}
+
+const updateBotRevoke = `-- name: UpdateBotRevoke :one
+UPDATE bots
+SET revoked_at = COALESCE(revoked_at, ?1)
+WHERE bot_id = ?2
+RETURNING bot_id, signing_pubkey_ed25519, encryption_pubkey_x25519, signing_kid, encryption_kid, created_at, last_seen_at, revoked_at
+`
+
+type UpdateBotRevokeParams struct {
+	RevokedAt sql.NullTime `json:"revoked_at"`
+	BotID     string       `json:"bot_id"`
+}
+
+func (q *Queries) UpdateBotRevoke(ctx context.Context, arg UpdateBotRevokeParams) (Bot, error) {
+	row := q.queryRow(ctx, q.updateBotRevokeStmt, updateBotRevoke, arg.RevokedAt, arg.BotID)
+	var i Bot
+	err := row.Scan(
+		&i.BotID,
+		&i.SigningPubkeyEd25519,
+		&i.EncryptionPubkeyX25519,
+		&i.SigningKid,
+		&i.EncryptionKid,
+		&i.CreatedAt,
+		&i.LastSeenAt,
+		&i.RevokedAt,
+	)
+	return i, err
 }
 
 const updateJobCancel = `-- name: UpdateJobCancel :exec

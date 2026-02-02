@@ -27,6 +27,7 @@ type BotStore interface {
 	CreateBot(ctx context.Context, arg sqlc.CreateBotParams) error
 	GetBot(ctx context.Context, botID string) (sqlc.Bot, error)
 	UpdateBotLastSeen(ctx context.Context, arg sqlc.UpdateBotLastSeenParams) error
+	UpdateBotRevoke(ctx context.Context, arg sqlc.UpdateBotRevokeParams) (sqlc.Bot, error)
 }
 
 type BotHandler struct {
@@ -56,6 +57,14 @@ type botResponse struct {
 	EncryptionKid          string     `json:"encryption_kid"`
 	CreatedAt              time.Time  `json:"created_at"`
 	LastSeenAt             *time.Time `json:"last_seen_at,omitempty"`
+	Revoked                bool       `json:"revoked"`
+	RevokedAt              *time.Time `json:"revoked_at,omitempty"`
+}
+
+type botRevokeResponse struct {
+	BotID     string    `json:"bot_id"`
+	Revoked   bool      `json:"revoked"`
+	RevokedAt time.Time `json:"revoked_at"`
 }
 
 func (h *BotHandler) Register(w http.ResponseWriter, r *http.Request) {
@@ -188,6 +197,50 @@ func (h *BotHandler) Get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, botToResponse(bot))
 }
 
+func (h *BotHandler) Revoke(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.Store == nil {
+		writeJSONError(w, http.StatusInternalServerError, "store unavailable")
+		return
+	}
+	botID := chi.URLParam(r, "bot_id")
+	if botID == "" {
+		writeJSONError(w, http.StatusBadRequest, "missing bot_id")
+		return
+	}
+	caller := r.Header.Get(headerBotID)
+	if caller == "" {
+		writeJSONError(w, http.StatusUnauthorized, "missing bot_id")
+		return
+	}
+	if caller != botID {
+		writeJSONError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+
+	now := h.now()
+	updated, err := h.Store.UpdateBotRevoke(r.Context(), sqlc.UpdateBotRevokeParams{
+		BotID:     botID,
+		RevokedAt: sql.NullTime{Time: now, Valid: true},
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSONError(w, http.StatusNotFound, "bot not found")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "bot revoke failed")
+		return
+	}
+	if !updated.RevokedAt.Valid {
+		writeJSONError(w, http.StatusInternalServerError, "bot revoke failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, botRevokeResponse{
+		BotID:     updated.BotID,
+		Revoked:   true,
+		RevokedAt: updated.RevokedAt.Time,
+	})
+}
+
 func (h *BotHandler) now() time.Time {
 	if h.Clock == nil {
 		return time.Now()
@@ -235,6 +288,13 @@ func botToResponse(bot sqlc.Bot) botResponse {
 		t := bot.LastSeenAt.Time
 		lastSeen = &t
 	}
+	var revokedAt *time.Time
+	revoked := false
+	if bot.RevokedAt.Valid {
+		t := bot.RevokedAt.Time
+		revokedAt = &t
+		revoked = true
+	}
 	return botResponse{
 		BotID:                  bot.BotID,
 		SigningPubkeyEd25519:   bot.SigningPubkeyEd25519,
@@ -243,6 +303,8 @@ func botToResponse(bot sqlc.Bot) botResponse {
 		EncryptionKid:          bot.EncryptionKid,
 		CreatedAt:              bot.CreatedAt,
 		LastSeenAt:             lastSeen,
+		Revoked:                revoked,
+		RevokedAt:              revokedAt,
 	}
 }
 

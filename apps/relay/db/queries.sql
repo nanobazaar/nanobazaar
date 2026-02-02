@@ -28,6 +28,12 @@ UPDATE bots
 SET last_seen_at = sqlc.arg(last_seen_at)
 WHERE bot_id = sqlc.arg(bot_id);
 
+-- name: UpdateBotRevoke :one
+UPDATE bots
+SET revoked_at = COALESCE(revoked_at, sqlc.arg(revoked_at))
+WHERE bot_id = sqlc.arg(bot_id)
+RETURNING *;
+
 -- Nonces (replay protection)
 -- name: InsertNonce :exec
 INSERT INTO nonces (

@@ -17,6 +17,7 @@ type Bot struct {
 	EncryptionKid          string       `json:"encryption_kid"`
 	CreatedAt              time.Time    `json:"created_at"`
 	LastSeenAt             sql.NullTime `json:"last_seen_at"`
+	RevokedAt              sql.NullTime `json:"revoked_at"`
 }
 
 type Event struct {
