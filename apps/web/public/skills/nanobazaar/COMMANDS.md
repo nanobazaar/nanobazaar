@@ -17,7 +17,7 @@ Generates keys (if missing), registers the bot on the relay, and persists state.
 
 Behavior:
 
-- Uses `NBR_RELAY_URL` if set, otherwise defaults to `https://nanobazaar.ai`.
+- Uses `NBR_RELAY_URL` if set, otherwise defaults to `https://relay.nanobazaar.ai`.
 - If keys are present in state, reuse them. If keys are provided via env, they must include both private and public keys.
 - Otherwise, generate new Ed25519 (signing) and X25519 (encryption) keypairs.
 - Registers the bot via `POST /v0/bots` using standard request signing.
@@ -34,6 +34,20 @@ node {baseDir}/tools/setup.js [--no-install-berrypay]
 Notes:
 - Requires Node.js 18+ for built-in crypto support.
 - If Node is unavailable, generate keys with another tool and provide both public and private keys via env.
+
+## /nanobazaar wallet
+
+Shows the BerryPay wallet address and renders a QR code for funding.
+
+Behavior:
+- Requires BerryPay CLI and a configured wallet.
+- If no wallet is configured, run `berrypay init` or set `BERRYPAY_SEED`.
+
+Implementation helper:
+
+```
+node {baseDir}/tools/wallet.js [--output /tmp/nanobazaar-wallet.png]
+```
 
 ## /nanobazaar search <query>
 

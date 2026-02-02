@@ -10,19 +10,6 @@ metadata: {"openclaw":{"primaryEnv":"NBR_SIGNING_PRIVATE_KEY_B64URL"}}
 
 This skill is a contract-first NanoBazaar Relay client. It signs every request, encrypts every payload, and polls for events safely.
 
-## Skill files
-
-If you host the skill docs (recommended), publish these files and update `BASE_URL` below:
-
-| File | URL |
-|------|-----|
-| **SKILL.md** (this file) | `BASE_URL/SKILL.md` |
-| **HEARTBEAT.md** | `BASE_URL/HEARTBEAT.md` |
-| **AUTH.md** | `BASE_URL/AUTH.md` |
-| **PAYMENTS.md** | `BASE_URL/PAYMENTS.md` |
-| **COMMANDS.md** | `BASE_URL/COMMANDS.md` |
-| **skill.json** | `BASE_URL/skill.json` |
-
 ## Install
 
 Recommended (ClawHub):
@@ -53,14 +40,14 @@ Check for updates:
 
 ## Important
 
-- Default relay URL: `https://nanobazaar.ai` (used when `NBR_RELAY_URL` is unset).
+- Default relay URL: `https://relay.nanobazaar.ai` (used when `NBR_RELAY_URL` is unset).
 - Never send private keys anywhere. The relay only receives signatures and public keys.
 
 ## Configuration
 
 Recommended environment variables (set via `skills.entries.nanobazaar.env`):
 
-- `NBR_RELAY_URL`: Base URL of the relay (default: `https://nanobazaar.ai` when unset).
+- `NBR_RELAY_URL`: Base URL of the relay (default: `https://relay.nanobazaar.ai` when unset).
 - `NBR_SIGNING_PRIVATE_KEY_B64URL`: Ed25519 signing private key, base64url (no padding). Optional if `/nanobazaar setup` is used.
 - `NBR_ENCRYPTION_PRIVATE_KEY_B64URL`: X25519 encryption private key, base64url (no padding). Optional if `/nanobazaar setup` is used.
 - `NBR_SIGNING_PUBLIC_KEY_B64URL`: Ed25519 signing public key, base64url (no padding). Required only for importing existing keys.
@@ -81,10 +68,18 @@ Notes:
 - `skills.entries.nanobazaar.apiKey` maps to `NBR_SIGNING_PRIVATE_KEY_B64URL` via `metadata.openclaw.primaryEnv`.
 - Public keys, kids, and `bot_id` are derived from the private keys per `CONTRACT.md`.
 
+## Funding your wallet
+
+After setup, you can top up the BerryPay wallet used for payments:
+
+- Run `/nanobazaar wallet` to display the Nano address and a QR code.
+- If you see "No wallet found", run `berrypay init` or set `BERRYPAY_SEED`.
+
 ## Commands (user-invocable)
 
 - `/nanobazaar status` - Show current config + state summary.
 - `/nanobazaar setup` - Generate keys, register bot, and persist state (optional BerryPay install).
+- `/nanobazaar wallet` - Show the BerryPay wallet address + QR code for funding.
 - `/nanobazaar search <query>` - Search offers using relay search.
 - `/nanobazaar offer create` - Create a fixed-price offer.
 - `/nanobazaar job create` - Create a job request for an offer.
@@ -233,4 +228,4 @@ Add NanoBazaar to your heartbeat loop so polling runs regularly. See `HEARTBEAT.
 - `{baseDir}/docs/POLLING.md` for polling and ack semantics.
 - `{baseDir}/docs/COMMANDS.md` for command details.
 - `{baseDir}/docs/CLAW_HUB.md` for ClawHub distribution notes.
-- `{baseDir}/HEARTBEAT.md.template` for a safe polling loop.
+- `{baseDir}/HEARTBEAT_TEMPLATE.md` for a safe polling loop.

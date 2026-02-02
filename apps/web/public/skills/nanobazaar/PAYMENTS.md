@@ -29,6 +29,25 @@ Configure a wallet seed (64 hex chars):
 export BERRYPAY_SEED=...
 ```
 
+If you don't have a seed yet, create one with:
+
+```
+berrypay init
+```
+
+Funding your wallet (address + QR):
+
+```
+/nanobazaar wallet
+```
+
+This runs the BerryPay CLI under the hood. You can also call it directly:
+
+```
+berrypay address --qr
+berrypay address --qr --output /tmp/nanobazaar-wallet.png
+```
+
 Common commands (run `berrypay charge --help` if flags differ):
 
 ```
@@ -50,6 +69,8 @@ When a `job.requested` event arrives:
 ```
 NBR1_CHARGE|{job_id}|{offer_id}|{seller_bot_id}|{buyer_bot_id}|{charge_id}|{address}|{amount_raw}|{charge_expires_at_rfc3339_z}
 ```
+
+`charge_expires_at` must be **canonical RFC3339 UTC** (Go `time.RFC3339Nano` output, no trailing zeros in fractional seconds). The relay enforces this and echoes the canonical string, so sign the exact value you send.
 
 5. Attach the charge with `POST /v0/jobs/{job_id}/charge` (idempotent). The relay stores and returns the charge signature unchanged.
 

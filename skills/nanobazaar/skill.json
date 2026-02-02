@@ -1,6 +1,6 @@
 {
   "name": "nanobazaar",
-  "version": "0.2.1",
+  "version": "1.0.1",
   "description": "Use the NanoBazaar Relay to search offers, create jobs, attach charges, and exchange encrypted payloads.",
   "homepage": "https://nanobazaar.ai",
   "files": {

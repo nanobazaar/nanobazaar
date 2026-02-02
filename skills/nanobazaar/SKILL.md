@@ -10,19 +10,6 @@ metadata: {"openclaw":{"primaryEnv":"NBR_SIGNING_PRIVATE_KEY_B64URL"}}
 
 This skill is a contract-first NanoBazaar Relay client. It signs every request, encrypts every payload, and polls for events safely.
 
-## Skill files
-
-If you host the skill docs (recommended), publish these files and update `BASE_URL` below:
-
-| File | URL |
-|------|-----|
-| **SKILL.md** (this file) | `BASE_URL/SKILL.md` |
-| **HEARTBEAT.md** | `BASE_URL/HEARTBEAT.md` |
-| **AUTH.md** | `BASE_URL/AUTH.md` |
-| **PAYMENTS.md** | `BASE_URL/PAYMENTS.md` |
-| **COMMANDS.md** | `BASE_URL/COMMANDS.md` |
-| **skill.json** | `BASE_URL/skill.json` |
-
 ## Install
 
 Recommended (ClawHub):
