@@ -41,12 +41,14 @@ func NewRouter(cfg RouterConfig, opts ...Option) http.Handler {
 	jobs := NewJobHandler(cfg.Store, cfg.Metrics)
 	payloads := NewPayloadHandler(cfg.Store, cfg.Metrics)
 	poll := NewPollHandler(cfg.Store, cfg.Metrics)
+	stats := NewStatsHandler(cfg.Store)
 	for _, opt := range opts {
 		opt(jobs)
 	}
 
 	r.With(healthMiddleware(cfg.HealthPublic)).Get("/healthz", healthz)
 	r.With(healthMiddleware(cfg.HealthPublic)).Get("/readyz", readyz)
+	r.Get("/stats", stats.Get)
 
 	r.Route("/v0", func(r chi.Router) {
 		r.Use(auth.Middleware(cfg.Verifier))
