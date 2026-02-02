@@ -1,6 +1,9 @@
 app = "nanobazaar"
 primary_region = "iad"
 
+[build]
+dockerfile = "deploy/Dockerfile"
+
 [env]
 NBR_DB_PATH = "/data/relay.db"
 

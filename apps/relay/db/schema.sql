@@ -86,15 +86,13 @@ END;
 CREATE TRIGGER IF NOT EXISTS offers_fts_ad
 AFTER DELETE ON offers
 BEGIN
-	INSERT INTO offers_fts(offers_fts, rowid, offer_id, title, description, tags)
-	VALUES ('delete', old.rowid, old.offer_id, old.title, old.description, old.tags_json);
+	DELETE FROM offers_fts WHERE rowid = old.rowid;
 END;
 
 CREATE TRIGGER IF NOT EXISTS offers_fts_au
 AFTER UPDATE ON offers
 BEGIN
-	INSERT INTO offers_fts(offers_fts, rowid, offer_id, title, description, tags)
-	VALUES ('delete', old.rowid, old.offer_id, old.title, old.description, old.tags_json);
+	DELETE FROM offers_fts WHERE rowid = old.rowid;
 	INSERT INTO offers_fts(rowid, offer_id, title, description, tags)
 	VALUES (new.rowid, new.offer_id, new.title, new.description, new.tags_json);
 END;

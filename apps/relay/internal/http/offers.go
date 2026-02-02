@@ -658,9 +658,10 @@ func (h *OfferHandler) loadOfferEntries(ctx context.Context, sellerBotID, query 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
 	entries := make([]offerEntry, 0)
+	expiredOffers := make([]string, 0)
+	now := h.now()
 	for rows.Next() {
 		var offer sqlc.Offer
 		var purchaseCount int64
@@ -682,8 +683,8 @@ func (h *OfferHandler) loadOfferEntries(ctx context.Context, sellerBotID, query 
 			return nil, err
 		}
 
-		if err := h.expireOfferIfNeeded(ctx, &offer); err != nil {
-			return nil, err
+		if h.markOfferExpired(now, &offer) {
+			expiredOffers = append(expiredOffers, offer.OfferID)
 		}
 		if !offerStatusVisible(offer.Status, includePaused) {
 			continue
@@ -707,6 +708,13 @@ func (h *OfferHandler) loadOfferEntries(ctx context.Context, sellerBotID, query 
 		})
 	}
 	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := h.persistExpiredOffers(ctx, expiredOffers); err != nil {
 		return nil, err
 	}
 	return entries, nil
@@ -720,9 +728,10 @@ func (h *OfferHandler) loadOfferEntriesSearch(ctx context.Context, sellerBotID, 
 		}
 		return nil, err
 	}
-	defer rows.Close()
 
 	entries := make([]offerEntry, 0)
+	expiredOffers := make([]string, 0)
+	now := h.now()
 	for rows.Next() {
 		var offer sqlc.Offer
 		var purchaseCount int64
@@ -746,8 +755,8 @@ func (h *OfferHandler) loadOfferEntriesSearch(ctx context.Context, sellerBotID, 
 			return nil, err
 		}
 
-		if err := h.expireOfferIfNeeded(ctx, &offer); err != nil {
-			return nil, err
+		if h.markOfferExpired(now, &offer) {
+			expiredOffers = append(expiredOffers, offer.OfferID)
 		}
 		if !offerStatusVisible(offer.Status, includePaused) {
 			continue
@@ -771,6 +780,13 @@ func (h *OfferHandler) loadOfferEntriesSearch(ctx context.Context, sellerBotID, 
 		})
 	}
 	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := h.persistExpiredOffers(ctx, expiredOffers); err != nil {
 		return nil, err
 	}
 	return entries, nil
@@ -781,9 +797,10 @@ func (h *OfferHandler) loadOfferEntriesSearchFallback(ctx context.Context, selle
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
 	entries := make([]offerEntry, 0)
+	expiredOffers := make([]string, 0)
+	now := h.now()
 	for rows.Next() {
 		var offer sqlc.Offer
 		var purchaseCount int64
@@ -805,8 +822,8 @@ func (h *OfferHandler) loadOfferEntriesSearchFallback(ctx context.Context, selle
 			return nil, err
 		}
 
-		if err := h.expireOfferIfNeeded(ctx, &offer); err != nil {
-			return nil, err
+		if h.markOfferExpired(now, &offer) {
+			expiredOffers = append(expiredOffers, offer.OfferID)
 		}
 		if !offerStatusVisible(offer.Status, includePaused) {
 			continue
@@ -835,6 +852,13 @@ func (h *OfferHandler) loadOfferEntriesSearchFallback(ctx context.Context, selle
 		})
 	}
 	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := h.persistExpiredOffers(ctx, expiredOffers); err != nil {
 		return nil, err
 	}
 	return entries, nil
@@ -850,17 +874,31 @@ func (h *OfferHandler) loadOfferTags(ctx context.Context, offer sqlc.Offer) ([]s
 	return h.Store.ListOfferTags(ctx, offer.OfferID)
 }
 
-func (h *OfferHandler) expireOfferIfNeeded(ctx context.Context, offer *sqlc.Offer) error {
+func (h *OfferHandler) markOfferExpired(now time.Time, offer *sqlc.Offer) bool {
 	if offer.Status != string(domain.OfferActive) && offer.Status != string(domain.OfferPaused) {
-		return nil
+		return false
 	}
-	if offer.ExpiresAt.Valid && h.now().After(offer.ExpiresAt.Time) {
-		if err := h.Store.UpdateOfferExpire(ctx, offer.OfferID); err != nil {
+	if offer.ExpiresAt.Valid && now.After(offer.ExpiresAt.Time) {
+		offer.Status = string(domain.OfferExpired)
+		return true
+	}
+	return false
+}
+
+func (h *OfferHandler) persistExpiredOffers(ctx context.Context, expired []string) error {
+	for _, offerID := range expired {
+		if err := h.Store.UpdateOfferExpire(ctx, offerID); err != nil {
 			return err
 		}
-		offer.Status = string(domain.OfferExpired)
 	}
 	return nil
+}
+
+func (h *OfferHandler) expireOfferIfNeeded(ctx context.Context, offer *sqlc.Offer) error {
+	if !h.markOfferExpired(h.now(), offer) {
+		return nil
+	}
+	return h.persistExpiredOffers(ctx, []string{offer.OfferID})
 }
 
 func (h *OfferHandler) now() time.Time {
