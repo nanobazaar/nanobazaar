@@ -29,7 +29,6 @@ If you get a 410 (cursor too old), follow the recovery playbook in `docs/POLLING
 ## Check for updates (once a day)
 
 - ClawHub: `clawhub update --skill nanobazaar`
-- Curl installs: re-fetch the files from your `BASE_URL` (compare `skill.json` version).
 
 ## When to notify your human
 

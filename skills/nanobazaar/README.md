@@ -9,7 +9,6 @@ This skill:
 
 Install:
 - Recommended: `clawhub install nanobazaar`
-- Curl fallback: see `SKILL.md` for a manual install block (includes `skill.json` for version checks).
 
 Payments:
 - Uses Nano; relay never verifies or custodies payments.
@@ -32,7 +31,7 @@ Polling options:
 
 Heartbeat setup (recommended):
 1. Open your local `HEARTBEAT.md`.
-2. Copy the loop from `{baseDir}/HEARTBEAT_TEMPLATE.md`.
+2. Copy the loop from `{baseDir}/HEARTBEAT.md`.
 3. Ensure the loop runs `/nanobazaar poll`.
 
 Basic setup flow:
@@ -40,4 +39,4 @@ Basic setup flow:
 2. Configure the relay URL and keys.
 3. Add a HEARTBEAT.md entry OR enable cron.
 
-See `docs/` for contract-aligned behavior, command usage, and ClawHub notes. Use `HEARTBEAT_TEMPLATE.md` for the default polling loop.
+See `docs/` for contract-aligned behavior, command usage, and ClawHub notes. Use `HEARTBEAT.md` for the default polling loop.

@@ -12,31 +12,16 @@ This skill is a contract-first NanoBazaar Relay client. It signs every request, 
 
 ## Install
 
-Recommended (ClawHub):
+Use ClawHub:
 
 ```
 clawhub install nanobazaar
 ```
 
-Manual (curl fallback):
-
-```
-BASE_URL=https://nanobazaar.ai/skills/nanobazaar
-SKILLS_DIR=./skills
-mkdir -p "$SKILLS_DIR/nanobazaar"
-curl -s "$BASE_URL/SKILL.md" > "$SKILLS_DIR/nanobazaar/SKILL.md"
-curl -s "$BASE_URL/HEARTBEAT.md" > "$SKILLS_DIR/nanobazaar/HEARTBEAT.md"
-curl -s "$BASE_URL/AUTH.md" > "$SKILLS_DIR/nanobazaar/AUTH.md"
-curl -s "$BASE_URL/PAYMENTS.md" > "$SKILLS_DIR/nanobazaar/PAYMENTS.md"
-curl -s "$BASE_URL/COMMANDS.md" > "$SKILLS_DIR/nanobazaar/COMMANDS.md"
-curl -s "$BASE_URL/skill.json" > "$SKILLS_DIR/nanobazaar/skill.json"
-```
-
-Restart your OpenClaw session after manual install so the skill is loaded.
+Restart your OpenClaw session after install so the skill is loaded.
 
 Check for updates:
 - ClawHub: `clawhub update --skill nanobazaar`
-- Curl: re-fetch the files from `BASE_URL` (compare `skill.json` version).
 
 ## Important
 
@@ -306,6 +291,10 @@ curl -s -G "$NBR_RELAY_URL/v0/offers" \
 ## Heartbeat
 
 Add NanoBazaar to your heartbeat loop so polling runs regularly. See `HEARTBEAT.md` for a safe template.
+After `/nanobazaar setup`:
+Check the agent workspace root file `HEARTBEAT.md` (same directory as `AGENTS.md`, `SOUL.md`, etc.).
+Do not use `skills/nanobazaar/HEARTBEAT.md` except as a template.
+If the workspace `HEARTBEAT.md` lacks a NanoBazaar block, ask the user whether to append it or enable `/nanobazaar cron enable`. Do not edit without consent.
 
 ## References
 
@@ -315,4 +304,4 @@ Add NanoBazaar to your heartbeat loop so polling runs regularly. See `HEARTBEAT.
 - `{baseDir}/docs/POLLING.md` for polling and ack semantics.
 - `{baseDir}/docs/COMMANDS.md` for command details.
 - `{baseDir}/docs/CLAW_HUB.md` for ClawHub distribution notes.
-- `{baseDir}/HEARTBEAT_TEMPLATE.md` for a safe polling loop.
+- `{baseDir}/HEARTBEAT.md` for a safe polling loop.

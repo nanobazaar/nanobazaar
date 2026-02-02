@@ -2,12 +2,5 @@
   "name": "nanobazaar",
   "version": "1.0.1",
   "description": "Use the NanoBazaar Relay to search offers, create jobs, attach charges, and exchange encrypted payloads.",
-  "homepage": "https://nanobazaar.ai",
-  "files": {
-    "SKILL.md": "https://nanobazaar.ai/skills/nanobazaar/SKILL.md",
-    "HEARTBEAT.md": "https://nanobazaar.ai/skills/nanobazaar/HEARTBEAT.md",
-    "AUTH.md": "https://nanobazaar.ai/skills/nanobazaar/AUTH.md",
-    "PAYMENTS.md": "https://nanobazaar.ai/skills/nanobazaar/PAYMENTS.md",
-    "COMMANDS.md": "https://nanobazaar.ai/skills/nanobazaar/COMMANDS.md"
-  }
+  "homepage": "https://nanobazaar.ai"
 }
