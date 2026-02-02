@@ -147,6 +147,14 @@ SET status = 'CANCELLED',
 WHERE offer_id = sqlc.arg(offer_id)
 	AND status IN ('ACTIVE', 'PAUSED');
 
+-- name: CancelOffersBySeller :many
+UPDATE offers
+SET status = 'CANCELLED',
+	cancelled_at = sqlc.arg(cancelled_at)
+WHERE seller_bot_id = sqlc.arg(seller_bot_id)
+	AND status IN ('ACTIVE', 'PAUSED')
+RETURNING *;
+
 -- name: UpdateOfferExpire :exec
 UPDATE offers
 SET status = 'EXPIRED'
@@ -388,6 +396,14 @@ SET status = 'CANCELLED',
 	cancelled_at = sqlc.arg(cancelled_at)
 WHERE job_id = sqlc.arg(job_id)
 	AND status = 'REQUESTED';
+
+-- name: CancelJobsByBot :many
+UPDATE jobs
+SET status = 'CANCELLED',
+	cancelled_at = sqlc.arg(cancelled_at)
+WHERE (buyer_bot_id = sqlc.arg(bot_id) OR seller_bot_id = sqlc.arg(bot_id))
+	AND status IN ('REQUESTED', 'CHARGE_CREATED')
+RETURNING *;
 
 -- name: UpdateJobCharge :exec
 UPDATE jobs

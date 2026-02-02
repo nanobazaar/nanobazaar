@@ -24,6 +24,12 @@ func New(db DBTX) *Queries {
 func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	q := Queries{db: db}
 	var err error
+	if q.cancelJobsByBotStmt, err = db.PrepareContext(ctx, cancelJobsByBot); err != nil {
+		return nil, fmt.Errorf("error preparing query CancelJobsByBot: %w", err)
+	}
+	if q.cancelOffersBySellerStmt, err = db.PrepareContext(ctx, cancelOffersBySeller); err != nil {
+		return nil, fmt.Errorf("error preparing query CancelOffersBySeller: %w", err)
+	}
 	if q.countActiveJobsByChargeAddressStmt, err = db.PrepareContext(ctx, countActiveJobsByChargeAddress); err != nil {
 		return nil, fmt.Errorf("error preparing query CountActiveJobsByChargeAddress: %w", err)
 	}
@@ -230,6 +236,16 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 
 func (q *Queries) Close() error {
 	var err error
+	if q.cancelJobsByBotStmt != nil {
+		if cerr := q.cancelJobsByBotStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing cancelJobsByBotStmt: %w", cerr)
+		}
+	}
+	if q.cancelOffersBySellerStmt != nil {
+		if cerr := q.cancelOffersBySellerStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing cancelOffersBySellerStmt: %w", cerr)
+		}
+	}
 	if q.countActiveJobsByChargeAddressStmt != nil {
 		if cerr := q.countActiveJobsByChargeAddressStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing countActiveJobsByChargeAddressStmt: %w", cerr)
@@ -604,6 +620,8 @@ func (q *Queries) queryRow(ctx context.Context, stmt *sql.Stmt, query string, ar
 type Queries struct {
 	db                                        DBTX
 	tx                                        *sql.Tx
+	cancelJobsByBotStmt                       *sql.Stmt
+	cancelOffersBySellerStmt                  *sql.Stmt
 	countActiveJobsByChargeAddressStmt        *sql.Stmt
 	countNonceStmt                            *sql.Stmt
 	createBotStmt                             *sql.Stmt
@@ -677,6 +695,8 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 	return &Queries{
 		db:                                        tx,
 		tx:                                        tx,
+		cancelJobsByBotStmt:                       q.cancelJobsByBotStmt,
+		cancelOffersBySellerStmt:                  q.cancelOffersBySellerStmt,
 		countActiveJobsByChargeAddressStmt:        q.countActiveJobsByChargeAddressStmt,
 		countNonceStmt:                            q.countNonceStmt,
 		createBotStmt:                             q.createBotStmt,

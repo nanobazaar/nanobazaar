@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"database/sql"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/nanobazaar/relay/internal/store"
 	"github.com/nanobazaar/relay/internal/store/sqlc"
 )
 
@@ -23,19 +23,12 @@ const headerBotID = "X-NBR-Bot-Id"
 
 var base32LowerNoPad = base32.NewEncoding("abcdefghijklmnopqrstuvwxyz234567").WithPadding(base32.NoPadding)
 
-type BotStore interface {
-	CreateBot(ctx context.Context, arg sqlc.CreateBotParams) error
-	GetBot(ctx context.Context, botID string) (sqlc.Bot, error)
-	UpdateBotLastSeen(ctx context.Context, arg sqlc.UpdateBotLastSeenParams) error
-	UpdateBotRevoke(ctx context.Context, arg sqlc.UpdateBotRevokeParams) (sqlc.Bot, error)
-}
-
 type BotHandler struct {
-	Store BotStore
+	Store *store.Store
 	Clock func() time.Time
 }
 
-func NewBotHandler(store BotStore) *BotHandler {
+func NewBotHandler(store *store.Store) *BotHandler {
 	return &BotHandler{
 		Store: store,
 		Clock: time.Now,
@@ -218,7 +211,18 @@ func (h *BotHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := h.now()
-	updated, err := h.Store.UpdateBotRevoke(r.Context(), sqlc.UpdateBotRevokeParams{
+	ctx := r.Context()
+	tx, err := h.Store.DB.BeginTx(ctx, nil)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "bot revoke failed")
+		return
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+	qtx := sqlc.New(tx)
+
+	updated, err := qtx.UpdateBotRevoke(ctx, sqlc.UpdateBotRevokeParams{
 		BotID:     botID,
 		RevokedAt: sql.NullTime{Time: now, Valid: true},
 	})
@@ -234,10 +238,62 @@ func (h *BotHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "bot revoke failed")
 		return
 	}
+
+	revokedAt := updated.RevokedAt.Time
+	cancelledAt := sql.NullTime{Time: revokedAt, Valid: true}
+
+	offers, err := qtx.CancelOffersBySeller(ctx, sqlc.CancelOffersBySellerParams{
+		SellerBotID: botID,
+		CancelledAt: cancelledAt,
+	})
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "bot revoke failed")
+		return
+	}
+	for _, offer := range offers {
+		if err := emitEventTx(ctx, qtx, offer.SellerBotID, offerCancelledEventType, map[string]any{
+			"offer_id":     offer.OfferID,
+			"cancelled_at": revokedAt.UTC().Format(time.RFC3339Nano),
+		}); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "event create failed")
+			return
+		}
+	}
+
+	jobs, err := qtx.CancelJobsByBot(ctx, sqlc.CancelJobsByBotParams{
+		BotID:       botID,
+		CancelledAt: cancelledAt,
+	})
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "bot revoke failed")
+		return
+	}
+	for _, job := range jobs {
+		payload := map[string]any{
+			"job_id":       job.JobID,
+			"cancelled_at": revokedAt.UTC().Format(time.RFC3339Nano),
+		}
+		recipients := []string{job.BuyerBotID, job.SellerBotID}
+		if job.BuyerBotID == job.SellerBotID {
+			recipients = []string{job.BuyerBotID}
+		}
+		for _, recipient := range recipients {
+			if err := emitEventTx(ctx, qtx, recipient, jobCancelledEventType, payload); err != nil {
+				writeJSONError(w, http.StatusInternalServerError, "event create failed")
+				return
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "bot revoke failed")
+		return
+	}
+
 	writeJSON(w, http.StatusOK, botRevokeResponse{
 		BotID:     updated.BotID,
 		Revoked:   true,
-		RevokedAt: updated.RevokedAt.Time,
+		RevokedAt: revokedAt,
 	})
 }
 

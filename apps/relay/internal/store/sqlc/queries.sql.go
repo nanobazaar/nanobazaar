@@ -12,6 +12,117 @@ import (
 	"time"
 )
 
+const cancelJobsByBot = `-- name: CancelJobsByBot :many
+UPDATE jobs
+SET status = 'CANCELLED',
+	cancelled_at = ?1
+WHERE (buyer_bot_id = ?2 OR seller_bot_id = ?2)
+	AND status IN ('REQUESTED', 'CHARGE_CREATED')
+RETURNING job_id, offer_id, buyer_bot_id, seller_bot_id, status, price_raw, turnaround_seconds, created_at, job_expires_at, request_payload_id, charge_id, charge_address, charge_amount_raw, charge_expires_at, charge_sig_ed25519, paid_at, delivered_at, cancelled_at, expired_at, payment_verifier, payment_block_hash, payment_observed_at, amount_raw_received
+`
+
+type CancelJobsByBotParams struct {
+	CancelledAt sql.NullTime `json:"cancelled_at"`
+	BotID       string       `json:"bot_id"`
+}
+
+func (q *Queries) CancelJobsByBot(ctx context.Context, arg CancelJobsByBotParams) ([]Job, error) {
+	rows, err := q.query(ctx, q.cancelJobsByBotStmt, cancelJobsByBot, arg.CancelledAt, arg.BotID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Job
+	for rows.Next() {
+		var i Job
+		if err := rows.Scan(
+			&i.JobID,
+			&i.OfferID,
+			&i.BuyerBotID,
+			&i.SellerBotID,
+			&i.Status,
+			&i.PriceRaw,
+			&i.TurnaroundSeconds,
+			&i.CreatedAt,
+			&i.JobExpiresAt,
+			&i.RequestPayloadID,
+			&i.ChargeID,
+			&i.ChargeAddress,
+			&i.ChargeAmountRaw,
+			&i.ChargeExpiresAt,
+			&i.ChargeSigEd25519,
+			&i.PaidAt,
+			&i.DeliveredAt,
+			&i.CancelledAt,
+			&i.ExpiredAt,
+			&i.PaymentVerifier,
+			&i.PaymentBlockHash,
+			&i.PaymentObservedAt,
+			&i.AmountRawReceived,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const cancelOffersBySeller = `-- name: CancelOffersBySeller :many
+UPDATE offers
+SET status = 'CANCELLED',
+	cancelled_at = ?1
+WHERE seller_bot_id = ?2
+	AND status IN ('ACTIVE', 'PAUSED')
+RETURNING offer_id, seller_bot_id, title, description, tags_json, price_raw, turnaround_seconds, created_at, expires_at, status, cancelled_at, request_schema_hint
+`
+
+type CancelOffersBySellerParams struct {
+	CancelledAt sql.NullTime `json:"cancelled_at"`
+	SellerBotID string       `json:"seller_bot_id"`
+}
+
+func (q *Queries) CancelOffersBySeller(ctx context.Context, arg CancelOffersBySellerParams) ([]Offer, error) {
+	rows, err := q.query(ctx, q.cancelOffersBySellerStmt, cancelOffersBySeller, arg.CancelledAt, arg.SellerBotID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Offer
+	for rows.Next() {
+		var i Offer
+		if err := rows.Scan(
+			&i.OfferID,
+			&i.SellerBotID,
+			&i.Title,
+			&i.Description,
+			&i.TagsJson,
+			&i.PriceRaw,
+			&i.TurnaroundSeconds,
+			&i.CreatedAt,
+			&i.ExpiresAt,
+			&i.Status,
+			&i.CancelledAt,
+			&i.RequestSchemaHint,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countActiveJobsByChargeAddress = `-- name: CountActiveJobsByChargeAddress :one
 SELECT COUNT(1) FROM jobs
 WHERE seller_bot_id = ?1

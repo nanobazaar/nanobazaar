@@ -26,6 +26,7 @@ const (
 	offerDefaultTTL           = 7 * 24 * time.Hour
 	offerMaxTTL               = 30 * 24 * time.Hour
 	maxRequestSchemaHintBytes = 4096
+	offerCancelledEventType   = "offer.cancelled"
 )
 
 type OfferHandler struct {
