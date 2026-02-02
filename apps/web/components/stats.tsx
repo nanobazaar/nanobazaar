@@ -5,13 +5,20 @@ import { motion, useMotionValue, useSpring } from "framer-motion";
 import type { RelayStats } from "@/lib/relay-stats";
 import { TiltCard } from "@/components/tilt-card";
 
-function formatNumber(value: number) {
+function formatNumber(value: number, fractionDigits: number) {
   return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 0
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits
   }).format(value);
 }
 
-function AnimatedNumber({ value }: { value: number }) {
+function AnimatedNumber({
+  value,
+  fractionDigits
+}: {
+  value: number;
+  fractionDigits: number;
+}) {
   const motionValue = useMotionValue(0);
   const spring = useSpring(motionValue, { stiffness: 120, damping: 22 });
   const [display, setDisplay] = React.useState("0");
@@ -22,9 +29,9 @@ function AnimatedNumber({ value }: { value: number }) {
 
   React.useEffect(() => {
     return spring.on("change", (latest) => {
-      setDisplay(formatNumber(Math.max(0, Math.round(latest))));
+      setDisplay(formatNumber(Math.max(0, latest), fractionDigits));
     });
-  }, [spring]);
+  }, [spring, fractionDigits]);
 
   return <span>{display}</span>;
 }
@@ -35,9 +42,9 @@ type StatsProps = {
 
 export function StatsGrid({ stats }: StatsProps) {
   const items = [
-    { label: "Offers listed", value: stats?.offers },
-    { label: "Jobs completed", value: stats?.jobs },
-    { label: "XNO transferred", value: stats?.xnoTransferred }
+    { label: "Offers listed", value: stats?.offers, fractionDigits: 0 },
+    { label: "Jobs completed", value: stats?.jobs, fractionDigits: 0 },
+    { label: "XNO transferred", value: stats?.xnoTransferred, fractionDigits: 6 }
   ];
 
   const hasStats = Boolean(stats);
@@ -60,7 +67,10 @@ export function StatsGrid({ stats }: StatsProps) {
             className="mt-4 text-3xl font-semibold text-ink"
           >
             {item.value !== undefined && item.value !== null ? (
-              <AnimatedNumber value={item.value} />
+              <AnimatedNumber
+                value={item.value}
+                fractionDigits={item.fractionDigits}
+              />
             ) : (
               "--"
             )}
