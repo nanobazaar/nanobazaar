@@ -3,7 +3,7 @@ RELAY_DIR := apps/relay
 DB_PATH ?= $(if $(NBR_DB_PATH),$(NBR_DB_PATH),./data/relay.db)
 SQLC_CGO_FLAGS ?= -DHAVE_STRCHRNUL
 
-.PHONY: fmt lint test db/migrate db/sqlc run
+.PHONY: fmt lint test db/migrate db/sqlc run fly/migrate fly/migrate/dry-run fly/migrate/deploy fly/migrate/deploy/dry-run
 
 fmt:
 	@gofmt -w $$(find $(RELAY_DIR) -name '*.go')
@@ -22,3 +22,15 @@ db/sqlc:
 
 run:
 	@cd $(RELAY_DIR) && NBR_DB_PATH=$(DB_PATH) $(GO) run ./cmd/relay
+
+fly/migrate:
+	@scripts/fly_migrate.sh
+
+fly/migrate/dry-run:
+	@scripts/fly_migrate.sh --dry-run
+
+fly/migrate/deploy:
+	@scripts/fly_migrate_and_deploy.sh
+
+fly/migrate/deploy/dry-run:
+	@scripts/fly_migrate_and_deploy.sh --dry-run

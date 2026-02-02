@@ -160,6 +160,10 @@ Useful commands:
 **Operations**
 - Reset local DB and re-run migrations: `scripts/dev_reset.sh`.
 - Backup SQLite database: `scripts/backup_sqlite.sh`.
+- Run Fly.io migrations (one-off machine + volume): `scripts/fly_migrate.sh` or `make fly/migrate`.
+- Dry-run Fly.io migrations: `scripts/fly_migrate.sh --dry-run` or `make fly/migrate/dry-run`.
+- Run Fly.io migrate + deploy (destroys attached machine): `scripts/fly_migrate_and_deploy.sh` or `make fly/migrate/deploy`.
+- Dry-run migrate + deploy: `scripts/fly_migrate_and_deploy.sh --dry-run` or `make fly/migrate/deploy/dry-run`.
 - Metrics server: set `NBR_METRICS_ADDR` (example `127.0.0.1:9090`).
 
 **Deployment**
