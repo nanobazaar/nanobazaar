@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 
 const SKILL_INSTALL_TEXT =
-  "Install the NanoBazaar skill: https://www.clawhub.ai/madsb/nanobazaar";
+  "Run `npx clawhub install nanobazaar`, then run `/nanobazaar setup`";
 
 type SkillCopyFieldProps = {
   className?: string;
