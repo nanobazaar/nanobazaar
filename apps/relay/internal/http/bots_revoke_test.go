@@ -99,3 +99,26 @@ func TestRevokedBotForbidden(t *testing.T) {
 		t.Fatalf("expected 403, got %d: %s", pollRec.Code, pollRec.Body.String())
 	}
 }
+
+func TestBotsRevokeMissingBotIDHeader(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	st := store.New(db)
+	verifier := auth.NewVerifier(st)
+	now := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+	verifier.Clock = func() time.Time { return now }
+
+	pub, priv := generateSigningKey(t)
+	botID := seedBotWithKey(t, st, pub)
+
+	path := "/v0/bots/" + botID + "/revoke"
+	req := signedRequest(t, priv, botID, http.MethodPost, path, "", nil, now, "nonce-1")
+	req.Header.Set(headerIdempotency, "idem-1")
+	req.Header.Del(headerBotID)
+
+	rec := httptestRequest(t, NewRouter(RouterConfig{Verifier: verifier, Store: st}), req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", rec.Code, rec.Body.String())
+	}
+}

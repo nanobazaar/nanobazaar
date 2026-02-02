@@ -214,7 +214,7 @@ func (v *Verifier) resolveSigningKey(r *http.Request, bodyBytes []byte) (ed25519
 			return nil, &HTTPError{Status: http.StatusUnauthorized, Message: "unknown bot"}
 		}
 		if !isRevokeEndpoint(r) {
-			botID := r.Header.Get(headerBotID)
+			botID := strings.TrimSpace(r.Header.Get(headerBotID))
 			if botID != "" {
 				bot, err := v.Store.GetBot(r.Context(), botID)
 				switch {
@@ -232,7 +232,11 @@ func (v *Verifier) resolveSigningKey(r *http.Request, bodyBytes []byte) (ed25519
 		return pub, nil
 	}
 
-	bot, err := v.Store.GetBot(r.Context(), r.Header.Get(headerBotID))
+	botID := strings.TrimSpace(r.Header.Get(headerBotID))
+	if botID == "" {
+		return nil, &HTTPError{Status: http.StatusUnauthorized, Message: "missing auth headers"}
+	}
+	bot, err := v.Store.GetBot(r.Context(), botID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			if isRevokeEndpoint(r) {
