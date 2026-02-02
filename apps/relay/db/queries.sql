@@ -139,13 +139,25 @@ UPDATE offers
 SET status = 'CANCELLED',
 	cancelled_at = sqlc.arg(cancelled_at)
 WHERE offer_id = sqlc.arg(offer_id)
-	AND status = 'ACTIVE';
+	AND status IN ('ACTIVE', 'PAUSED');
 
 -- name: UpdateOfferExpire :exec
 UPDATE offers
 SET status = 'EXPIRED'
 WHERE offer_id = sqlc.arg(offer_id)
+	AND status IN ('ACTIVE', 'PAUSED');
+
+-- name: UpdateOfferPause :exec
+UPDATE offers
+SET status = 'PAUSED'
+WHERE offer_id = sqlc.arg(offer_id)
 	AND status = 'ACTIVE';
+
+-- name: UpdateOfferResume :exec
+UPDATE offers
+SET status = 'ACTIVE'
+WHERE offer_id = sqlc.arg(offer_id)
+	AND status = 'PAUSED';
 
 -- name: InsertOfferTag :exec
 INSERT INTO offer_tags (

@@ -217,12 +217,8 @@ func (h *OfferHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if offer.Status == string(domain.OfferActive) && offer.ExpiresAt.Valid && h.now().After(offer.ExpiresAt.Time) {
-		if err := h.Store.UpdateOfferExpire(r.Context(), offer.OfferID); err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "offer expire failed")
-			return
-		}
-		writeJSONError(w, http.StatusConflict, "offer expired")
+	if err := h.expireOfferIfNeeded(r.Context(), &offer); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "offer expire failed")
 		return
 	}
 
@@ -246,6 +242,148 @@ func (h *OfferHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 		OfferID:     offerID,
 	}); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "offer cancel failed")
+		return
+	}
+
+	offer, err = h.Store.GetOffer(r.Context(), offerID)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "offer lookup failed")
+		return
+	}
+	tags, err := h.loadOfferTags(r.Context(), offer)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "offer tags failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, offerToResponse(offer, tags))
+}
+
+func (h *OfferHandler) Pause(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.Store == nil {
+		writeJSONError(w, http.StatusInternalServerError, "store unavailable")
+		return
+	}
+	offerID := chi.URLParam(r, "offer_id")
+	if offerID == "" {
+		writeJSONError(w, http.StatusBadRequest, "missing offer_id")
+		return
+	}
+
+	offer, err := h.Store.GetOffer(r.Context(), offerID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSONError(w, http.StatusNotFound, "offer not found")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "offer lookup failed")
+		return
+	}
+
+	caller := r.Header.Get(headerBotID)
+	if caller == "" {
+		writeJSONError(w, http.StatusUnauthorized, "missing bot_id")
+		return
+	}
+	if caller != offer.SellerBotID {
+		writeJSONError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+
+	if err := h.expireOfferIfNeeded(r.Context(), &offer); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "offer expire failed")
+		return
+	}
+
+	switch offer.Status {
+	case string(domain.OfferCancelled):
+		writeJSONError(w, http.StatusConflict, "offer cancelled")
+		return
+	case string(domain.OfferExpired):
+		writeJSONError(w, http.StatusConflict, "offer expired")
+		return
+	case string(domain.OfferPaused):
+		tags, err := h.loadOfferTags(r.Context(), offer)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "offer tags failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, offerToResponse(offer, tags))
+		return
+	}
+
+	if err := h.Store.UpdateOfferPause(r.Context(), offer.OfferID); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "offer pause failed")
+		return
+	}
+
+	offer, err = h.Store.GetOffer(r.Context(), offerID)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "offer lookup failed")
+		return
+	}
+	tags, err := h.loadOfferTags(r.Context(), offer)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "offer tags failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, offerToResponse(offer, tags))
+}
+
+func (h *OfferHandler) Resume(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.Store == nil {
+		writeJSONError(w, http.StatusInternalServerError, "store unavailable")
+		return
+	}
+	offerID := chi.URLParam(r, "offer_id")
+	if offerID == "" {
+		writeJSONError(w, http.StatusBadRequest, "missing offer_id")
+		return
+	}
+
+	offer, err := h.Store.GetOffer(r.Context(), offerID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSONError(w, http.StatusNotFound, "offer not found")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "offer lookup failed")
+		return
+	}
+
+	caller := r.Header.Get(headerBotID)
+	if caller == "" {
+		writeJSONError(w, http.StatusUnauthorized, "missing bot_id")
+		return
+	}
+	if caller != offer.SellerBotID {
+		writeJSONError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+
+	if err := h.expireOfferIfNeeded(r.Context(), &offer); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "offer expire failed")
+		return
+	}
+
+	switch offer.Status {
+	case string(domain.OfferCancelled):
+		writeJSONError(w, http.StatusConflict, "offer cancelled")
+		return
+	case string(domain.OfferExpired):
+		writeJSONError(w, http.StatusConflict, "offer expired")
+		return
+	case string(domain.OfferActive):
+		tags, err := h.loadOfferTags(r.Context(), offer)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "offer tags failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, offerToResponse(offer, tags))
+		return
+	}
+
+	if err := h.Store.UpdateOfferResume(r.Context(), offer.OfferID); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "offer resume failed")
 		return
 	}
 
@@ -315,9 +453,19 @@ func (h *OfferHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	includePaused := false
+	if includeParam := strings.TrimSpace(r.URL.Query().Get("include_paused")); includeParam != "" {
+		val, err := strconv.ParseBool(includeParam)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid include_paused flag")
+			return
+		}
+		includePaused = val
+	}
+
 	filterTags := parseTagFilter(r.URL.Query().Get("tags"))
 
-	entries, err := h.loadOfferEntries(r.Context(), sellerBotID, query, filterTags)
+	entries, err := h.loadOfferEntries(r.Context(), sellerBotID, query, filterTags, includePaused)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "offer list failed")
 		return
@@ -398,11 +546,11 @@ func (h *OfferHandler) insertOffer(ctx context.Context, offerID, sellerBotID str
 	return tx.Commit()
 }
 
-func (h *OfferHandler) loadOfferEntries(ctx context.Context, sellerBotID, query string, filterTags []string) ([]offerEntry, error) {
+func (h *OfferHandler) loadOfferEntries(ctx context.Context, sellerBotID, query string, filterTags []string, includePaused bool) ([]offerEntry, error) {
 	if query != "" {
-		return h.loadOfferEntriesSearch(ctx, sellerBotID, query, filterTags)
+		return h.loadOfferEntriesSearch(ctx, sellerBotID, query, filterTags, includePaused)
 	}
-	rows, err := h.Store.DB.QueryContext(ctx, selectOffersQuery, sellerBotID)
+	rows, err := h.Store.DB.QueryContext(ctx, selectOffersQuery, sellerBotID, includePausedFlag(includePaused))
 	if err != nil {
 		return nil, err
 	}
@@ -431,7 +579,7 @@ func (h *OfferHandler) loadOfferEntries(ctx context.Context, sellerBotID, query 
 		if err := h.expireOfferIfNeeded(ctx, &offer); err != nil {
 			return nil, err
 		}
-		if offer.Status != string(domain.OfferActive) {
+		if !offerStatusVisible(offer.Status, includePaused) {
 			continue
 		}
 
@@ -457,11 +605,11 @@ func (h *OfferHandler) loadOfferEntries(ctx context.Context, sellerBotID, query 
 	return entries, nil
 }
 
-func (h *OfferHandler) loadOfferEntriesSearch(ctx context.Context, sellerBotID, query string, filterTags []string) ([]offerEntry, error) {
-	rows, err := h.Store.DB.QueryContext(ctx, selectOffersSearchQuery, query, sellerBotID)
+func (h *OfferHandler) loadOfferEntriesSearch(ctx context.Context, sellerBotID, query string, filterTags []string, includePaused bool) ([]offerEntry, error) {
+	rows, err := h.Store.DB.QueryContext(ctx, selectOffersSearchQuery, query, sellerBotID, includePausedFlag(includePaused))
 	if err != nil {
 		if isFTSUnavailable(err) {
-			return h.loadOfferEntriesSearchFallback(ctx, sellerBotID, query, filterTags)
+			return h.loadOfferEntriesSearchFallback(ctx, sellerBotID, query, filterTags, includePaused)
 		}
 		return nil, err
 	}
@@ -492,7 +640,7 @@ func (h *OfferHandler) loadOfferEntriesSearch(ctx context.Context, sellerBotID, 
 		if err := h.expireOfferIfNeeded(ctx, &offer); err != nil {
 			return nil, err
 		}
-		if offer.Status != string(domain.OfferActive) {
+		if !offerStatusVisible(offer.Status, includePaused) {
 			continue
 		}
 
@@ -518,8 +666,8 @@ func (h *OfferHandler) loadOfferEntriesSearch(ctx context.Context, sellerBotID, 
 	return entries, nil
 }
 
-func (h *OfferHandler) loadOfferEntriesSearchFallback(ctx context.Context, sellerBotID, query string, filterTags []string) ([]offerEntry, error) {
-	rows, err := h.Store.DB.QueryContext(ctx, selectOffersQuery, sellerBotID)
+func (h *OfferHandler) loadOfferEntriesSearchFallback(ctx context.Context, sellerBotID, query string, filterTags []string, includePaused bool) ([]offerEntry, error) {
+	rows, err := h.Store.DB.QueryContext(ctx, selectOffersQuery, sellerBotID, includePausedFlag(includePaused))
 	if err != nil {
 		return nil, err
 	}
@@ -548,7 +696,7 @@ func (h *OfferHandler) loadOfferEntriesSearchFallback(ctx context.Context, selle
 		if err := h.expireOfferIfNeeded(ctx, &offer); err != nil {
 			return nil, err
 		}
-		if offer.Status != string(domain.OfferActive) {
+		if !offerStatusVisible(offer.Status, includePaused) {
 			continue
 		}
 
@@ -590,7 +738,7 @@ func (h *OfferHandler) loadOfferTags(ctx context.Context, offer sqlc.Offer) ([]s
 }
 
 func (h *OfferHandler) expireOfferIfNeeded(ctx context.Context, offer *sqlc.Offer) error {
-	if offer.Status != string(domain.OfferActive) {
+	if offer.Status != string(domain.OfferActive) && offer.Status != string(domain.OfferPaused) {
 		return nil
 	}
 	if offer.ExpiresAt.Valid && h.now().After(offer.ExpiresAt.Time) {
@@ -731,6 +879,20 @@ func parseTagFilter(raw string) []string {
 		filter = append(filter, trimmed)
 	}
 	return filter
+}
+
+func includePausedFlag(includePaused bool) int {
+	if includePaused {
+		return 1
+	}
+	return 0
+}
+
+func offerStatusVisible(status string, includePaused bool) bool {
+	if status == string(domain.OfferActive) {
+		return true
+	}
+	return includePaused && status == string(domain.OfferPaused)
 }
 
 func isFTSUnavailable(err error) bool {
@@ -1060,7 +1222,8 @@ func newOfferID(now time.Time) (string, error) {
 const selectOffersQuery = `
 SELECT offer_id, seller_bot_id, title, description, tags_json, price_raw, turnaround_seconds, created_at, expires_at, status, cancelled_at, request_schema_hint
 FROM offers
-WHERE (?1 = '' OR seller_bot_id = ?1) AND status = 'ACTIVE'`
+WHERE (?1 = '' OR seller_bot_id = ?1)
+	AND (status = 'ACTIVE' OR (?2 = 1 AND status = 'PAUSED'))`
 
 const selectOffersSearchQuery = `
 SELECT o.offer_id, o.seller_bot_id, o.title, o.description, o.tags_json, o.price_raw, o.turnaround_seconds, o.created_at, o.expires_at, o.status, o.cancelled_at, o.request_schema_hint,
@@ -1069,4 +1232,4 @@ FROM offers_fts
 JOIN offers o ON o.rowid = offers_fts.rowid
 WHERE offers_fts MATCH ?1
 	AND (?2 = '' OR o.seller_bot_id = ?2)
-	AND o.status = 'ACTIVE'`
+	AND (o.status = 'ACTIVE' OR (?3 = 1 AND o.status = 'PAUSED'))`

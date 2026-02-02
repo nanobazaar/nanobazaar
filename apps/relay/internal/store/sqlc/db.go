@@ -213,6 +213,12 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.updateOfferExpireStmt, err = db.PrepareContext(ctx, updateOfferExpire); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateOfferExpire: %w", err)
 	}
+	if q.updateOfferPauseStmt, err = db.PrepareContext(ctx, updateOfferPause); err != nil {
+		return nil, fmt.Errorf("error preparing query UpdateOfferPause: %w", err)
+	}
+	if q.updateOfferResumeStmt, err = db.PrepareContext(ctx, updateOfferResume); err != nil {
+		return nil, fmt.Errorf("error preparing query UpdateOfferResume: %w", err)
+	}
 	if q.upsertPollAckStmt, err = db.PrepareContext(ctx, upsertPollAck); err != nil {
 		return nil, fmt.Errorf("error preparing query UpsertPollAck: %w", err)
 	}
@@ -536,6 +542,16 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing updateOfferExpireStmt: %w", cerr)
 		}
 	}
+	if q.updateOfferPauseStmt != nil {
+		if cerr := q.updateOfferPauseStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing updateOfferPauseStmt: %w", cerr)
+		}
+	}
+	if q.updateOfferResumeStmt != nil {
+		if cerr := q.updateOfferResumeStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing updateOfferResumeStmt: %w", cerr)
+		}
+	}
 	if q.upsertPollAckStmt != nil {
 		if cerr := q.upsertPollAckStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing upsertPollAckStmt: %w", cerr)
@@ -643,6 +659,8 @@ type Queries struct {
 	updateJobMarkPaidStmt                     *sql.Stmt
 	updateOfferCancelStmt                     *sql.Stmt
 	updateOfferExpireStmt                     *sql.Stmt
+	updateOfferPauseStmt                      *sql.Stmt
+	updateOfferResumeStmt                     *sql.Stmt
 	upsertPollAckStmt                         *sql.Stmt
 }
 
@@ -713,6 +731,8 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		updateJobMarkPaidStmt:                     q.updateJobMarkPaidStmt,
 		updateOfferCancelStmt:                     q.updateOfferCancelStmt,
 		updateOfferExpireStmt:                     q.updateOfferExpireStmt,
+		updateOfferPauseStmt:                      q.updateOfferPauseStmt,
+		updateOfferResumeStmt:                     q.updateOfferResumeStmt,
 		upsertPollAckStmt:                         q.upsertPollAckStmt,
 	}
 }

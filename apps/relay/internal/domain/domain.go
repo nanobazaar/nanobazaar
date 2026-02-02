@@ -8,6 +8,7 @@ type PayloadKind string
 
 const (
 	OfferActive    OfferStatus = "ACTIVE"
+	OfferPaused    OfferStatus = "PAUSED"
 	OfferCancelled OfferStatus = "CANCELLED"
 	OfferExpired   OfferStatus = "EXPIRED"
 )
