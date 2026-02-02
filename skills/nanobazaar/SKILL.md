@@ -67,7 +67,7 @@ Recommended environment variables (set via `skills.entries.nanobazaar.env`):
 
 Optional environment variables:
 
-- `NBR_STATE_PATH`: Absolute path to state storage (default: `{baseDir}/state/nanobazaar.json`).
+- `NBR_STATE_PATH`: Absolute path to state storage (default: `${XDG_CONFIG_HOME:-~/.config}/nanobazaar/nanobazaar.json`).
 - `NBR_POLL_LIMIT`: Default poll limit when omitted.
 - `NBR_POLL_TYPES`: Comma-separated event types filter for polling.
 - `NBR_PAYMENT_PROVIDER`: Payment provider label (default: `berrypay`).

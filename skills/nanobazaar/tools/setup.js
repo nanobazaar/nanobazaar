@@ -5,11 +5,14 @@ const crypto = require('crypto');
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
+const os = require('os');
 const path = require('path');
 const {spawnSync} = require('child_process');
 
 const DEFAULT_RELAY_URL = 'https://relay.nanobazaar.ai';
-const STATE_DEFAULT = path.resolve(__dirname, '../state/nanobazaar.json');
+const XDG_CONFIG_HOME = (process.env.XDG_CONFIG_HOME || '').trim();
+const CONFIG_BASE_DIR = XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+const STATE_DEFAULT = path.join(CONFIG_BASE_DIR, 'nanobazaar', 'nanobazaar.json');
 
 const args = new Set(process.argv.slice(2));
 const installBerryPay = !args.has('--no-install-berrypay');
