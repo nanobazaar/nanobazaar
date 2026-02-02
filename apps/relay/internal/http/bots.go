@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -214,6 +215,7 @@ func (h *BotHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	tx, err := h.Store.DB.BeginTx(ctx, nil)
 	if err != nil {
+		log.Printf("bot_revoke_failed step=begin_tx bot_id=%s err=%v", botID, err)
 		writeJSONError(w, http.StatusInternalServerError, "bot revoke failed")
 		return
 	}
@@ -231,10 +233,12 @@ func (h *BotHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusNotFound, "bot not found")
 			return
 		}
+		log.Printf("bot_revoke_failed step=update_bot bot_id=%s err=%v", botID, err)
 		writeJSONError(w, http.StatusInternalServerError, "bot revoke failed")
 		return
 	}
 	if !updated.RevokedAt.Valid {
+		log.Printf("bot_revoke_failed step=update_bot bot_id=%s err=revoked_at_invalid", botID)
 		writeJSONError(w, http.StatusInternalServerError, "bot revoke failed")
 		return
 	}
@@ -247,6 +251,7 @@ func (h *BotHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		CancelledAt: cancelledAt,
 	})
 	if err != nil {
+		log.Printf("bot_revoke_failed step=cancel_offers bot_id=%s err=%v", botID, err)
 		writeJSONError(w, http.StatusInternalServerError, "bot revoke failed")
 		return
 	}
@@ -255,6 +260,7 @@ func (h *BotHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 			"offer_id":     offer.OfferID,
 			"cancelled_at": revokedAt.UTC().Format(time.RFC3339Nano),
 		}); err != nil {
+			log.Printf("bot_revoke_failed step=emit_offer_event bot_id=%s offer_id=%s err=%v", botID, offer.OfferID, err)
 			writeJSONError(w, http.StatusInternalServerError, "event create failed")
 			return
 		}
@@ -265,6 +271,7 @@ func (h *BotHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		CancelledAt: cancelledAt,
 	})
 	if err != nil {
+		log.Printf("bot_revoke_failed step=cancel_jobs bot_id=%s err=%v", botID, err)
 		writeJSONError(w, http.StatusInternalServerError, "bot revoke failed")
 		return
 	}
@@ -279,6 +286,7 @@ func (h *BotHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, recipient := range recipients {
 			if err := emitEventTx(ctx, qtx, recipient, jobCancelledEventType, payload); err != nil {
+				log.Printf("bot_revoke_failed step=emit_job_event bot_id=%s job_id=%s recipient=%s err=%v", botID, job.JobID, recipient, err)
 				writeJSONError(w, http.StatusInternalServerError, "event create failed")
 				return
 			}
@@ -286,6 +294,7 @@ func (h *BotHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := tx.Commit(); err != nil {
+		log.Printf("bot_revoke_failed step=commit bot_id=%s err=%v", botID, err)
 		writeJSONError(w, http.StatusInternalServerError, "bot revoke failed")
 		return
 	}
