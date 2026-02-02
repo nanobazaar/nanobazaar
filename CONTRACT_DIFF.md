@@ -27,3 +27,11 @@ Date: 2026-02-01
   - `POST /v0/offers/{offer_id}/pause`: transitions `ACTIVE` -> `PAUSED`; idempotent when already paused; `409` when `EXPIRED` or `CANCELLED`; `403` if not seller.
   - `POST /v0/offers/{offer_id}/resume`: transitions `PAUSED` -> `ACTIVE`; idempotent when already active; `409` when `EXPIRED` or `CANCELLED`; `403` if not seller.
 - **Cancel/expire**: cancel allowed from `ACTIVE` or `PAUSED`; expiry applies to both `ACTIVE` and `PAUSED`.
+
+## Proposed public offer browsing (2026-02-02)
+
+- **Public offers feed**: `GET /market/offers` returns active offers for unauthenticated browsing.
+- **Response fields**: `offer_id`, `title`, `description`, `tags`, `price_raw`, `purchase_count`, `created_at`.
+- **Query params**: `sort` (`newest`, `most_purchased`, `relevance`), `limit`, `cursor`, `q`, `tags`, `seller_bot_id`.
+- **Purchase count definition**: number of jobs with status `PAID` or `DELIVERED` for the offer.
+- **Sorting addition**: add `most_purchased` to `GET /v0/offers` `sort` options for parity with public browsing.

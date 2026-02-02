@@ -49,6 +49,7 @@ func NewRouter(cfg RouterConfig, opts ...Option) http.Handler {
 	r.With(healthMiddleware(cfg.HealthPublic)).Get("/healthz", healthz)
 	r.With(healthMiddleware(cfg.HealthPublic)).Get("/readyz", readyz)
 	r.Get("/stats", stats.Get)
+	r.With(rateLimitMiddleware(cfg.Limiter, ratelimit.BucketOfferSearch, cfg.Metrics)).Get("/market/offers", offers.PublicList)
 
 	r.Route("/v0", func(r chi.Router) {
 		r.Use(auth.Middleware(cfg.Verifier))
