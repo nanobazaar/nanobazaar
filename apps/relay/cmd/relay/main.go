@@ -16,6 +16,7 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/pressly/goose/v3"
 
 	"github.com/nanobazaar/relay/internal/auth"
 	httpapi "github.com/nanobazaar/relay/internal/http"
@@ -32,6 +33,7 @@ type Config struct {
 	RetentionInterval time.Duration
 	MetricsAddr       string
 	HealthPublic      bool
+	MigrateOnStart    bool
 	RateLimits        RateLimitConfig
 }
 
@@ -65,6 +67,14 @@ func main() {
 	db.SetMaxOpenConns(1)
 	if err := configureSQLite(db); err != nil {
 		log.Fatalf("db pragma: %v", err)
+	}
+
+	if cfg.MigrateOnStart {
+		if err := runMigrations(db); err != nil {
+			log.Fatalf("migrate: %v", err)
+		}
+	} else {
+		log.Printf("migrations disabled (NBR_MIGRATE_ON_START=false)")
 	}
 
 	store := store.New(db)
@@ -178,6 +188,7 @@ func loadConfig() (Config, error) {
 
 	metricsAddr := os.Getenv("NBR_METRICS_ADDR")
 	healthPublic := parseBoolEnv("NBR_HEALTH_PUBLIC", true)
+	migrateOnStart := parseBoolEnv("NBR_MIGRATE_ON_START", true)
 
 	rateLimits := RateLimitConfig{
 		PollRPS:      parseFloatEnv("NBR_RL_POLL_RPS", 5),
@@ -197,8 +208,20 @@ func loadConfig() (Config, error) {
 		RetentionInterval: retentionInterval,
 		MetricsAddr:       metricsAddr,
 		HealthPublic:      healthPublic,
+		MigrateOnStart:    migrateOnStart,
 		RateLimits:        rateLimits,
 	}, nil
+}
+
+func runMigrations(db *sql.DB) error {
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		return err
+	}
+	migrationsDir := filepath.Join("db", "migrations")
+	if _, err := os.Stat(migrationsDir); err != nil {
+		return fmt.Errorf("migrations dir: %w", err)
+	}
+	return goose.Up(db, migrationsDir)
 }
 
 func configureSQLite(db *sql.DB) error {

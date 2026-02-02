@@ -86,9 +86,10 @@ Configuration is via environment variables.
 | --- | --- | --- |
 | `NBR_HTTP_ADDR` | `:8080` | HTTP listen address (falls back to `:$PORT` then `:8080`). |
 | `NBR_DB_PATH` | `./data/relay.db` | SQLite database path. |
+| `NBR_MIGRATE_ON_START` | `true` | Run Goose migrations on process startup. |
 | `NBR_RETENTION_ENABLED` | `false` | Enable the retention loop. |
 | `NBR_RETENTION_INTERVAL` | `30m` | Retention sweep interval. |
-| `NBR_HEALTH_PUBLIC` | `false` | When false, health endpoints are localhost-only. |
+| `NBR_HEALTH_PUBLIC` | `true` | When false, health endpoints are localhost-only. |
 | `NBR_METRICS_ADDR` | empty | Metrics server address (set to enable). |
 | `NBR_RL_POLL_RPS` | `5` | Poll rate limit (requests per second). |
 | `NBR_RL_POLL_BURST` | `10` | Poll burst capacity. |
@@ -150,6 +151,7 @@ SQLite configuration:
 
 Migrations and sqlc:
 - Migrations live in `apps/relay/db/migrations/` and are applied with Goose.
+- The relay runs migrations on startup by default (set `NBR_MIGRATE_ON_START=false` to disable).
 - SQLC generation uses `apps/relay/db/schema.sql` and `apps/relay/db/queries.sql`.
 
 Useful commands:
