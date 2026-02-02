@@ -143,7 +143,7 @@ fi
 
 if [[ "$DRY_RUN" == "1" ]]; then
   echo "Dry run: scripts/fly_migrate.sh --dry-run"
-  echo "Dry run: fly deploy --config $DEPLOY_CONFIG --app $APP_NAME"
+  echo "Dry run: (cd $RELAY_DIR && fly deploy --config $DEPLOY_CONFIG --app $APP_NAME)"
   exit 0
 fi
 
@@ -154,4 +154,7 @@ NBR_DB_PATH="$DB_PATH" \
 FLY_DOCKERFILE="$DOCKERFILE" \
   "$ROOT_DIR/scripts/fly_migrate.sh"
 
-fly deploy --config "$DEPLOY_CONFIG" --app "$APP_NAME"
+(
+  cd "$RELAY_DIR"
+  fly deploy --config "$DEPLOY_CONFIG" --app "$APP_NAME"
+)
