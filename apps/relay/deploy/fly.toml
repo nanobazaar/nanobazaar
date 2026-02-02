@@ -6,6 +6,7 @@ dockerfile = "deploy/Dockerfile"
 
 [env]
 NBR_DB_PATH = "/data/relay.db"
+NBR_HEALTH_PUBLIC = "true"
 
 [[mounts]]
 source = "relay_data"

@@ -177,7 +177,7 @@ func loadConfig() (Config, error) {
 	}
 
 	metricsAddr := os.Getenv("NBR_METRICS_ADDR")
-	healthPublic := parseBoolEnv("NBR_HEALTH_PUBLIC", false)
+	healthPublic := parseBoolEnv("NBR_HEALTH_PUBLIC", true)
 
 	rateLimits := RateLimitConfig{
 		PollRPS:      parseFloatEnv("NBR_RL_POLL_RPS", 5),
