@@ -150,6 +150,81 @@ func TestOffersCancel(t *testing.T) {
 	}
 }
 
+func TestOffersPauseResume(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	store := store.New(db)
+	verifier := auth.NewVerifier(store)
+	now := time.Now().UTC().Truncate(time.Second)
+	verifier.Clock = func() time.Time { return now }
+
+	pub, priv := generateSigningKey(t)
+	botID := seedBotWithKey(t, store, pub)
+
+	offerID := createOfferForTest(t, store, botID, "offer_pause", now.Add(-time.Hour))
+
+	pauseReq := signedRequest(t, priv, botID, http.MethodPost, "/v0/offers/"+offerID+"/pause", "", []byte(`{}`), now, "nonce-1")
+	pauseReq.Header.Set(headerIdempotency, "idem-1")
+	pauseRec := httptestRequest(t, NewRouter(RouterConfig{Verifier: verifier, Store: store}), pauseReq)
+	if pauseRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", pauseRec.Code, pauseRec.Body.String())
+	}
+
+	var pauseResp offerResponse
+	if err := json.Unmarshal(pauseRec.Body.Bytes(), &pauseResp); err != nil {
+		t.Fatalf("unmarshal pause response: %v", err)
+	}
+	if pauseResp.Status != string(domain.OfferPaused) {
+		t.Fatalf("expected status PAUSED, got %q", pauseResp.Status)
+	}
+
+	secondPauseReq := signedRequest(t, priv, botID, http.MethodPost, "/v0/offers/"+offerID+"/pause", "", []byte(`{}`), now, "nonce-2")
+	secondPauseReq.Header.Set(headerIdempotency, "idem-2")
+	secondPauseRec := httptestRequest(t, NewRouter(RouterConfig{Verifier: verifier, Store: store}), secondPauseReq)
+	if secondPauseRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", secondPauseRec.Code, secondPauseRec.Body.String())
+	}
+
+	var secondPauseResp offerResponse
+	if err := json.Unmarshal(secondPauseRec.Body.Bytes(), &secondPauseResp); err != nil {
+		t.Fatalf("unmarshal pause response: %v", err)
+	}
+	if secondPauseResp.Status != string(domain.OfferPaused) {
+		t.Fatalf("expected status PAUSED, got %q", secondPauseResp.Status)
+	}
+
+	resumeReq := signedRequest(t, priv, botID, http.MethodPost, "/v0/offers/"+offerID+"/resume", "", []byte(`{}`), now, "nonce-3")
+	resumeReq.Header.Set(headerIdempotency, "idem-3")
+	resumeRec := httptestRequest(t, NewRouter(RouterConfig{Verifier: verifier, Store: store}), resumeReq)
+	if resumeRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resumeRec.Code, resumeRec.Body.String())
+	}
+
+	var resumeResp offerResponse
+	if err := json.Unmarshal(resumeRec.Body.Bytes(), &resumeResp); err != nil {
+		t.Fatalf("unmarshal resume response: %v", err)
+	}
+	if resumeResp.Status != string(domain.OfferActive) {
+		t.Fatalf("expected status ACTIVE, got %q", resumeResp.Status)
+	}
+
+	secondResumeReq := signedRequest(t, priv, botID, http.MethodPost, "/v0/offers/"+offerID+"/resume", "", []byte(`{}`), now, "nonce-4")
+	secondResumeReq.Header.Set(headerIdempotency, "idem-4")
+	secondResumeRec := httptestRequest(t, NewRouter(RouterConfig{Verifier: verifier, Store: store}), secondResumeReq)
+	if secondResumeRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", secondResumeRec.Code, secondResumeRec.Body.String())
+	}
+
+	var secondResumeResp offerResponse
+	if err := json.Unmarshal(secondResumeRec.Body.Bytes(), &secondResumeResp); err != nil {
+		t.Fatalf("unmarshal resume response: %v", err)
+	}
+	if secondResumeResp.Status != string(domain.OfferActive) {
+		t.Fatalf("expected status ACTIVE, got %q", secondResumeResp.Status)
+	}
+}
+
 func TestOffersCancelForbidden(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
@@ -249,6 +324,66 @@ func TestOffersListPagination(t *testing.T) {
 	}
 	if secondResp.Offers[0].OfferID != "offer_c" {
 		t.Fatalf("unexpected offer_id %q", secondResp.Offers[0].OfferID)
+	}
+}
+
+func TestOffersListIncludePaused(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	store := store.New(db)
+	verifier := auth.NewVerifier(store)
+	now := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+	verifier.Clock = func() time.Time { return now }
+
+	pub, priv := generateSigningKey(t)
+	botID := seedBotWithKey(t, store, pub)
+
+	activeID := insertOfferWithExpiry(t, store, botID, "offer_active", now.Add(-time.Hour), now.Add(24*time.Hour))
+	pausedID := insertOfferWithExpiry(t, store, botID, "offer_paused", now.Add(-2*time.Hour), now.Add(24*time.Hour))
+	if err := store.UpdateOfferPause(context.Background(), pausedID); err != nil {
+		t.Fatalf("pause offer: %v", err)
+	}
+
+	listReq := signedRequest(t, priv, botID, http.MethodGet, "/v0/offers", "", nil, now, "nonce-1")
+	listRec := httptestRequest(t, NewRouter(RouterConfig{Verifier: verifier, Store: store}), listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", listRec.Code, listRec.Body.String())
+	}
+
+	var listResp offerListResponse
+	if err := json.Unmarshal(listRec.Body.Bytes(), &listResp); err != nil {
+		t.Fatalf("unmarshal list response: %v", err)
+	}
+	if len(listResp.Offers) != 1 {
+		t.Fatalf("expected 1 offer, got %d", len(listResp.Offers))
+	}
+	if listResp.Offers[0].OfferID != activeID {
+		t.Fatalf("expected offer_id %q, got %q", activeID, listResp.Offers[0].OfferID)
+	}
+
+	includeReq := signedRequest(t, priv, botID, http.MethodGet, "/v0/offers", "include_paused=true", nil, now, "nonce-2")
+	includeRec := httptestRequest(t, NewRouter(RouterConfig{Verifier: verifier, Store: store}), includeReq)
+	if includeRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", includeRec.Code, includeRec.Body.String())
+	}
+
+	var includeResp offerListResponse
+	if err := json.Unmarshal(includeRec.Body.Bytes(), &includeResp); err != nil {
+		t.Fatalf("unmarshal list response: %v", err)
+	}
+	if len(includeResp.Offers) != 2 {
+		t.Fatalf("expected 2 offers, got %d", len(includeResp.Offers))
+	}
+	seen := make(map[string]struct{}, len(includeResp.Offers))
+	for _, offer := range includeResp.Offers {
+		seen[offer.OfferID] = struct{}{}
+	}
+	if _, ok := seen[activeID]; !ok {
+		t.Fatalf("expected offer_id %q in response", activeID)
+	}
+	if _, ok := seen[pausedID]; !ok {
+		t.Fatalf("expected offer_id %q in response", pausedID)
 	}
 }
 

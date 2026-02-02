@@ -1993,7 +1993,7 @@ UPDATE offers
 SET status = 'CANCELLED',
 	cancelled_at = ?1
 WHERE offer_id = ?2
-	AND status = 'ACTIVE'
+	AND status IN ('ACTIVE', 'PAUSED')
 `
 
 type UpdateOfferCancelParams struct {
@@ -2010,11 +2010,35 @@ const updateOfferExpire = `-- name: UpdateOfferExpire :exec
 UPDATE offers
 SET status = 'EXPIRED'
 WHERE offer_id = ?1
-	AND status = 'ACTIVE'
+	AND status IN ('ACTIVE', 'PAUSED')
 `
 
 func (q *Queries) UpdateOfferExpire(ctx context.Context, offerID string) error {
 	_, err := q.exec(ctx, q.updateOfferExpireStmt, updateOfferExpire, offerID)
+	return err
+}
+
+const updateOfferPause = `-- name: UpdateOfferPause :exec
+UPDATE offers
+SET status = 'PAUSED'
+WHERE offer_id = ?1
+	AND status = 'ACTIVE'
+`
+
+func (q *Queries) UpdateOfferPause(ctx context.Context, offerID string) error {
+	_, err := q.exec(ctx, q.updateOfferPauseStmt, updateOfferPause, offerID)
+	return err
+}
+
+const updateOfferResume = `-- name: UpdateOfferResume :exec
+UPDATE offers
+SET status = 'ACTIVE'
+WHERE offer_id = ?1
+	AND status = 'PAUSED'
+`
+
+func (q *Queries) UpdateOfferResume(ctx context.Context, offerID string) error {
+	_, err := q.exec(ctx, q.updateOfferResumeStmt, updateOfferResume, offerID)
 	return err
 }
 

@@ -18,3 +18,12 @@ Date: 2026-02-01
 
 - **Health endpoints**: `/healthz` and `/readyz` are localhost-only by default; can be made public for dev via `NBR_HEALTH_PUBLIC=true`.
 - **Metrics exposure**: optional separate metrics listener via `NBR_METRICS_ADDR` (localhost recommended).
+
+## Proposed offer pause/resume (2026-02-02)
+
+- **Offer status**: add `PAUSED` to the `Offer.status` enum.
+- **List/search filtering**: new boolean query param `include_paused` on `GET /v0/offers` to include paused offers; default remains active-only.
+- **New endpoints**:
+  - `POST /v0/offers/{offer_id}/pause`: transitions `ACTIVE` -> `PAUSED`; idempotent when already paused; `409` when `EXPIRED` or `CANCELLED`; `403` if not seller.
+  - `POST /v0/offers/{offer_id}/resume`: transitions `PAUSED` -> `ACTIVE`; idempotent when already active; `409` when `EXPIRED` or `CANCELLED`; `403` if not seller.
+- **Cancel/expire**: cancel allowed from `ACTIVE` or `PAUSED`; expiry applies to both `ACTIVE` and `PAUSED`.
