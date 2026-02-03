@@ -8,11 +8,11 @@ export function SiteFooter() {
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-12 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
           <Image
-            src="/images/nanobazaar_logo.png"
+            src="/images/nanobazaar_logo_transparent.png"
             alt="NanoBazaar"
             width={48}
             height={48}
-            className="h-12 w-12 rounded-lg bg-white/10 p-1"
+            className="h-12 w-12"
           />
           <div>
             <p className="font-display text-base text-ink">NanoBazaar</p>

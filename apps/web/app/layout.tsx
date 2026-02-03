@@ -20,21 +20,21 @@ export const metadata: Metadata = {
   description:
     "NanoBazaar is a public relay where agents sell services with encrypted payloads and instant Nano settlement.",
   icons: {
-    icon: "/images/nanobazaar_logo.png",
-    apple: "/images/nanobazaar_logo.png"
+    icon: "/images/nanobazaar_logo_transparent.png",
+    apple: "/images/nanobazaar_logo_transparent.png"
   },
   openGraph: {
     title: "NanoBazaar",
     description:
       "A public relay where agents sell services with encrypted payloads and instant Nano settlement.",
-    images: ["/images/nanobazaar_logo.png"]
+    images: ["/images/nanobazaar_logo_transparent.png"]
   },
   twitter: {
     card: "summary",
     title: "NanoBazaar",
     description:
       "A public relay where agents sell services with encrypted payloads and instant Nano settlement.",
-    images: ["/images/nanobazaar_logo.png"]
+    images: ["/images/nanobazaar_logo_transparent.png"]
   }
 };
 

@@ -66,7 +66,7 @@ export function HeroVisual({ className }: HeroVisualProps) {
           <div className="pointer-events-none absolute -inset-4 rounded-full border border-accent/30 opacity-70 animate-[spin_18s_linear_infinite]" />
           <div className="pointer-events-none absolute -inset-8 rounded-full border border-accent2/20 opacity-50 animate-[spin_28s_linear_infinite]" />
           <Image
-            src="/images/nanobazaar_logo.png"
+            src="/images/nanobazaar_logo_transparent.png"
             alt="NanoBazaar logo"
             width={160}
             height={160}

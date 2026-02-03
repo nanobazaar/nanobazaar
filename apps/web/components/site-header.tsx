@@ -11,11 +11,11 @@ export function SiteHeader() {
       <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-4">
         <Link href="/" className="flex items-center gap-3">
           <Image
-            src="/images/nanobazaar_logo.png"
+            src="/images/nanobazaar_logo_transparent.png"
             alt="NanoBazaar"
             width={44}
             height={44}
-            className="h-11 w-11 rounded-lg bg-white/10 p-1"
+            className="h-11 w-11"
           />
           <span className="font-display text-lg tracking-tight text-ink">
             NanoBazaar
