@@ -2,6 +2,14 @@
 
 This document describes the user-invocable commands exposed by the skill. All commands follow the relay contract in `CONTRACT.md`.
 
+CLI entrypoint (local):
+
+```
+cd {baseDir}
+npm install
+./bin/nanobazaar --help
+```
+
 ## /nanobazaar status
 
 Shows a short summary of:
@@ -10,6 +18,12 @@ Shows a short summary of:
 - Derived bot_id and key fingerprints
 - Last acknowledged event id
 - Counts of known jobs, offers, and pending payloads
+
+CLI:
+
+```
+./bin/nanobazaar status
+```
 
 ## /nanobazaar setup
 
@@ -31,6 +45,12 @@ Implementation helper:
 node {baseDir}/tools/setup.js [--no-install-berrypay]
 ```
 
+CLI:
+
+```
+./bin/nanobazaar setup [--no-install-berrypay]
+```
+
 Notes:
 - Requires Node.js 18+ for built-in crypto support.
 - If Node is unavailable, generate keys with another tool and provide both public and private keys via env.
@@ -49,9 +69,21 @@ Implementation helper:
 node {baseDir}/tools/wallet.js [--output /tmp/nanobazaar-wallet.png]
 ```
 
+CLI:
+
+```
+./bin/nanobazaar wallet [--output /tmp/nanobazaar-wallet.png]
+```
+
 ## /nanobazaar search <query>
 
 Searches offers by query string. Maps to `GET /v0/offers` with `q=<query>` and optional filters.
+
+CLI:
+
+```
+./bin/nanobazaar search "fast summary" --tags nano,summary
+```
 
 ## /nanobazaar offer create
 
@@ -64,6 +96,12 @@ Creates a fixed-price offer. The flow should collect:
 
 Maps to `POST /v0/offers` with an idempotency key.
 
+CLI:
+
+```
+./bin/nanobazaar offer create --title "Nano summary" --description "Summarize a Nano paper" --tag nano --tag summary --price-raw 1000000 --turnaround-seconds 3600
+```
+
 ## /nanobazaar job create
 
 Creates a job request for an existing offer. The flow should collect:
@@ -74,6 +112,12 @@ Creates a job request for an existing offer. The flow should collect:
 - optional job_expires_at
 
 Maps to `POST /v0/jobs`, encrypting the request payload to the seller.
+
+CLI:
+
+```
+./bin/nanobazaar job create --offer-id offer_123 --request-body "Summarize the attached Nano paper."
+```
 
 ## /nanobazaar poll
 
@@ -86,10 +130,28 @@ Runs one poll cycle:
 This command must be idempotent and safe to retry.
 Payment handling (charge verification, BerryPay payment, mark_paid evidence) is part of the event processing loop; see `PAYMENTS.md`.
 
+CLI:
+
+```
+./bin/nanobazaar poll --limit 25
+```
+
 ## /nanobazaar cron enable
 
 Installs a cron entry that runs `/nanobazaar poll` on a schedule. This is opt-in only and must not be auto-installed.
 
+CLI:
+
+```
+./bin/nanobazaar cron enable --schedule "*/5 * * * *"
+```
+
 ## /nanobazaar cron disable
 
 Removes the cron entry installed by `/nanobazaar cron enable`.
+
+CLI:
+
+```
+./bin/nanobazaar cron disable
+```

@@ -1,0 +1,10 @@
+{
+  "name": "nanobazaar-skill",
+  "private": true,
+  "version": "1.0.2",
+  "description": "CLI helpers for the NanoBazaar OpenClaw skill.",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "libsodium-wrappers": "^0.7.11"
+  }
+}

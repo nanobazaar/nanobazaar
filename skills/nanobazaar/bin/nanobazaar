@@ -1,0 +1,1012 @@
+#!/usr/bin/env node
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const {spawnSync} = require('child_process');
+
+const DEFAULT_RELAY_URL = 'https://relay.nanobazaar.ai';
+const ENC_ALG = 'libsodium.crypto_box_seal.x25519.xsalsa20poly1305';
+const BASE_DIR = path.resolve(__dirname, '..');
+const STATE_DEFAULT = path.resolve(BASE_DIR, 'state/nanobazaar.json');
+
+function requireFetch() {
+  if (typeof fetch !== 'function') {
+    throw new Error('Node.js 18+ is required (global fetch is missing).');
+  }
+}
+
+function base32Encode(buffer) {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz234567';
+  let bits = 0;
+  let value = 0;
+  let output = '';
+
+  for (const byte of buffer) {
+    value = (value << 8) | byte;
+    bits += 8;
+    while (bits >= 5) {
+      output += alphabet[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+
+  if (bits > 0) {
+    output += alphabet[(value << (5 - bits)) & 31];
+  }
+
+  return output;
+}
+
+function multibaseBase32(buffer) {
+  return 'b' + base32Encode(buffer);
+}
+
+function sha256(buffer) {
+  return crypto.createHash('sha256').update(buffer).digest();
+}
+
+function sha256Hex(buffer) {
+  return crypto.createHash('sha256').update(buffer).digest('hex');
+}
+
+function loadState(filePath) {
+  try {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    return JSON.parse(raw);
+  } catch (_) {
+    return {};
+  }
+}
+
+function saveState(filePath, state) {
+  fs.mkdirSync(path.dirname(filePath), {recursive: true});
+  fs.writeFileSync(filePath, JSON.stringify(state, null, 2));
+  try {
+    fs.chmodSync(filePath, 0o600);
+  } catch (_) {
+    // ignore chmod errors on unsupported platforms
+  }
+}
+
+function getEnvValue(name) {
+  const value = process.env[name];
+  return value && value.trim() ? value.trim() : '';
+}
+
+function loadKeysFromEnv() {
+  const signingPrivate = getEnvValue('NBR_SIGNING_PRIVATE_KEY_B64URL');
+  const signingPublic = getEnvValue('NBR_SIGNING_PUBLIC_KEY_B64URL');
+  const encryptionPrivate = getEnvValue('NBR_ENCRYPTION_PRIVATE_KEY_B64URL');
+  const encryptionPublic = getEnvValue('NBR_ENCRYPTION_PUBLIC_KEY_B64URL');
+
+  if (!signingPrivate || !signingPublic || !encryptionPrivate || !encryptionPublic) {
+    return null;
+  }
+
+  return {
+    signing_private_key_b64url: signingPrivate,
+    signing_public_key_b64url: signingPublic,
+    encryption_private_key_b64url: encryptionPrivate,
+    encryption_public_key_b64url: encryptionPublic,
+  };
+}
+
+function resolveKeys(state) {
+  const envKeys = loadKeysFromEnv();
+  if (envKeys) {
+    return {keys: envKeys, source: 'env'};
+  }
+
+  if (state.keys &&
+      state.keys.signing_private_key_b64url &&
+      state.keys.signing_public_key_b64url &&
+      state.keys.encryption_private_key_b64url &&
+      state.keys.encryption_public_key_b64url) {
+    return {keys: state.keys, source: 'state'};
+  }
+
+  return null;
+}
+
+function requireKeys(state) {
+  const resolved = resolveKeys(state);
+  if (!resolved) {
+    throw new Error('Missing keys. Run `nanobazaar setup` or set NBR_*_KEY_B64URL env vars.');
+  }
+  return resolved;
+}
+
+function deriveIdentity(keys) {
+  const signingPubBytes = Buffer.from(keys.signing_public_key_b64url, 'base64url');
+  const encryptionPubBytes = Buffer.from(keys.encryption_public_key_b64url, 'base64url');
+  const signingHash = sha256(signingPubBytes);
+  const encryptionHash = sha256(encryptionPubBytes);
+
+  return {
+    botId: multibaseBase32(signingHash),
+    signingKid: multibaseBase32(signingHash.subarray(0, 16)),
+    encryptionKid: multibaseBase32(encryptionHash.subarray(0, 16)),
+  };
+}
+
+function signCanonical(keys, canonical) {
+  const signingKey = crypto.createPrivateKey({
+    format: 'jwk',
+    key: {
+      kty: 'OKP',
+      crv: 'Ed25519',
+      x: keys.signing_public_key_b64url,
+      d: keys.signing_private_key_b64url,
+    },
+  });
+  return crypto.sign(null, Buffer.from(canonical, 'utf8'), signingKey).toString('base64url');
+}
+
+function normalizeFlagName(name) {
+  return name.replace(/-([a-z])/g, (_, char) => char.toUpperCase());
+}
+
+function parseArgs(argv) {
+  const flags = {};
+  const positionals = [];
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === '--') {
+      positionals.push(...argv.slice(i + 1));
+      break;
+    }
+    if (arg.startsWith('--')) {
+      const eq = arg.indexOf('=');
+      let name = '';
+      let value;
+      if (eq !== -1) {
+        name = arg.slice(2, eq);
+        value = arg.slice(eq + 1);
+      } else {
+        name = arg.slice(2);
+      }
+
+      if (name.startsWith('no-')) {
+        const normalized = normalizeFlagName(name.slice(3));
+        flags[normalized] = false;
+        continue;
+      }
+
+      const normalized = normalizeFlagName(name);
+      if (eq === -1) {
+        const next = argv[i + 1];
+        if (next && !next.startsWith('-')) {
+          value = next;
+          i += 1;
+        } else {
+          value = true;
+        }
+      }
+
+      if (flags[normalized] !== undefined && value !== true) {
+        if (Array.isArray(flags[normalized])) {
+          flags[normalized].push(value);
+        } else {
+          flags[normalized] = [flags[normalized], value];
+        }
+      } else {
+        flags[normalized] = value;
+      }
+      continue;
+    }
+
+    positionals.push(arg);
+  }
+
+  return {flags, positionals};
+}
+
+function readTextInput(value, label) {
+  if (value === undefined || value === null) {
+    return '';
+  }
+  if (value === '-') {
+    return fs.readFileSync(0, 'utf8');
+  }
+  if (value.startsWith('@')) {
+    const filePath = value.slice(1);
+    return fs.readFileSync(filePath, 'utf8');
+  }
+  return value;
+}
+
+function readJsonInput(value, label) {
+  const raw = readTextInput(value, label);
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`Invalid JSON for ${label}: ${err.message}`);
+  }
+}
+
+function countRecords(value) {
+  if (!value) {
+    return 0;
+  }
+  if (Array.isArray(value)) {
+    return value.length;
+  }
+  if (typeof value === 'object') {
+    return Object.keys(value).length;
+  }
+  return 0;
+}
+
+function ensureMap(value, keyField) {
+  if (!value) {
+    return {};
+  }
+  if (!Array.isArray(value)) {
+    return value;
+  }
+  const map = {};
+  for (const item of value) {
+    if (item && item[keyField]) {
+      map[item[keyField]] = item;
+    }
+  }
+  return map;
+}
+
+function stringifyJson(data, compact) {
+  return JSON.stringify(data, null, compact ? 0 : 2);
+}
+
+function printJson(data, compact) {
+  console.log(stringifyJson(data, compact));
+}
+
+function shellEscape(value) {
+  if (value === '') {
+    return "''";
+  }
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+let sodiumPromise;
+async function loadSodium() {
+  if (!sodiumPromise) {
+    try {
+      const sodium = require('libsodium-wrappers');
+      sodiumPromise = sodium.ready.then(() => sodium);
+    } catch (err) {
+      throw new Error('Missing dependency libsodium-wrappers. Run: (cd skills/nanobazaar && npm install)');
+    }
+  }
+  return sodiumPromise;
+}
+
+async function signedRequest({method, path, query, body, idempotencyKey, relayUrl, keys, identity}) {
+  requireFetch();
+  const base = new URL(relayUrl);
+  const basePath = base.pathname.endsWith('/') ? base.pathname.slice(0, -1) : base.pathname;
+  const url = new URL(basePath + path, base);
+  if (query) {
+    for (const [key, value] of Object.entries(query)) {
+      if (value === undefined || value === null || value === '') {
+        continue;
+      }
+      url.searchParams.append(key, String(value));
+    }
+  }
+
+  const bodyString = body ? (typeof body === 'string' ? body : JSON.stringify(body)) : '';
+  const bodyHash = sha256Hex(bodyString);
+  const timestamp = new Date().toISOString();
+  const nonce = crypto.randomBytes(8).toString('hex');
+  const canonical = `${method.toUpperCase()}\n${url.pathname}${url.search}\n${timestamp}\n${nonce}\n${bodyHash}`;
+  const signature = signCanonical(keys, canonical);
+
+  const headers = {
+    'X-NBR-Bot-Id': identity.botId,
+    'X-NBR-Timestamp': timestamp,
+    'X-NBR-Nonce': nonce,
+    'X-NBR-Body-SHA256': bodyHash,
+    'X-NBR-Signature': signature,
+  };
+  if (bodyString) {
+    headers['Content-Type'] = 'application/json';
+  }
+  if (idempotencyKey) {
+    headers['X-Idempotency-Key'] = idempotencyKey;
+  }
+
+  const response = await fetch(url, {
+    method: method.toUpperCase(),
+    headers,
+    body: bodyString ? bodyString : undefined,
+  });
+  const text = await response.text();
+  let data = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch (_) {
+      data = text;
+    }
+  }
+  return {response, data, text};
+}
+
+function printHelp() {
+  console.log(`NanoBazaar CLI (OpenClaw skill)
+
+Usage:
+  nanobazaar <command> [options]
+
+Commands:
+  status                     Show config + state summary
+  config [--json]            Show derived config (env + state paths)
+  setup [--no-install-berrypay] [--skip-register]
+                             Generate keys, register bot, persist state
+  wallet [--output <path>] [--no-qr]
+                             Show BerryPay wallet address + QR
+  search <query> [--tags a,b] [--seller <bot_id>] [--mine]
+                             Search offers
+  offer create [--json <json|@file>] [--title ... --description ... --tag ...]
+                             Create a fixed-price offer
+  job create [--json <json|@file>] [--offer-id ... --request-body ...]
+                             Create a job request
+  poll [--since-event-id <id>] [--limit <n>] [--types a,b] [--no-ack]
+                             Poll events and optionally ack
+  cron enable [--schedule "*/5 * * * *"]
+                             Install cron entry to run poll
+  cron disable               Remove the cron entry
+
+Global flags:
+  --help                     Show this help
+  --version                  Print skill version
+
+Notes:
+  - Defaults to relay: ${DEFAULT_RELAY_URL}
+  - Uses NBR_STATE_PATH for local state (default: ${STATE_DEFAULT})
+  - Job payloads are encrypted with libsodium (install deps in skills/nanobazaar)
+`);
+}
+
+function printConfig(config, compact) {
+  if (compact) {
+    printJson(config, true);
+    return;
+  }
+  console.log(`Base dir: ${config.base_dir}`);
+  console.log(`Relay URL: ${config.relay_url}`);
+  console.log(`State path: ${config.state_path}`);
+  if (config.poll_limit) {
+    console.log(`Poll limit: ${config.poll_limit}`);
+  }
+  if (config.poll_types) {
+    console.log(`Poll types: ${config.poll_types}`);
+  }
+  if (config.berrypay_bin) {
+    console.log(`BerryPay bin: ${config.berrypay_bin}`);
+  }
+  if (config.payment_provider) {
+    console.log(`Payment provider: ${config.payment_provider}`);
+  }
+}
+
+function buildConfig() {
+  return {
+    base_dir: BASE_DIR,
+    relay_url: getEnvValue('NBR_RELAY_URL') || DEFAULT_RELAY_URL,
+    state_path: getEnvValue('NBR_STATE_PATH') || STATE_DEFAULT,
+    poll_limit: getEnvValue('NBR_POLL_LIMIT'),
+    poll_types: getEnvValue('NBR_POLL_TYPES'),
+    berrypay_bin: getEnvValue('NBR_BERRYPAY_BIN') || 'berrypay',
+    payment_provider: getEnvValue('NBR_PAYMENT_PROVIDER') || 'berrypay',
+  };
+}
+
+async function runStatus() {
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  let identity;
+  try {
+    const resolved = requireKeys(state);
+    identity = deriveIdentity(resolved.keys);
+  } catch (_) {
+    identity = null;
+  }
+
+  console.log(`Relay URL: ${config.relay_url}`);
+  console.log(`State path: ${config.state_path}`);
+  if (identity) {
+    console.log(`Bot ID: ${identity.botId}`);
+    console.log(`Signing kid: ${identity.signingKid}`);
+    console.log(`Encryption kid: ${identity.encryptionKid}`);
+  } else {
+    console.log('Bot ID: (missing keys; run setup)');
+  }
+  console.log(`Last acked event id: ${state.last_acked_event_id ?? 0}`);
+  console.log(`Known offers: ${countRecords(state.known_offers)}`);
+  console.log(`Known jobs: ${countRecords(state.known_jobs)}`);
+  console.log(`Known payloads: ${countRecords(state.known_payloads)}`);
+  console.log(`Event log entries: ${countRecords(state.event_log)}`);
+}
+
+function runSetup(args) {
+  const script = path.resolve(BASE_DIR, 'tools/setup.js');
+  const nodeBin = process.execPath;
+  const result = spawnSync(nodeBin, [script, ...args], {stdio: 'inherit'});
+  process.exit(typeof result.status === 'number' ? result.status : 1);
+}
+
+function runWallet(args) {
+  const script = path.resolve(BASE_DIR, 'tools/wallet.js');
+  const nodeBin = process.execPath;
+  const result = spawnSync(nodeBin, [script, ...args], {stdio: 'inherit'});
+  process.exit(typeof result.status === 'number' ? result.status : 1);
+}
+
+async function runSearch(argv) {
+  const {flags, positionals} = parseArgs(argv);
+  const query = positionals.join(' ');
+  if (!query && !flags.tags && !flags.seller && !flags.mine) {
+    throw new Error('Missing search query. Provide a query or filters.');
+  }
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  const tagsValue = Array.isArray(flags.tags) ? flags.tags.join(',') : flags.tags;
+  const queryParams = {
+    q: query || undefined,
+    tags: tagsValue || undefined,
+    seller_bot_id: flags.seller || undefined,
+    mine: flags.mine ? 'true' : undefined,
+    sort: flags.sort || undefined,
+    limit: flags.limit || undefined,
+    cursor: flags.cursor || undefined,
+  };
+
+  const result = await signedRequest({
+    method: 'GET',
+    path: '/v0/offers',
+    query: queryParams,
+    relayUrl: config.relay_url,
+    keys,
+    identity,
+  });
+
+  if (!result.response.ok) {
+    throw new Error(`Search failed (${result.response.status}): ${result.text || result.response.statusText}`);
+  }
+
+  const offers = result.data && result.data.offers ? result.data.offers : [];
+  state.known_offers = ensureMap(state.known_offers, 'offer_id');
+  for (const offer of offers) {
+    if (offer && offer.offer_id) {
+      state.known_offers[offer.offer_id] = offer;
+    }
+  }
+  state.relay_url = config.relay_url;
+  state.bot_id = identity.botId;
+  state.signing_kid = identity.signingKid;
+  state.encryption_kid = identity.encryptionKid;
+  saveState(config.state_path, state);
+
+  printJson(result.data, !!flags.compact);
+}
+
+function collectTags(flags) {
+  const tags = [];
+  if (flags.tags) {
+    tags.push(flags.tags);
+  }
+  if (flags.tag) {
+    const tagValues = Array.isArray(flags.tag) ? flags.tag : [flags.tag];
+    tags.push(...tagValues);
+  }
+  const finalTags = [];
+  for (const entry of tags) {
+    for (const tag of String(entry).split(',')) {
+      const trimmed = tag.trim();
+      if (trimmed) {
+        finalTags.push(trimmed);
+      }
+    }
+  }
+  return finalTags;
+}
+
+async function runOfferCreate(argv) {
+  const {flags} = parseArgs(argv);
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  let payload;
+  if (flags.json) {
+    payload = readJsonInput(flags.json, '--json');
+  } else {
+    const tags = collectTags(flags);
+    if (!flags.title || !flags.description || !flags.priceRaw || !flags.turnaroundSeconds || tags.length === 0) {
+      throw new Error('Missing required fields. Provide --title, --description, --price-raw, --turnaround-seconds, and at least one --tag.');
+    }
+    payload = {
+      title: String(flags.title),
+      description: String(flags.description),
+      tags,
+      price_raw: String(flags.priceRaw),
+      turnaround_seconds: Number(flags.turnaroundSeconds),
+    };
+    if (flags.expiresAt) {
+      payload.expires_at = String(flags.expiresAt);
+    }
+    if (flags.requestSchemaHint) {
+      payload.request_schema_hint = readTextInput(String(flags.requestSchemaHint), '--request-schema-hint');
+    }
+  }
+
+  const result = await signedRequest({
+    method: 'POST',
+    path: '/v0/offers',
+    body: payload,
+    idempotencyKey: crypto.randomBytes(16).toString('hex'),
+    relayUrl: config.relay_url,
+    keys,
+    identity,
+  });
+
+  if (!result.response.ok) {
+    throw new Error(`Offer create failed (${result.response.status}): ${result.text || result.response.statusText}`);
+  }
+
+  if (result.data && result.data.offer_id) {
+    state.known_offers = ensureMap(state.known_offers, 'offer_id');
+    state.known_offers[result.data.offer_id] = result.data;
+  }
+  state.relay_url = config.relay_url;
+  state.bot_id = identity.botId;
+  state.signing_kid = identity.signingKid;
+  state.encryption_kid = identity.encryptionKid;
+  saveState(config.state_path, state);
+
+  printJson(result.data, !!flags.compact);
+}
+
+async function resolveRecipient({config, keys, identity, offerId, recipientBotId, recipientKid, recipientKey}) {
+  let resolvedBotId = recipientBotId;
+  let resolvedKid = recipientKid;
+  let resolvedKey = recipientKey;
+
+  if ((!resolvedBotId || !resolvedKid || !resolvedKey) && offerId) {
+    const offerResult = await signedRequest({
+      method: 'GET',
+      path: `/v0/offers/${offerId}`,
+      relayUrl: config.relay_url,
+      keys,
+      identity,
+    });
+    if (!offerResult.response.ok) {
+      throw new Error(`Failed to fetch offer (${offerResult.response.status}): ${offerResult.text || offerResult.response.statusText}`);
+    }
+    if (!resolvedBotId && offerResult.data && offerResult.data.seller_bot_id) {
+      resolvedBotId = offerResult.data.seller_bot_id;
+    }
+  }
+
+  if (!resolvedBotId) {
+    throw new Error('Missing recipient bot id. Provide --recipient-bot-id or an offer id.');
+  }
+
+  if (!resolvedKid || !resolvedKey) {
+    const botResult = await signedRequest({
+      method: 'GET',
+      path: `/v0/bots/${resolvedBotId}`,
+      relayUrl: config.relay_url,
+      keys,
+      identity,
+    });
+    if (!botResult.response.ok) {
+      throw new Error(`Failed to fetch bot keys (${botResult.response.status}): ${botResult.text || botResult.response.statusText}`);
+    }
+    if (!resolvedKid && botResult.data && botResult.data.encryption_kid) {
+      resolvedKid = botResult.data.encryption_kid;
+    }
+    if (!resolvedKey && botResult.data && botResult.data.encryption_pubkey_x25519) {
+      resolvedKey = botResult.data.encryption_pubkey_x25519;
+    }
+  }
+
+  if (!resolvedKid || !resolvedKey) {
+    throw new Error('Recipient encryption key data is missing.');
+  }
+
+  return {botId: resolvedBotId, encryptionKid: resolvedKid, encryptionKey: resolvedKey};
+}
+
+async function buildRequestPayload({keys, senderBotId, recipientBotId, recipientKid, recipientKey, jobId, payloadId, body}) {
+  const sodium = await loadSodium();
+  const createdAt = new Date().toISOString();
+  const bodyHash = sha256Hex(body);
+  const canonical = `NBR1|${payloadId}|${jobId}|request|${senderBotId}|${recipientBotId}|${createdAt}|${bodyHash}`;
+  const senderSig = signCanonical(keys, canonical);
+
+  const inner = {
+    prefix: 'NBR1',
+    payload_id: payloadId,
+    job_id: jobId,
+    payload_kind: 'request',
+    sender_bot_id: senderBotId,
+    recipient_bot_id: recipientBotId,
+    created_at: createdAt,
+    body,
+    sender_sig_ed25519: senderSig,
+  };
+
+  const plaintext = Buffer.from(JSON.stringify(inner), 'utf8');
+  const recipientKeyBytes = Buffer.from(recipientKey, 'base64url');
+  const ciphertext = sodium.crypto_box_seal(plaintext, recipientKeyBytes);
+
+  return {
+    envelope: {
+      payload_id: payloadId,
+      payload_kind: 'request',
+      enc_alg: ENC_ALG,
+      recipient_kid: recipientKid,
+      ciphertext_b64: Buffer.from(ciphertext).toString('base64url'),
+    },
+    created_at: createdAt,
+  };
+}
+
+async function runJobCreate(argv) {
+  const {flags} = parseArgs(argv);
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  let payload;
+  let jobId;
+  let offerId;
+  let jobExpiresAt;
+  let payloadMeta = null;
+
+  if (flags.json) {
+    payload = readJsonInput(flags.json, '--json');
+  } else {
+    offerId = flags.offerId || flags.offer;
+    if (!offerId) {
+      throw new Error('Missing --offer-id.');
+    }
+    jobId = flags.jobId || `job_${crypto.randomUUID()}`;
+    jobExpiresAt = flags.jobExpiresAt || undefined;
+
+    if (flags.payloadJson) {
+      const envelope = readJsonInput(flags.payloadJson, '--payload-json');
+      payload = {
+        job_id: jobId,
+        offer_id: offerId,
+        request_payload: envelope,
+      };
+      if (jobExpiresAt) {
+        payload.job_expires_at = jobExpiresAt;
+      }
+    } else {
+      const bodyValue = flags.requestBody || flags.body || flags.requestBodyFile;
+      if (!bodyValue) {
+        throw new Error('Missing request body. Provide --request-body or --request-body-file.');
+      }
+      let body = '';
+      if (flags.requestBodyFile) {
+        body = readTextInput(`@${String(flags.requestBodyFile)}`, '--request-body-file');
+      } else {
+        body = readTextInput(String(bodyValue), '--request-body');
+      }
+      const payloadId = flags.payloadId || `pay_${crypto.randomUUID()}`;
+      const recipient = await resolveRecipient({
+        config,
+        keys,
+        identity,
+        offerId,
+        recipientBotId: flags.recipientBotId,
+        recipientKid: flags.recipientKid,
+        recipientKey: flags.recipientEncryptionKey,
+      });
+
+      const payloadResult = await buildRequestPayload({
+        keys,
+        senderBotId: identity.botId,
+        recipientBotId: recipient.botId,
+        recipientKid: recipient.encryptionKid,
+        recipientKey: recipient.encryptionKey,
+        jobId,
+        payloadId,
+        body,
+      });
+
+      payload = {
+        job_id: jobId,
+        offer_id: offerId,
+        request_payload: payloadResult.envelope,
+      };
+      if (jobExpiresAt) {
+        payload.job_expires_at = jobExpiresAt;
+      }
+      payloadMeta = {
+        payload_id: payloadId,
+        job_id: jobId,
+        payload_kind: 'request',
+        created_at: payloadResult.created_at,
+      };
+    }
+  }
+
+  const jobIdForIdempotency = payload.job_id || jobId;
+  const result = await signedRequest({
+    method: 'POST',
+    path: '/v0/jobs',
+    body: payload,
+    idempotencyKey: jobIdForIdempotency,
+    relayUrl: config.relay_url,
+    keys,
+    identity,
+  });
+
+  if (!result.response.ok) {
+    throw new Error(`Job create failed (${result.response.status}): ${result.text || result.response.statusText}`);
+  }
+
+  if (result.data && result.data.job_id) {
+    state.known_jobs = ensureMap(state.known_jobs, 'job_id');
+    state.known_jobs[result.data.job_id] = result.data;
+  }
+  if (payloadMeta) {
+    state.known_payloads = ensureMap(state.known_payloads, 'payload_id');
+    state.known_payloads[payloadMeta.payload_id] = payloadMeta;
+  }
+  state.relay_url = config.relay_url;
+  state.bot_id = identity.botId;
+  state.signing_kid = identity.signingKid;
+  state.encryption_kid = identity.encryptionKid;
+  saveState(config.state_path, state);
+
+  printJson(result.data, !!flags.compact);
+}
+
+async function runPoll(argv) {
+  const {flags} = parseArgs(argv);
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  const since = flags.sinceEventId || state.last_acked_event_id;
+  const limit = flags.limit || config.poll_limit;
+  const types = flags.types || config.poll_types;
+
+  const result = await signedRequest({
+    method: 'GET',
+    path: '/v0/poll',
+    query: {
+      since_event_id: since,
+      limit,
+      types,
+    },
+    relayUrl: config.relay_url,
+    keys,
+    identity,
+  });
+
+  if (result.response.status === 410) {
+    throw new Error(`Poll cursor too old (410). Suggested resync. Response: ${result.text}`);
+  }
+
+  if (!result.response.ok) {
+    throw new Error(`Poll failed (${result.response.status}): ${result.text || result.response.statusText}`);
+  }
+
+  const events = result.data && result.data.events ? result.data.events : [];
+  state.event_log = Array.isArray(state.event_log) ? state.event_log : [];
+  const existingIds = new Set(state.event_log.map((event) => event.event_id));
+  for (const event of events) {
+    if (!existingIds.has(event.event_id)) {
+      state.event_log.push(event);
+    }
+  }
+  if (state.event_log.length > 500) {
+    state.event_log = state.event_log.slice(-500);
+  }
+
+  let ackedId = state.last_acked_event_id || 0;
+  if (events.length > 0 && flags.ack !== false) {
+    const maxEventId = events.reduce((max, event) => Math.max(max, event.event_id), 0);
+    const ackResult = await signedRequest({
+      method: 'POST',
+      path: '/v0/poll/ack',
+      body: {up_to_event_id: maxEventId},
+      idempotencyKey: crypto.randomBytes(16).toString('hex'),
+      relayUrl: config.relay_url,
+      keys,
+      identity,
+    });
+    if (!ackResult.response.ok) {
+      throw new Error(`Ack failed (${ackResult.response.status}): ${ackResult.text || ackResult.response.statusText}`);
+    }
+    if (ackResult.data && typeof ackResult.data.last_acked_event_id === 'number') {
+      ackedId = ackResult.data.last_acked_event_id;
+    } else {
+      ackedId = maxEventId;
+    }
+  }
+
+  if (typeof ackedId === 'number') {
+    state.last_acked_event_id = ackedId;
+  }
+  state.relay_url = config.relay_url;
+  state.bot_id = identity.botId;
+  state.signing_kid = identity.signingKid;
+  state.encryption_kid = identity.encryptionKid;
+  saveState(config.state_path, state);
+
+  if (flags.output) {
+    fs.writeFileSync(String(flags.output), stringifyJson(result.data, false));
+  } else {
+    printJson(result.data, !!flags.compact);
+  }
+}
+
+function runCronEnable(argv) {
+  const {flags} = parseArgs(argv);
+  const config = buildConfig();
+  const schedule = flags.schedule || '*/5 * * * *';
+  const nodeBin = process.execPath;
+  const cliPath = path.resolve(__filename);
+
+  const envPairs = [];
+  if (getEnvValue('NBR_RELAY_URL')) {
+    envPairs.push(`NBR_RELAY_URL=${shellEscape(getEnvValue('NBR_RELAY_URL'))}`);
+  }
+  if (getEnvValue('NBR_STATE_PATH')) {
+    envPairs.push(`NBR_STATE_PATH=${shellEscape(getEnvValue('NBR_STATE_PATH'))}`);
+  }
+  if (getEnvValue('NBR_POLL_LIMIT')) {
+    envPairs.push(`NBR_POLL_LIMIT=${shellEscape(getEnvValue('NBR_POLL_LIMIT'))}`);
+  }
+  if (getEnvValue('NBR_POLL_TYPES')) {
+    envPairs.push(`NBR_POLL_TYPES=${shellEscape(getEnvValue('NBR_POLL_TYPES'))}`);
+  }
+
+  const envPrefix = envPairs.length > 0 ? `${envPairs.join(' ')} ` : '';
+  const command = `${shellEscape(nodeBin)} ${shellEscape(cliPath)} poll`;
+  const cronLine = `${schedule} ${envPrefix}${command} # nanobazaar-cli`;
+
+  const listResult = spawnSync('crontab', ['-l'], {encoding: 'utf8'});
+  const current = listResult.status === 0 ? listResult.stdout : '';
+  const filtered = current
+    .split(/\r?\n/)
+    .filter((line) => line.trim() && !line.includes('# nanobazaar-cli'))
+    .join('\n');
+
+  const next = [filtered, cronLine].filter(Boolean).join('\n') + '\n';
+  const installResult = spawnSync('crontab', ['-'], {input: next, encoding: 'utf8'});
+  if (installResult.status !== 0) {
+    throw new Error(`Failed to install cron entry: ${installResult.stderr || 'unknown error'}`);
+  }
+
+  console.log('Cron enabled.');
+  console.log(`Schedule: ${schedule}`);
+  console.log(`Command: ${envPrefix}${command}`);
+  console.log(`State path: ${config.state_path}`);
+}
+
+function runCronDisable() {
+  const listResult = spawnSync('crontab', ['-l'], {encoding: 'utf8'});
+  if (listResult.status !== 0) {
+    console.log('No crontab entries found.');
+    return;
+  }
+  const filtered = listResult.stdout
+    .split(/\r?\n/)
+    .filter((line) => line.trim() && !line.includes('# nanobazaar-cli'))
+    .join('\n');
+
+  const next = filtered ? `${filtered}\n` : '';
+  const installResult = spawnSync('crontab', ['-'], {input: next, encoding: 'utf8'});
+  if (installResult.status !== 0) {
+    throw new Error(`Failed to remove cron entry: ${installResult.stderr || 'unknown error'}`);
+  }
+  console.log('Cron disabled.');
+}
+
+function loadVersion() {
+  try {
+    const skillJson = JSON.parse(fs.readFileSync(path.resolve(BASE_DIR, 'skill.json'), 'utf8'));
+    return skillJson.version || 'unknown';
+  } catch (_) {
+    return 'unknown';
+  }
+}
+
+async function main() {
+  const argv = process.argv.slice(2);
+  if (argv.length === 0) {
+    printHelp();
+    return;
+  }
+
+  if (argv.includes('--help') || argv[0] === 'help') {
+    printHelp();
+    return;
+  }
+
+  if (argv.includes('--version') || argv[0] === 'version') {
+    console.log(loadVersion());
+    return;
+  }
+
+  const command = argv[0];
+  const rest = argv.slice(1);
+
+  switch (command) {
+    case 'status':
+      await runStatus();
+      return;
+    case 'config': {
+      const {flags} = parseArgs(rest);
+      const config = buildConfig();
+      printConfig(config, flags.json || flags.compact);
+      return;
+    }
+    case 'setup':
+      runSetup(rest);
+      return;
+    case 'wallet':
+      runWallet(rest);
+      return;
+    case 'search':
+      await runSearch(rest);
+      return;
+    case 'offer': {
+      const sub = rest[0];
+      if (sub === 'create') {
+        await runOfferCreate(rest.slice(1));
+        return;
+      }
+      throw new Error('Unknown offer command. Use: offer create');
+    }
+    case 'job': {
+      const sub = rest[0];
+      if (sub === 'create') {
+        await runJobCreate(rest.slice(1));
+        return;
+      }
+      throw new Error('Unknown job command. Use: job create');
+    }
+    case 'poll':
+      await runPoll(rest);
+      return;
+    case 'cron': {
+      const sub = rest[0];
+      if (sub === 'enable') {
+        runCronEnable(rest.slice(1));
+        return;
+      }
+      if (sub === 'disable') {
+        runCronDisable();
+        return;
+      }
+      throw new Error('Unknown cron command. Use: cron enable|disable');
+    }
+    default:
+      throw new Error(`Unknown command: ${command}`);
+  }
+}
+
+main().catch((err) => {
+  console.error(err.message || err);
+  process.exit(1);
+});
