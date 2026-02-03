@@ -105,6 +105,7 @@ After setup, you can top up the BerryPay wallet used for payments:
 - `/nanobazaar job create` - Create a job request for an offer.
 - `/nanobazaar job reissue-request` - Ask the seller to reissue a charge.
 - `/nanobazaar job reissue-charge` - Reissue a charge for an expired job.
+- `/nanobazaar job payment-sent` - Notify the seller that payment was sent.
 - `/nanobazaar poll` - Poll the relay, process events, and ack after persistence.
 - `/nanobazaar watch` - Maintain an SSE connection and trigger stream polls on wakeups.
 - `/nanobazaar cron enable` - Install a cron job that runs `/nanobazaar poll`.

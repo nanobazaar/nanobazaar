@@ -24,11 +24,12 @@ import (
 
 const (
 	encAlgSealBox                = "libsodium.crypto_box_seal.x25519.xsalsa20poly1305"
-	jobDefaultExpiry             = 48 * time.Hour
-	jobMaxExpiry                 = 7 * 24 * time.Hour
-	chargeMaxExpiry              = 24 * time.Hour
+	jobDefaultExpiry             = 7 * 24 * time.Hour
+	jobMaxExpiry                 = 30 * 24 * time.Hour
+	chargeMaxExpiry              = 30 * 24 * time.Hour
 	jobRequestedEventType        = "job.requested"
 	jobChargeCreatedEventType    = "job.charge_created"
+	jobPaymentSentEventType      = "job.payment_sent"
 	jobChargeReissuedEventType   = "job.charge_reissued"
 	jobChargeReissueReqEventType = "job.charge_reissue_requested"
 	jobPaidEventType             = "job.paid"
@@ -81,6 +82,13 @@ type chargeCreateRequest struct {
 type chargeReissueRequest struct {
 	Note               string `json:"note"`
 	RequestedExpiresAt string `json:"requested_expires_at"`
+}
+
+type paymentSentRequest struct {
+	PaymentBlockHash string `json:"payment_block_hash"`
+	SentAt           string `json:"sent_at"`
+	AmountRawSent    string `json:"amount_raw_sent"`
+	Note             string `json:"note"`
 }
 
 type markPaidRequest struct {
@@ -625,6 +633,103 @@ func (h *JobHandler) Charge(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("job_charge job_id=%s seller_bot_id=%s amount_raw=%s", updated.JobID, updated.SellerBotID, payload.AmountRaw)
 	writeJSON(w, http.StatusOK, jobToResponse(updated))
+}
+
+func (h *JobHandler) PaymentSent(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.Store == nil {
+		writeJSONError(w, http.StatusInternalServerError, "store unavailable")
+		return
+	}
+	jobID := chi.URLParam(r, "job_id")
+	if jobID == "" {
+		writeJSONError(w, http.StatusBadRequest, "missing job_id")
+		return
+	}
+	job, err := h.Store.GetJob(r.Context(), jobID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSONError(w, http.StatusNotFound, "job not found")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "job lookup failed")
+		return
+	}
+	job, err = h.applyExpiry(r.Context(), job)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "job expiry failed")
+		return
+	}
+
+	caller := r.Header.Get(headerBotID)
+	if caller == "" {
+		writeJSONError(w, http.StatusUnauthorized, "missing bot_id")
+		return
+	}
+	if caller != job.BuyerBotID {
+		writeJSONError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	if job.Status != string(domain.JobChargeCreated) {
+		writeJSONError(w, http.StatusConflict, "job not payable")
+		return
+	}
+	if !job.ChargeID.Valid {
+		writeJSONError(w, http.StatusConflict, "charge missing")
+		return
+	}
+	if job.ChargeExpiresAt.Valid && h.now().After(job.ChargeExpiresAt.Time) {
+		writeJSONError(w, http.StatusConflict, "charge expired")
+		return
+	}
+
+	var payload paymentSentRequest
+	body, _ := readAll(r)
+	if len(bytes.TrimSpace(body)) > 0 {
+		if err := json.Unmarshal(body, &payload); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+	}
+
+	now := h.now()
+	sentAt := now
+	if payload.SentAt != "" {
+		parsed, err := parseTime(payload.SentAt)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid sent_at")
+			return
+		}
+		if parsed.After(now.Add(5 * time.Minute)) {
+			writeJSONError(w, http.StatusBadRequest, "sent_at in future")
+			return
+		}
+		sentAt = parsed
+	}
+
+	eventPayload := map[string]any{
+		"job_id":       job.JobID,
+		"buyer_bot_id": job.BuyerBotID,
+		"sent_at":      sentAt.UTC().Format(time.RFC3339Nano),
+	}
+	if payload.PaymentBlockHash != "" {
+		eventPayload["payment_block_hash"] = payload.PaymentBlockHash
+	}
+	if payload.AmountRawSent != "" {
+		eventPayload["amount_raw_sent"] = payload.AmountRawSent
+	}
+	if payload.Note != "" {
+		eventPayload["note"] = payload.Note
+	}
+
+	if err := emitEvent(r.Context(), h.Store, h.StreamHub, job.SellerBotID, jobPaymentSentEventType, eventPayload); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "event create failed")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"job_id":  job.JobID,
+		"sent_at": eventPayload["sent_at"],
+	})
 }
 
 func (h *JobHandler) ReissueChargeRequest(w http.ResponseWriter, r *http.Request) {

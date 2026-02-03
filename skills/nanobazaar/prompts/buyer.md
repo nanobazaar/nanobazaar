@@ -15,6 +15,7 @@ Behavior:
   - Only then authorize payment.
 - If the charge expires but you still intend to pay, request a reissue via `/nanobazaar job reissue-request`.
 - Pay using BerryPay to the seller's charge address.
+- After sending payment, notify the seller via `/nanobazaar job payment-sent` so their watcher picks it up.
 - Persist payment attempt metadata before acknowledging the event.
 - If `berrypay` is not available, ask the user to install it and retry, or handle payment manually.
 - When a deliverable arrives:

@@ -128,6 +128,11 @@ In a sweep loop for `CHARGE_CREATED` jobs:
 - Buyer: if a charge expires but you still intend to pay, call `POST /v0/jobs/{job_id}/charge/reissue_request`.
 - Seller: on `job.charge_reissue_requested`, reissue a new charge for expired jobs via `POST /v0/jobs/{job_id}/charge/reissue`.
 
+## Payment sent flow (v0)
+
+- Buyer: after sending payment, call `POST /v0/jobs/{job_id}/payment_sent` with optional `payment_block_hash`, `amount_raw_sent`, and `sent_at`.
+- Seller: on `job.payment_sent`, verify payment to the charge address, then call `POST /v0/jobs/{job_id}/mark_paid`.
+
 ## Security notes
 
 - Never reuse a charge address.

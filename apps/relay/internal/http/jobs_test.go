@@ -303,6 +303,78 @@ func TestJobChargeExpiresAtPreservesMilliseconds(t *testing.T) {
 	}
 }
 
+func TestJobPaymentSentEmitsEvent(t *testing.T) {
+	ctx := context.Background()
+	db := setupTestDB(t)
+	defer db.Close()
+
+	st := store.New(db)
+	now := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return now }
+
+	buyerID := "bot_buyer"
+	sellerID := "bot_seller"
+	offerID := "offer_pay"
+	seedJobBot(t, st, buyerID, now)
+	seedJobBot(t, st, sellerID, now)
+	seedJobOffer(t, st, offerID, sellerID, now)
+
+	router := NewRouter(RouterConfig{Store: st}, WithClock(clock))
+
+	createPayload := payloadEnvelopeInput{
+		PayloadID:     "pay_req_pay",
+		PayloadKind:   payloadKindRequest,
+		EncAlg:        encAlgSealBox,
+		RecipientKid:  "kid_seller",
+		CiphertextB64: base64.RawURLEncoding.EncodeToString([]byte("request")),
+	}
+	createReq := jobCreateRequest{
+		JobID:          "job_pay_1",
+		OfferID:        offerID,
+		RequestPayload: createPayload,
+	}
+	create := newJSONRequest(t, http.MethodPost, "/v0/jobs", mustJSONBytes(t, createReq))
+	create.Header.Set(headerBotID, buyerID)
+	createRec := httptestRequest(t, router, create)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+
+	chargeReq := chargeCreateRequest{
+		ChargeID:        "chg_pay_1",
+		Address:         "nano_addr_pay",
+		AmountRaw:       "1000",
+		ChargeExpiresAt: now.Add(2 * time.Hour).Format(time.RFC3339),
+		ChargeSig:       "sig",
+	}
+	charge := newJSONRequest(t, http.MethodPost, "/v0/jobs/job_pay_1/charge", mustJSONBytes(t, chargeReq))
+	charge.Header.Set(headerBotID, sellerID)
+	chargeRec := httptestRequest(t, router, charge)
+	if chargeRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", chargeRec.Code, chargeRec.Body.String())
+	}
+
+	paymentReq := paymentSentRequest{PaymentBlockHash: "block_hash_1"}
+	payment := newJSONRequest(t, http.MethodPost, "/v0/jobs/job_pay_1/payment_sent", mustJSONBytes(t, paymentReq))
+	payment.Header.Set(headerBotID, buyerID)
+	paymentRec := httptestRequest(t, router, payment)
+	if paymentRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", paymentRec.Code, paymentRec.Body.String())
+	}
+
+	sellerEvents, err := st.ListEventsAfterID(ctx, sqlc.ListEventsAfterIDParams{
+		RecipientBotID: sellerID,
+		SinceEventID:   0,
+		Limit:          10,
+	})
+	if err != nil {
+		t.Fatalf("list seller events: %v", err)
+	}
+	if !containsEventType(sellerEvents, jobPaymentSentEventType) {
+		t.Fatalf("expected job.payment_sent event for seller")
+	}
+}
+
 func TestJobChargeExpiresAtRejectsNonCanonical(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()

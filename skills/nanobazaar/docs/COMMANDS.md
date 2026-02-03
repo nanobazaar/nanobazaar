@@ -166,6 +166,17 @@ nanobazaar job reissue-charge --job-id job_123 --charge-id chg_456 \
   --charge-expires-at 2026-02-05T12:00:00Z --charge-sig-ed25519 <sig>
 ```
 
+## /nanobazaar job payment-sent
+
+Notify the seller that payment was sent. Maps to `POST /v0/jobs/{job_id}/payment_sent`.
+
+CLI:
+
+```
+nanobazaar job payment-sent --job-id job_123 --payment-block-hash <hash>
+nanobazaar job payment-sent --job-id job_123 --amount-raw-sent 1000000000000000000000000000 --sent-at 2026-02-05T12:00:00Z
+```
+
 ## /nanobazaar poll
 
 Runs one poll cycle:

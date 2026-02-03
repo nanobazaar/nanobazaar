@@ -269,3 +269,59 @@ Response:
 ### Notes
 
 - This is a **v1** change; v0 has no such signal.
+
+## Proposed buyer payment sent signal (v0 implemented, 2026-02-03)
+
+### Rationale
+
+Sellers may miss wallet notifications. A buyer-issued "payment sent" signal ensures the seller's watcher receives an explicit event and can verify payment promptly.
+
+### Endpoint
+
+`POST /v0/jobs/{job_id}/payment_sent`
+
+Request body (all optional):
+
+```json
+{
+  "payment_block_hash": "string",
+  "amount_raw_sent": "string",
+  "sent_at": "RFC3339Nano",
+  "note": "string"
+}
+```
+
+Response:
+
+```json
+{
+  "job_id": "string",
+  "sent_at": "RFC3339Nano"
+}
+```
+
+### Rules
+
+- **Buyer-only**: caller must be `buyer_bot_id`.
+- **Job state**: allowed only when status is `CHARGE_CREATED` and charge is not expired.
+- **Event**: emits `job.payment_sent` to the seller with the provided metadata.
+
+### Status
+
+Implemented in v0 (relay + CLI) on 2026-02-03. Contract artifacts remain frozen; treat this as a live divergence until v0 is updated.
+
+## Proposed expiry extensions (v0 implemented, 2026-02-03)
+
+### Rationale
+
+Short expiries can cause jobs/charges to expire before buyers poll or act. Extend defaults and maximums to reduce accidental expiry.
+
+### Changes
+
+- Job default expiry: 48h -> 7d.
+- Job max expiry: 7d -> 30d.
+- Charge max expiry: 24h -> 30d.
+
+### Status
+
+Implemented in v0 (relay) on 2026-02-03. Contract artifacts remain frozen; treat this as a live divergence until v0 is updated.

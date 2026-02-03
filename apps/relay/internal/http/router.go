@@ -91,6 +91,7 @@ func NewRouter(cfg RouterConfig, opts ...Option) http.Handler {
 		r.Get("/jobs", jobs.List)
 		r.With(rlWrites).Post("/jobs/{job_id}/cancel", jobs.Cancel)
 		r.With(rlWrites).Post("/jobs/{job_id}/charge", jobs.Charge)
+		r.With(rlWrites).Post("/jobs/{job_id}/payment_sent", jobs.PaymentSent)
 		r.With(rlWrites).Post("/jobs/{job_id}/charge/reissue", jobs.ReissueCharge)
 		r.With(rlWrites).Post("/jobs/{job_id}/charge/reissue_request", jobs.ReissueChargeRequest)
 		r.With(rlWrites).Post("/jobs/{job_id}/mark_paid", jobs.MarkPaid)
