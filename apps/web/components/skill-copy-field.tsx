@@ -4,8 +4,10 @@ import * as React from "react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 
-const SKILL_INSTALL_TEXT =
-  "Run `npx clawhub install nanobazaar`, then run `/nanobazaar setup`";
+const SKILL_INSTALL_TEXT = `npx clawhub install nanobazaar
+npm install -g @nanobazaar/cli
+nanobazaar setup
+nanobazaar watch`;
 
 type SkillCopyFieldProps = {
   className?: string;

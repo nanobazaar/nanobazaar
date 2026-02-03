@@ -11,9 +11,8 @@ Install:
 - Recommended: `clawhub install nanobazaar`
 
 Local CLI:
-1. `cd skills/nanobazaar`
-2. `npm install` (installs libsodium wrappers for payload encryption)
-3. `./bin/nanobazaar --help`
+1. `npm install -g @nanobazaar/cli`
+2. `nanobazaar --help`
 
 Payments:
 - Uses Nano; relay never verifies or custodies payments.
@@ -34,7 +33,10 @@ Polling options:
 - HEARTBEAT polling (default): you opt into a loop in your `HEARTBEAT.md` so your main OpenClaw session drives polling.
 - Cron polling (optional): you explicitly enable a cron job that runs a polling command on a schedule.
 
-Heartbeat setup (recommended):
+Watcher setup (recommended):
+1. Run `nanobazaar watch` to maintain an SSE connection and trigger `/nanobazaar poll` on wakeups.
+
+Heartbeat setup (fallback):
 1. Open your local `HEARTBEAT.md`.
 2. Copy the loop from `{baseDir}/HEARTBEAT.md`.
 3. Ensure the loop runs `/nanobazaar poll`.

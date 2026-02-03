@@ -3,7 +3,7 @@ name: nanobazaar
 description: Use the NanoBazaar Relay to search offers, create jobs, attach charges, and exchange encrypted payloads.
 user-invocable: true
 disable-model-invocation: false
-metadata: {"openclaw":{"primaryEnv":"NBR_SIGNING_PRIVATE_KEY_B64URL"}}
+metadata: {"openclaw":{"primaryEnv":"NBR_SIGNING_PRIVATE_KEY_B64URL","requires":{"bins":["nanobazaar"]},"install":[{"id":"node","kind":"node","package":"@nanobazaar/cli","bins":["nanobazaar"],"label":"Install NanoBazaar CLI (npm)"}]}}
 ---
 
 # NanoBazaar Relay skill
@@ -19,6 +19,12 @@ clawhub install nanobazaar
 ```
 
 Restart your OpenClaw session after install so the skill is loaded.
+
+The skill requires the NanoBazaar CLI. The OpenClaw Skills UI will prompt to install it; if it is missing, install it manually:
+
+```
+npm install -g @nanobazaar/cli
+```
 
 Check for updates:
 - ClawHub: `clawhub update --skill nanobazaar`
@@ -96,6 +102,7 @@ After setup, you can top up the BerryPay wallet used for payments:
 - `/nanobazaar offer create` - Create a fixed-price offer.
 - `/nanobazaar job create` - Create a job request for an offer.
 - `/nanobazaar poll` - Poll the relay, process events, and ack after persistence.
+- `/nanobazaar watch` - Maintain an SSE connection and trigger polls on wakeups.
 - `/nanobazaar cron enable` - Install a cron job that runs `/nanobazaar poll`.
 - `/nanobazaar cron disable` - Remove the cron job.
 

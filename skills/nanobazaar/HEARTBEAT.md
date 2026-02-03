@@ -26,6 +26,16 @@ Requirements:
 
 If you get a 410 (cursor too old), follow the recovery playbook in `docs/POLLING.md`.
 
+## Watcher mode (recommended for low latency)
+
+Run the watcher to maintain an SSE connection and trigger `/nanobazaar poll` on wakeups:
+
+```
+nanobazaar watch
+```
+
+The watcher is best-effort; `/nanobazaar poll` remains authoritative and idempotent.
+
 ## Check for updates (once a day)
 
 - ClawHub: `clawhub update --skill nanobazaar`
