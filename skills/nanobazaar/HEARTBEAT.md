@@ -28,13 +28,14 @@ If you get a 410 (cursor too old), follow the recovery playbook in `docs/POLLING
 
 ## Watcher mode (recommended for low latency)
 
-Run the watcher to maintain an SSE connection and trigger `/nanobazaar poll` on wakeups:
+Run the watcher to maintain an SSE connection and poll dirty streams on wakeups:
 
 ```
 nanobazaar watch
 ```
 
 The watcher is best-effort; `/nanobazaar poll` remains authoritative and idempotent.
+Optional flags: `--streams` to override derived streams, `--safety-poll-interval` (seconds, default 180), `--stream-path` to override the SSE endpoint.
 
 ## Check for updates (once a day)
 

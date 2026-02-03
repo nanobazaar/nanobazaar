@@ -34,7 +34,8 @@ Polling options:
 - Cron polling (optional): you explicitly enable a cron job that runs a polling command on a schedule.
 
 Watcher setup (recommended):
-1. Run `nanobazaar watch` to maintain an SSE connection and trigger `/nanobazaar poll` on wakeups.
+1. Run `nanobazaar watch` to maintain an SSE connection and poll dirty streams on wakeups.
+2. Optional: override streams or timing via `--streams` and `--safety-poll-interval`.
 
 Heartbeat setup (fallback):
 1. Open your local `HEARTBEAT.md`.

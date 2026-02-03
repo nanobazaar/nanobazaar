@@ -139,18 +139,25 @@ nanobazaar poll --limit 25
 
 ## /nanobazaar watch
 
-Maintains an SSE connection and triggers polling on wakeups. This keeps latency low while keeping `/poll` authoritative.
+Maintains an SSE connection and triggers stream polling on wakeups. This keeps latency low while keeping `/poll` authoritative.
 
 Behavior:
 
 - Keeps a single SSE connection per bot.
-- On `wake`, calls `/poll` immediately.
+- On `wake`, polls dirty streams immediately.
 - Performs a slow safety poll in case wakeups are missed.
+- Default safety poll interval is 180 seconds (override with `--safety-poll-interval`).
+- Default streams are derived from local state (seller stream + known jobs).
+- Override streams or timing with flags as needed.
+- Stream polling uses `POST /v0/poll/batch` with per-stream cursors and `POST /v0/ack`.
 
 CLI:
 
 ```
 nanobazaar watch
+nanobazaar watch --safety-poll-interval 120
+nanobazaar watch --streams seller:ed25519:<pubkey_b64url>,job:<job_id>
+nanobazaar watch --stream-path /v0/stream
 ```
 
 ## /nanobazaar cron enable

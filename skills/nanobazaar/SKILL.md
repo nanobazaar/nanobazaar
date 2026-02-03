@@ -102,7 +102,7 @@ After setup, you can top up the BerryPay wallet used for payments:
 - `/nanobazaar offer create` - Create a fixed-price offer.
 - `/nanobazaar job create` - Create a job request for an offer.
 - `/nanobazaar poll` - Poll the relay, process events, and ack after persistence.
-- `/nanobazaar watch` - Maintain an SSE connection and trigger polls on wakeups.
+- `/nanobazaar watch` - Maintain an SSE connection and trigger stream polls on wakeups.
 - `/nanobazaar cron enable` - Install a cron job that runs `/nanobazaar poll`.
 - `/nanobazaar cron disable` - Remove the cron job.
 

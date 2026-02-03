@@ -449,6 +449,9 @@ async function runStatus() {
     console.log('Bot ID: (missing keys; run setup)');
   }
   console.log(`Last acked event id: ${state.last_acked_event_id ?? 0}`);
+  if (state.stream_cursors && typeof state.stream_cursors === 'object' && !Array.isArray(state.stream_cursors)) {
+    console.log(`Stream cursors: ${Object.keys(state.stream_cursors).length}`);
+  }
   console.log(`Known offers: ${countRecords(state.known_offers)}`);
   console.log(`Known jobs: ${countRecords(state.known_jobs)}`);
   console.log(`Known payloads: ${countRecords(state.known_payloads)}`);
@@ -934,6 +937,65 @@ function parsePositiveInt(value, label) {
   return Math.floor(parsed);
 }
 
+function parseOptionalPositiveInt(value, label) {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return undefined;
+  }
+  return parsePositiveInt(value, label);
+}
+
+function ensureStreamCursorMap(state) {
+  if (!state.stream_cursors || typeof state.stream_cursors !== 'object' || Array.isArray(state.stream_cursors)) {
+    state.stream_cursors = {};
+  }
+  return state.stream_cursors;
+}
+
+function getStreamCursor(state, stream) {
+  const cursors = ensureStreamCursorMap(state);
+  const cursor = cursors[stream];
+  return typeof cursor === 'number' && Number.isFinite(cursor) ? cursor : 0;
+}
+
+function setStreamCursor(state, stream, cursor) {
+  if (typeof cursor !== 'number' || !Number.isFinite(cursor)) {
+    return;
+  }
+  const cursors = ensureStreamCursorMap(state);
+  cursors[stream] = cursor;
+}
+
+function appendEvents(state, events) {
+  if (!Array.isArray(events) || events.length === 0) {
+    return 0;
+  }
+  state.event_log = Array.isArray(state.event_log) ? state.event_log : [];
+  const existingIds = new Set(
+    state.event_log
+      .map((event) => (event ? event.event_id : undefined))
+      .filter((id) => id !== undefined && id !== null),
+  );
+  let added = 0;
+  for (const event of events) {
+    if (!event) {
+      continue;
+    }
+    const eventId = event.event_id;
+    if (eventId !== undefined && eventId !== null) {
+      if (existingIds.has(eventId)) {
+        continue;
+      }
+      existingIds.add(eventId);
+    }
+    state.event_log.push(event);
+    added += 1;
+  }
+  if (state.event_log.length > 500) {
+    state.event_log = state.event_log.slice(-500);
+  }
+  return added;
+}
+
 function backoffDelayMs(attempt, opts) {
   const baseMs = opts && opts.baseMs ? opts.baseMs : 500;
   const maxMs = opts && opts.maxMs ? opts.maxMs : 30000;
@@ -1091,17 +1153,118 @@ async function runWatch(argv) {
     ? parsePositiveInt(flags.safetyPollInterval, '--safety-poll-interval')
     : 180;
 
-  const pollArgs = [];
-  if (flags.ack === false) {
-    pollArgs.push('--no-ack');
-  }
-
   const printPolls = !!flags.printPolls;
+  const pollLimit = parseOptionalPositiveInt(flags.limit, '--limit')
+    ?? parseOptionalPositiveInt(config.poll_limit, 'NBR_POLL_LIMIT');
+
+  ensureStreamCursorMap(state);
+  const streamSet = new Set(streams);
 
   let pollInFlight = false;
   let pollQueued = false;
+  let queuedReason = null;
+  const queuedStreams = new Set();
 
-  async function runPollLoop(reason) {
+  function normalizeWakeStreams(candidate) {
+    if (!Array.isArray(candidate) || candidate.length === 0) {
+      return streams;
+    }
+    const filtered = candidate.map((stream) => String(stream)).filter((stream) => streamSet.has(stream));
+    return filtered.length > 0 ? filtered : streams;
+  }
+
+  async function pollBatchStreams(streamList, reason) {
+    const uniqueStreams = uniqStrings(streamList);
+    if (uniqueStreams.length === 0) {
+      return {events: 0, acked: 0, streams: 0};
+    }
+
+    const requestStreams = uniqueStreams.map((stream) => ({
+      stream,
+      since: getStreamCursor(state, stream),
+    }));
+
+    const body = {streams: requestStreams};
+    if (pollLimit !== undefined) {
+      body.limit = pollLimit;
+    }
+
+    const result = await signedRequest({
+      method: 'POST',
+      path: '/v0/poll/batch',
+      body,
+      relayUrl: config.relay_url,
+      keys,
+      identity,
+    });
+
+    if (!result.response.ok) {
+      throw new Error(`Poll batch failed (${result.response.status}): ${result.text || result.response.statusText}`);
+    }
+
+    const results = result.data && Array.isArray(result.data.results) ? result.data.results : [];
+    const allEvents = [];
+    for (const entry of results) {
+      if (entry && Array.isArray(entry.events)) {
+        allEvents.push(...entry.events);
+      }
+    }
+
+    state.relay_url = config.relay_url;
+    state.bot_id = identity.botId;
+    state.signing_kid = identity.signingKid;
+    state.encryption_kid = identity.encryptionKid;
+
+    const addedEvents = appendEvents(state, allEvents);
+    if (addedEvents > 0) {
+      saveState(config.state_path, state);
+    }
+
+    let ackedStreams = 0;
+    if (flags.ack !== false) {
+      for (const entry of results) {
+        if (!entry || !entry.stream) {
+          continue;
+        }
+        const next = entry.next;
+        const current = getStreamCursor(state, entry.stream);
+        if (typeof next !== 'number' || !Number.isFinite(next) || next === current) {
+          continue;
+        }
+
+        const ackResult = await signedRequest({
+          method: 'POST',
+          path: '/v0/ack',
+          body: {stream: entry.stream, ack: next},
+          idempotencyKey: crypto.randomBytes(16).toString('hex'),
+          relayUrl: config.relay_url,
+          keys,
+          identity,
+        });
+
+        if (!ackResult.response.ok) {
+          throw new Error(`Ack failed (${ackResult.response.status}): ${ackResult.text || ackResult.response.statusText}`);
+        }
+
+        setStreamCursor(state, entry.stream, next);
+        saveState(config.state_path, state);
+        ackedStreams += 1;
+      }
+    }
+
+    if (printPolls && result.data) {
+      printJson(result.data, !!flags.compact);
+    }
+
+    return {events: allEvents.length, acked: ackedStreams, streams: uniqueStreams.length, reason};
+  }
+
+  async function runPollLoop(reason, streamList) {
+    const normalized = normalizeWakeStreams(streamList);
+    for (const stream of normalized) {
+      queuedStreams.add(stream);
+    }
+    queuedReason = reason;
     pollQueued = true;
     if (pollInFlight) {
       return;
@@ -1110,12 +1273,16 @@ async function runWatch(argv) {
     try {
       while (pollQueued) {
         pollQueued = false;
+        const batch = Array.from(queuedStreams);
+        queuedStreams.clear();
+        const label = queuedReason || reason;
+        queuedReason = null;
         try {
-          const pollResult = await runPoll(pollArgs, {quiet: !printPolls});
-          console.error(`[watch] poll ok (${reason}): events=${pollResult.events.length} acked=${pollResult.ackedId ?? 'n/a'}`);
+          const summary = await pollBatchStreams(batch, label);
+          console.error(`[watch] poll ok (${label}): streams=${summary.streams} events=${summary.events} acked_streams=${flags.ack === false ? 'disabled' : summary.acked}`);
         } catch (err) {
-          console.error(`[watch] poll error (${reason}): ${err && err.message ? err.message : String(err)}`);
-          // Keep running; poll is idempotent and can be retried on the next wake/safety interval.
+          console.error(`[watch] poll error (${label}): ${err && err.message ? err.message : String(err)}`);
+          // Keep running; polling is idempotent and can be retried on the next wake/safety interval.
         }
       }
     } finally {
@@ -1151,6 +1318,34 @@ async function runWatch(argv) {
   void runPollLoop('startup');
 
   let attempt = 0;
+  function extractWakeStreams(evt) {
+    if (!evt) {
+      return null;
+    }
+    if (evt.event === 'wake') {
+      if (!evt.data) {
+        return [];
+      }
+      try {
+        const parsed = JSON.parse(evt.data);
+        return parsed && Array.isArray(parsed.streams) ? parsed.streams : [];
+      } catch (_) {
+        return [];
+      }
+    }
+    if (evt.data) {
+      try {
+        const parsed = JSON.parse(evt.data);
+        if (parsed && (parsed.event === 'wake' || parsed.type === 'wake' || parsed.hint === 'poll')) {
+          return Array.isArray(parsed.streams) ? parsed.streams : [];
+        }
+      } catch (_) {
+        // ignore non-JSON payloads
+      }
+    }
+    return null;
+  }
+
   while (!signal.aborted) {
     try {
       const {url, init} = buildSignedFetch({
@@ -1178,25 +1373,9 @@ async function runWatch(argv) {
       await consumeSseStream(response.body, {
         signal,
         onEvent: (evt) => {
-          if (!evt) {
-            return;
-          }
-
-          if (evt.event === 'wake') {
-            void runPollLoop('wake');
-            return;
-          }
-
-          // Fallback: handle "message" events where the payload indicates a wake.
-          if (evt.data) {
-            try {
-              const parsed = JSON.parse(evt.data);
-              if (parsed && (parsed.event === 'wake' || parsed.type === 'wake' || parsed.hint === 'poll')) {
-                void runPollLoop('wake');
-              }
-            } catch (_) {
-              // ignore non-JSON payloads
-            }
+          const wakeStreams = extractWakeStreams(evt);
+          if (wakeStreams !== null) {
+            void runPollLoop('wake', wakeStreams);
           }
         },
       });
