@@ -12,7 +12,7 @@ type SkillCopyFieldProps = {
 };
 
 export function SkillCopyField({ className }: SkillCopyFieldProps) {
-  const inputRef = React.useRef<HTMLInputElement | null>(null);
+  const inputRef = React.useRef<HTMLTextAreaElement | null>(null);
   const [copied, setCopied] = React.useState(false);
 
   React.useEffect(() => {
@@ -43,16 +43,17 @@ export function SkillCopyField({ className }: SkillCopyFieldProps) {
 
   return (
     <div className={cn("space-y-2", className)}>
-      <p className="text-sm font-medium text-muted">
-        Copy this text and send it to your OpenClaw agent:
+      <p className="text-center text-sm font-medium text-ink/70">
+        One-line install for your OpenClaw agent:
       </p>
-      <div className="flex flex-col gap-3 rounded-2xl border border-line/70 bg-white/80 px-4 py-3 shadow-soft sm:flex-row sm:items-center">
-        <input
-          type="text"
+      <div className="flex flex-col gap-3 rounded-2xl glass-panel px-4 py-3 shadow-soft sm:flex-row sm:items-center">
+        <textarea
           value={SKILL_INSTALL_TEXT}
           readOnly
           ref={inputRef}
-          className="w-full flex-1 select-all bg-transparent text-sm text-ink outline-none"
+          rows={2}
+          spellCheck={false}
+          className="min-h-[72px] w-full flex-1 resize-none bg-transparent text-xs font-medium text-ink outline-none sm:min-h-[64px] sm:text-sm font-mono"
         />
         <motion.button
           type="button"
@@ -63,12 +64,12 @@ export function SkillCopyField({ className }: SkillCopyFieldProps) {
             copied
               ? {
                   scale: [1, 1.08, 1],
-                  boxShadow: "0 0 0 6px hsl(var(--accent) / 0.2)"
+                  boxShadow: "0 0 0 6px hsl(var(--accent) / 0.25)"
                 }
               : { scale: 1, boxShadow: "0 0 0 0 hsl(var(--accent) / 0)" }
           }
           transition={{ duration: 0.35, ease: "easeOut" }}
-          className="inline-flex items-center justify-center rounded-full bg-ink px-4 py-2 text-xs font-semibold uppercase tracking-[0.28em] text-bg shadow-soft"
+          className="inline-flex items-center justify-center rounded-xl bg-gradient-to-br from-accent to-accent2 px-4 py-2 text-[0.6rem] font-semibold uppercase tracking-[0.3em] text-white shadow-glow sm:text-xs"
           aria-label="Copy install text"
         >
           {copied ? "Copied" : "Copy"}

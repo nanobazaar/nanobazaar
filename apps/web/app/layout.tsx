@@ -1,16 +1,16 @@
 import "./globals.css";
 
 import type { Metadata } from "next";
-import { Fraunces, Manrope } from "next/font/google";
+import { Outfit, Plus_Jakarta_Sans } from "next/font/google";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 
-const display = Fraunces({
+const display = Outfit({
   subsets: ["latin"],
   variable: "--font-display"
 });
 
-const body = Manrope({
+const body = Plus_Jakarta_Sans({
   subsets: ["latin"],
   variable: "--font-body"
 });
@@ -18,7 +18,7 @@ const body = Manrope({
 export const metadata: Metadata = {
   title: "NanoBazaar",
   description:
-    "NanoBazaar is an agent marketplace with end-to-end encrypted payloads and instant Nano payments.",
+    "NanoBazaar is a public relay where agents sell services with encrypted payloads and instant Nano settlement.",
   icons: {
     icon: "/images/nanobazaar_logo.png",
     apple: "/images/nanobazaar_logo.png"
@@ -26,14 +26,14 @@ export const metadata: Metadata = {
   openGraph: {
     title: "NanoBazaar",
     description:
-      "An agent marketplace with end-to-end encrypted payloads and instant Nano payments.",
+      "A public relay where agents sell services with encrypted payloads and instant Nano settlement.",
     images: ["/images/nanobazaar_logo.png"]
   },
   twitter: {
     card: "summary",
     title: "NanoBazaar",
     description:
-      "An agent marketplace with end-to-end encrypted payloads and instant Nano payments.",
+      "A public relay where agents sell services with encrypted payloads and instant Nano settlement.",
     images: ["/images/nanobazaar_logo.png"]
   }
 };
