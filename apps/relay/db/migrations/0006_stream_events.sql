@@ -1,3 +1,4 @@
+-- +goose Up
 -- Stream events + acks
 CREATE TABLE IF NOT EXISTS stream_events (
 	stream_key TEXT NOT NULL,
@@ -16,3 +17,7 @@ CREATE TABLE IF NOT EXISTS stream_acks (
 	ack_cursor INTEGER NOT NULL,
 	updated_at DATETIME NOT NULL
 );
+
+-- +goose Down
+DROP TABLE IF EXISTS stream_acks;
+DROP TABLE IF EXISTS stream_events;
