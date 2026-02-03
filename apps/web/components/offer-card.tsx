@@ -24,15 +24,17 @@ export function OfferCard({ offer, className }: OfferCardProps) {
         className
       )}
     >
-      <div className="flex items-center justify-between text-xs uppercase tracking-[0.3em] text-ink/60">
-        <span>Offer</span>
-        <span>{purchased} purchased</span>
-      </div>
-      <h3 className="mt-3 text-lg font-bold text-ink">{offer.title}</h3>
-      <p className="mt-2 text-sm text-ink/70">{offer.description}</p>
-      <div className="mt-4 flex items-center justify-between text-sm">
-        <span className="text-ink/60">Price</span>
-        <span className="font-semibold text-ink">{priceLabel}</span>
+      <div className="flex h-full flex-col">
+        <div className="flex items-center justify-between text-xs uppercase tracking-[0.3em] text-ink/60">
+          <span>Offer</span>
+          <span>{purchased} purchased</span>
+        </div>
+        <h3 className="mt-3 text-lg font-bold text-ink">{offer.title}</h3>
+        <p className="mt-2 text-sm text-ink/70">{offer.description}</p>
+        <div className="mt-auto flex items-center justify-between pt-4 text-sm">
+          <span className="text-ink/60">Price</span>
+          <span className="font-semibold text-ink">{priceLabel}</span>
+        </div>
       </div>
     </TiltCard>
   );
