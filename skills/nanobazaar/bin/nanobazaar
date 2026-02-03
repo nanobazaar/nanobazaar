@@ -2,6 +2,7 @@
 'use strict';
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const {spawnSync} = require('child_process');
@@ -9,7 +10,9 @@ const {spawnSync} = require('child_process');
 const DEFAULT_RELAY_URL = 'https://relay.nanobazaar.ai';
 const ENC_ALG = 'libsodium.crypto_box_seal.x25519.xsalsa20poly1305';
 const BASE_DIR = path.resolve(__dirname, '..');
-const STATE_DEFAULT = path.resolve(BASE_DIR, 'state/nanobazaar.json');
+const XDG_CONFIG_HOME = (process.env.XDG_CONFIG_HOME || '').trim();
+const CONFIG_BASE_DIR = XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+const STATE_DEFAULT = path.join(CONFIG_BASE_DIR, 'nanobazaar', 'nanobazaar.json');
 
 function requireFetch() {
   if (typeof fetch !== 'function') {
@@ -284,7 +287,7 @@ async function loadSodium() {
   return sodiumPromise;
 }
 
-async function signedRequest({method, path, query, body, idempotencyKey, relayUrl, keys, identity}) {
+function buildSignedFetch({method, path, query, body, idempotencyKey, relayUrl, keys, identity, extraHeaders, signal}) {
   requireFetch();
   const base = new URL(relayUrl);
   const basePath = base.pathname.endsWith('/') ? base.pathname.slice(0, -1) : base.pathname;
@@ -318,12 +321,29 @@ async function signedRequest({method, path, query, body, idempotencyKey, relayUr
   if (idempotencyKey) {
     headers['X-Idempotency-Key'] = idempotencyKey;
   }
+  if (extraHeaders) {
+    for (const [key, value] of Object.entries(extraHeaders)) {
+      if (value === undefined || value === null || value === '') {
+        continue;
+      }
+      headers[key] = String(value);
+    }
+  }
 
-  const response = await fetch(url, {
-    method: method.toUpperCase(),
-    headers,
-    body: bodyString ? bodyString : undefined,
-  });
+  return {
+    url,
+    init: {
+      method: method.toUpperCase(),
+      headers,
+      body: bodyString ? bodyString : undefined,
+      signal,
+    },
+  };
+}
+
+async function signedRequest({method, path, query, body, idempotencyKey, relayUrl, keys, identity, extraHeaders, signal}) {
+  const {url, init} = buildSignedFetch({method, path, query, body, idempotencyKey, relayUrl, keys, identity, extraHeaders, signal});
+  const response = await fetch(url, init);
   const text = await response.text();
   let data = null;
   if (text) {
@@ -357,6 +377,8 @@ Commands:
                              Create a job request
   poll [--since-event-id <id>] [--limit <n>] [--types a,b] [--no-ack]
                              Poll events and optionally ack
+  watch [--streams a,b] [--stream-path /v0/stream] [--safety-poll-interval <seconds>]
+                             Maintain SSE connection; poll on wake + on safety interval
   cron enable [--schedule "*/5 * * * *"]
                              Install cron entry to run poll
   cron disable               Remove the cron entry
@@ -777,7 +799,8 @@ async function runJobCreate(argv) {
   printJson(result.data, !!flags.compact);
 }
 
-async function runPoll(argv) {
+async function runPoll(argv, options) {
+  const quiet = options && options.quiet;
   const {flags} = parseArgs(argv);
   const config = buildConfig();
   const state = loadState(config.state_path);
@@ -821,9 +844,21 @@ async function runPoll(argv) {
     state.event_log = state.event_log.slice(-500);
   }
 
+  if (typeof state.last_acked_event_id !== 'number') {
+    state.last_acked_event_id = 0;
+  }
+  state.relay_url = config.relay_url;
+  state.bot_id = identity.botId;
+  state.signing_kid = identity.signingKid;
+  state.encryption_kid = identity.encryptionKid;
+  saveState(config.state_path, state);
+
   let ackedId = state.last_acked_event_id || 0;
+  let maxEventId = 0;
   if (events.length > 0 && flags.ack !== false) {
-    const maxEventId = events.reduce((max, event) => Math.max(max, event.event_id), 0);
+    maxEventId = events.reduce((max, event) => Math.max(max, event.event_id), 0);
+
+    // Ack only after events are durably persisted to local state.
     const ackResult = await signedRequest({
       method: 'POST',
       path: '/v0/poll/ack',
@@ -841,22 +876,350 @@ async function runPoll(argv) {
     } else {
       ackedId = maxEventId;
     }
-  }
 
-  if (typeof ackedId === 'number') {
-    state.last_acked_event_id = ackedId;
+    if (typeof ackedId === 'number' && ackedId !== state.last_acked_event_id) {
+      state.last_acked_event_id = ackedId;
+      saveState(config.state_path, state);
+    }
   }
-  state.relay_url = config.relay_url;
-  state.bot_id = identity.botId;
-  state.signing_kid = identity.signingKid;
-  state.encryption_kid = identity.encryptionKid;
-  saveState(config.state_path, state);
 
   if (flags.output) {
     fs.writeFileSync(String(flags.output), stringifyJson(result.data, false));
-  } else {
+  } else if (!quiet) {
     printJson(result.data, !!flags.compact);
   }
+
+  return {events, ackedId, maxEventId};
+}
+
+function parseCsv(value) {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  const values = Array.isArray(value) ? value : [value];
+  const out = [];
+  for (const entry of values) {
+    for (const part of String(entry).split(',')) {
+      const trimmed = part.trim();
+      if (trimmed) {
+        out.push(trimmed);
+      }
+    }
+  }
+  return out;
+}
+
+function uniqStrings(values) {
+  const seen = new Set();
+  const out = [];
+  for (const value of values) {
+    const key = String(value);
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(key);
+    }
+  }
+  return out;
+}
+
+function parsePositiveInt(value, label) {
+  const raw = String(value);
+  if (!raw.trim()) {
+    throw new Error(`Missing value for ${label}.`);
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`Invalid ${label}: ${raw}`);
+  }
+  return Math.floor(parsed);
+}
+
+function backoffDelayMs(attempt, opts) {
+  const baseMs = opts && opts.baseMs ? opts.baseMs : 500;
+  const maxMs = opts && opts.maxMs ? opts.maxMs : 30000;
+  const exp = Math.min(maxMs, baseMs * (2 ** Math.max(0, attempt)));
+  const jittered = exp * (0.5 + Math.random());
+  return Math.min(maxMs, Math.max(baseMs, Math.floor(jittered)));
+}
+
+function sleep(ms, signal) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    if (!signal) {
+      return;
+    }
+    if (signal.aborted) {
+      clearTimeout(timer);
+      resolve();
+      return;
+    }
+    signal.addEventListener('abort', () => {
+      clearTimeout(timer);
+      resolve();
+    }, {once: true});
+  });
+}
+
+async function consumeSseStream(body, {signal, onEvent}) {
+  if (!body || typeof body.getReader !== 'function') {
+    throw new Error('SSE response body is not readable (expected a web ReadableStream).');
+  }
+
+  const reader = body.getReader();
+  const decoder = new TextDecoder('utf8');
+  let buffer = '';
+
+  let eventName = '';
+  let eventId = '';
+  let data = '';
+
+  function flush() {
+    if (!data) {
+      eventName = '';
+      eventId = '';
+      return;
+    }
+    const payload = data.endsWith('\n') ? data.slice(0, -1) : data;
+    onEvent({
+      event: eventName || 'message',
+      id: eventId || undefined,
+      data: payload,
+    });
+    eventName = '';
+    eventId = '';
+    data = '';
+  }
+
+  while (!signal.aborted) {
+    const {done, value} = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, {stream: true});
+
+    while (true) {
+      const newlineIndex = buffer.indexOf('\n');
+      if (newlineIndex === -1) {
+        break;
+      }
+      let line = buffer.slice(0, newlineIndex);
+      buffer = buffer.slice(newlineIndex + 1);
+      if (line.endsWith('\r')) {
+        line = line.slice(0, -1);
+      }
+
+      if (line === '') {
+        flush();
+        continue;
+      }
+      if (line.startsWith(':')) {
+        continue;
+      }
+
+      const sep = line.indexOf(':');
+      const field = sep === -1 ? line : line.slice(0, sep);
+      let valuePart = sep === -1 ? '' : line.slice(sep + 1);
+      if (valuePart.startsWith(' ')) {
+        valuePart = valuePart.slice(1);
+      }
+
+      switch (field) {
+        case 'event':
+          eventName = valuePart;
+          break;
+        case 'id':
+          eventId = valuePart;
+          break;
+        case 'data':
+          data += valuePart + '\n';
+          break;
+        default:
+          break;
+      }
+    }
+  }
+
+  flush();
+}
+
+function deriveDefaultStreams({keys, state}) {
+  const streams = [];
+
+  if (keys && keys.signing_public_key_b64url) {
+    // Proposed stream key format: seller:ed25519:<pubkey-b64url>
+    streams.push(`seller:ed25519:${keys.signing_public_key_b64url}`);
+  }
+
+  const knownJobs = state && state.known_jobs ? state.known_jobs : null;
+  if (knownJobs) {
+    if (Array.isArray(knownJobs)) {
+      for (const job of knownJobs) {
+        if (job && job.job_id) {
+          streams.push(`job:${job.job_id}`);
+        }
+      }
+    } else if (typeof knownJobs === 'object') {
+      for (const jobId of Object.keys(knownJobs)) {
+        if (jobId) {
+          streams.push(`job:${jobId}`);
+        }
+      }
+    }
+  }
+
+  return uniqStrings(streams);
+}
+
+async function runWatch(argv) {
+  requireFetch();
+
+  const {flags} = parseArgs(argv);
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  const streamPath = flags.streamPath || flags.ssePath || '/v0/stream';
+  const streams = flags.streams
+    ? uniqStrings(parseCsv(flags.streams))
+    : deriveDefaultStreams({keys, state});
+  if (streams.length === 0) {
+    throw new Error('No streams configured for watch. Provide --streams or ensure state contains keys.');
+  }
+
+  const safetyIntervalSeconds = flags.safetyPollInterval
+    ? parsePositiveInt(flags.safetyPollInterval, '--safety-poll-interval')
+    : 180;
+
+  const pollArgs = [];
+  if (flags.ack === false) {
+    pollArgs.push('--no-ack');
+  }
+
+  const printPolls = !!flags.printPolls;
+
+  let pollInFlight = false;
+  let pollQueued = false;
+
+  async function runPollLoop(reason) {
+    pollQueued = true;
+    if (pollInFlight) {
+      return;
+    }
+    pollInFlight = true;
+    try {
+      while (pollQueued) {
+        pollQueued = false;
+        try {
+          const pollResult = await runPoll(pollArgs, {quiet: !printPolls});
+          console.error(`[watch] poll ok (${reason}): events=${pollResult.events.length} acked=${pollResult.ackedId ?? 'n/a'}`);
+        } catch (err) {
+          console.error(`[watch] poll error (${reason}): ${err && err.message ? err.message : String(err)}`);
+          // Keep running; poll is idempotent and can be retried on the next wake/safety interval.
+        }
+      }
+    } finally {
+      pollInFlight = false;
+    }
+  }
+
+  const controller = new AbortController();
+  const {signal} = controller;
+  const stop = () => {
+    if (!signal.aborted) {
+      controller.abort();
+    }
+  };
+
+  process.on('SIGINT', stop);
+  process.on('SIGTERM', stop);
+
+  console.error(`[watch] relay=${config.relay_url}`);
+  console.error(`[watch] state_path=${config.state_path}`);
+  console.error(`[watch] stream_path=${streamPath}`);
+  console.error(`[watch] streams=${streams.join(',')}`);
+  console.error(`[watch] safety_poll_interval_seconds=${safetyIntervalSeconds}`);
+
+  const safetyTimer = setInterval(() => {
+    if (signal.aborted) {
+      return;
+    }
+    void runPollLoop('safety');
+  }, safetyIntervalSeconds * 1000);
+
+  // Kick off an initial poll so the watcher is useful even if wakeups are missed.
+  void runPollLoop('startup');
+
+  let attempt = 0;
+  while (!signal.aborted) {
+    try {
+      const {url, init} = buildSignedFetch({
+        method: 'GET',
+        path: streamPath,
+        query: {streams: streams.join(',')},
+        relayUrl: config.relay_url,
+        keys,
+        identity,
+        extraHeaders: {
+          'Accept': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+        },
+        signal,
+      });
+      const response = await fetch(url, init);
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`SSE connect failed (${response.status}): ${text || response.statusText}`);
+      }
+
+      attempt = 0;
+      console.error('[watch] connected');
+
+      await consumeSseStream(response.body, {
+        signal,
+        onEvent: (evt) => {
+          if (!evt) {
+            return;
+          }
+
+          if (evt.event === 'wake') {
+            void runPollLoop('wake');
+            return;
+          }
+
+          // Fallback: handle "message" events where the payload indicates a wake.
+          if (evt.data) {
+            try {
+              const parsed = JSON.parse(evt.data);
+              if (parsed && (parsed.event === 'wake' || parsed.type === 'wake' || parsed.hint === 'poll')) {
+                void runPollLoop('wake');
+              }
+            } catch (_) {
+              // ignore non-JSON payloads
+            }
+          }
+        },
+      });
+
+      if (signal.aborted) {
+        break;
+      }
+
+      console.error('[watch] disconnected');
+    } catch (err) {
+      if (signal.aborted) {
+        break;
+      }
+      const message = err && err.message ? err.message : String(err);
+      const delayMs = backoffDelayMs(attempt);
+      attempt += 1;
+      console.error(`[watch] sse error: ${message}`);
+      console.error(`[watch] reconnecting in ${Math.round(delayMs / 1000)}s`);
+      await sleep(delayMs, signal);
+    }
+  }
+
+  clearInterval(safetyTimer);
 }
 
 function runCronEnable(argv) {
@@ -924,8 +1287,18 @@ function runCronDisable() {
 
 function loadVersion() {
   try {
-    const skillJson = JSON.parse(fs.readFileSync(path.resolve(BASE_DIR, 'skill.json'), 'utf8'));
-    return skillJson.version || 'unknown';
+    for (const name of ['package.json', 'skill.json']) {
+      try {
+        const raw = fs.readFileSync(path.resolve(BASE_DIR, name), 'utf8');
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.version) {
+          return parsed.version;
+        }
+      } catch (_) {
+        // ignore
+      }
+    }
+    return 'unknown';
   } catch (_) {
     return 'unknown';
   }
@@ -988,6 +1361,9 @@ async function main() {
     }
     case 'poll':
       await runPoll(rest);
+      return;
+    case 'watch':
+      await runWatch(rest);
       return;
     case 'cron': {
       const sub = rest[0];
