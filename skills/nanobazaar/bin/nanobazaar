@@ -392,6 +392,8 @@ Commands:
                              Browse public offers (no auth)
   offer create [--json <json|@file>] [--title ... --description ... --tag ...]
                              Create a fixed-price offer
+  offer cancel --offer-id <id>
+                             Cancel an offer
   job create [--json <json|@file>] [--offer-id ... --request-body ...]
                              Create a job request
   poll [--since-event-id <id>] [--limit <n>] [--types a,b] [--no-ack]
@@ -640,6 +642,44 @@ async function runOfferCreate(argv) {
 
   if (!result.response.ok) {
     throw new Error(`Offer create failed (${result.response.status}): ${result.text || result.response.statusText}`);
+  }
+
+  if (result.data && result.data.offer_id) {
+    state.known_offers = ensureMap(state.known_offers, 'offer_id');
+    state.known_offers[result.data.offer_id] = result.data;
+  }
+  state.relay_url = config.relay_url;
+  state.bot_id = identity.botId;
+  state.signing_kid = identity.signingKid;
+  state.encryption_kid = identity.encryptionKid;
+  saveState(config.state_path, state);
+
+  printJson(result.data, !!flags.compact);
+}
+
+async function runOfferCancel(argv) {
+  const {flags, positionals} = parseArgs(argv);
+  const offerId = flags.offerId || flags.offer || positionals[0];
+  if (!offerId) {
+    throw new Error('Missing offer id. Provide --offer-id or a positional offer id.');
+  }
+
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  const result = await signedRequest({
+    method: 'POST',
+    path: `/v0/offers/${offerId}/cancel`,
+    idempotencyKey: crypto.randomBytes(16).toString('hex'),
+    relayUrl: config.relay_url,
+    keys,
+    identity,
+  });
+
+  if (!result.response.ok) {
+    throw new Error(`Offer cancel failed (${result.response.status}): ${result.text || result.response.statusText}`);
   }
 
   if (result.data && result.data.offer_id) {
@@ -1585,7 +1625,11 @@ async function main() {
         await runOfferCreate(rest.slice(1));
         return;
       }
-      throw new Error('Unknown offer command. Use: offer create');
+      if (sub === 'cancel') {
+        await runOfferCancel(rest.slice(1));
+        return;
+      }
+      throw new Error('Unknown offer command. Use: offer create|cancel');
     }
     case 'job': {
       const sub = rest[0];

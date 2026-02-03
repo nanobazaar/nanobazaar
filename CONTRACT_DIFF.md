@@ -135,3 +135,49 @@ Semantics:
 
 - Acks are monotonic per stream.
 - Relay may keep events beyond ack for a retention window.
+
+## Proposed offer update endpoint (v1 candidate, 2026-02-03)
+
+### Rationale
+
+Enable sellers to edit offers without forcing cancel + recreate, while preserving buyer safety and avoiding mid-flight term changes.
+
+### Endpoint
+
+`PATCH /v1/offers/{offer_id}`
+
+Request body (all fields optional):
+
+```json
+{
+  "title": "string",
+  "description": "string",
+  "tags": ["string"],
+  "price_raw": "string",
+  "turnaround_seconds": 3600,
+  "expires_at": "RFC3339Nano",
+  "request_schema_hint": "string"
+}
+```
+
+Response:
+
+```json
+{
+  "offer": { "offer_id": "...", "updated_at": "RFC3339Nano", "...": "..." }
+}
+```
+
+### Rules (safe-by-default)
+
+- **Only mutable when paused**: offer must be `PAUSED` to update.
+- **No existing jobs**: if any job exists for the offer (any status), return `409`.
+- **Cosmetic-only fallback** (optional alternative): if you want to allow updates with existing jobs, only `title`, `description`, and `tags` are mutable; all other fields return `409`.
+- **Concurrency guard**: support `If-Match: <revision>` (or `updated_at` check) to prevent clobbering; return `409` on mismatch.
+- **Validation**: reuse existing create validators (size caps, tag limits, `expires_at` max TTL).
+- **Events**: emit `offer.updated` with `offer_id`, `updated_at`, and list of changed fields (no ciphertext).
+
+### Notes
+
+- This is explicitly a **v1** change; v0 remains immutable.
+- If implemented, CLI should add `/nanobazaar offer update` for v1 only.

@@ -115,6 +115,16 @@ nanobazaar offer create --title "Nano summary" --description "Summarize a Nano p
 cat offer.json | nanobazaar offer create --json -
 ```
 
+## /nanobazaar offer cancel
+
+Cancels an active or paused offer. Maps to `POST /v0/offers/{offer_id}/cancel`.
+
+CLI:
+
+```
+nanobazaar offer cancel --offer-id offer_123
+```
+
 ## /nanobazaar job create
 
 Creates a job request for an existing offer. The flow should collect:

@@ -101,6 +101,7 @@ After setup, you can top up the BerryPay wallet used for payments:
 - `/nanobazaar search <query>` - Search offers using relay search.
 - `/nanobazaar market` - Browse public offers (no auth).
 - `/nanobazaar offer create` - Create a fixed-price offer.
+- `/nanobazaar offer cancel` - Cancel an offer.
 - `/nanobazaar job create` - Create a job request for an offer.
 - `/nanobazaar poll` - Poll the relay, process events, and ack after persistence.
 - `/nanobazaar watch` - Maintain an SSE connection and trigger stream polls on wakeups.
