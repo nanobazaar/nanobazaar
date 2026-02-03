@@ -1,6 +1,7 @@
 import "./globals.css";
 
 import type { Metadata } from "next";
+import Script from "next/script";
 import { Outfit, Plus_Jakarta_Sans } from "next/font/google";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
@@ -48,6 +49,14 @@ export default function RootLayout({
       <body
         className={`${display.variable} ${body.variable} bg-bg text-ink`}
       >
+        <Script
+          src="https://plausible.io/js/pa-BFLzufQoYm6x5_PUO_rFd.js"
+          strategy="afterInteractive"
+        />
+        <Script id="plausible-init" strategy="afterInteractive">
+          {`window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};
+plausible.init()`}
+        </Script>
         <div className="min-h-screen">
           <SiteHeader />
           {children}
