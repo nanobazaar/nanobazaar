@@ -51,6 +51,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.createPayloadStmt, err = db.PrepareContext(ctx, createPayload); err != nil {
 		return nil, fmt.Errorf("error preparing query CreatePayload: %w", err)
 	}
+	if q.createStreamEventStmt, err = db.PrepareContext(ctx, createStreamEvent); err != nil {
+		return nil, fmt.Errorf("error preparing query CreateStreamEvent: %w", err)
+	}
 	if q.deleteEventsBeforeStmt, err = db.PrepareContext(ctx, deleteEventsBefore); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteEventsBefore: %w", err)
 	}
@@ -71,6 +74,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.deletePayloadsFetchedBeforeStmt, err = db.PrepareContext(ctx, deletePayloadsFetchedBefore); err != nil {
 		return nil, fmt.Errorf("error preparing query DeletePayloadsFetchedBefore: %w", err)
+	}
+	if q.deleteStreamEventsAckedBeforeStmt, err = db.PrepareContext(ctx, deleteStreamEventsAckedBefore); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteStreamEventsAckedBefore: %w", err)
 	}
 	if q.getBotStmt, err = db.PrepareContext(ctx, getBot); err != nil {
 		return nil, fmt.Errorf("error preparing query GetBot: %w", err)
@@ -98,6 +104,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.getPollAckStmt, err = db.PrepareContext(ctx, getPollAck); err != nil {
 		return nil, fmt.Errorf("error preparing query GetPollAck: %w", err)
+	}
+	if q.getStreamAckStmt, err = db.PrepareContext(ctx, getStreamAck); err != nil {
+		return nil, fmt.Errorf("error preparing query GetStreamAck: %w", err)
 	}
 	if q.insertIdempotencyStmt, err = db.PrepareContext(ctx, insertIdempotency); err != nil {
 		return nil, fmt.Errorf("error preparing query InsertIdempotency: %w", err)
@@ -192,6 +201,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listPayloadMetadataUnfetchedAfterStmt, err = db.PrepareContext(ctx, listPayloadMetadataUnfetchedAfter); err != nil {
 		return nil, fmt.Errorf("error preparing query ListPayloadMetadataUnfetchedAfter: %w", err)
 	}
+	if q.listStreamEventsAfterCursorStmt, err = db.PrepareContext(ctx, listStreamEventsAfterCursor); err != nil {
+		return nil, fmt.Errorf("error preparing query ListStreamEventsAfterCursor: %w", err)
+	}
 	if q.markPayloadFetchedStmt, err = db.PrepareContext(ctx, markPayloadFetched); err != nil {
 		return nil, fmt.Errorf("error preparing query MarkPayloadFetched: %w", err)
 	}
@@ -230,6 +242,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.upsertPollAckStmt, err = db.PrepareContext(ctx, upsertPollAck); err != nil {
 		return nil, fmt.Errorf("error preparing query UpsertPollAck: %w", err)
+	}
+	if q.upsertStreamAckStmt, err = db.PrepareContext(ctx, upsertStreamAck); err != nil {
+		return nil, fmt.Errorf("error preparing query UpsertStreamAck: %w", err)
 	}
 	return &q, nil
 }
@@ -281,6 +296,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing createPayloadStmt: %w", cerr)
 		}
 	}
+	if q.createStreamEventStmt != nil {
+		if cerr := q.createStreamEventStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing createStreamEventStmt: %w", cerr)
+		}
+	}
 	if q.deleteEventsBeforeStmt != nil {
 		if cerr := q.deleteEventsBeforeStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteEventsBeforeStmt: %w", cerr)
@@ -314,6 +334,11 @@ func (q *Queries) Close() error {
 	if q.deletePayloadsFetchedBeforeStmt != nil {
 		if cerr := q.deletePayloadsFetchedBeforeStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deletePayloadsFetchedBeforeStmt: %w", cerr)
+		}
+	}
+	if q.deleteStreamEventsAckedBeforeStmt != nil {
+		if cerr := q.deleteStreamEventsAckedBeforeStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteStreamEventsAckedBeforeStmt: %w", cerr)
 		}
 	}
 	if q.getBotStmt != nil {
@@ -359,6 +384,11 @@ func (q *Queries) Close() error {
 	if q.getPollAckStmt != nil {
 		if cerr := q.getPollAckStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getPollAckStmt: %w", cerr)
+		}
+	}
+	if q.getStreamAckStmt != nil {
+		if cerr := q.getStreamAckStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getStreamAckStmt: %w", cerr)
 		}
 	}
 	if q.insertIdempotencyStmt != nil {
@@ -516,6 +546,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listPayloadMetadataUnfetchedAfterStmt: %w", cerr)
 		}
 	}
+	if q.listStreamEventsAfterCursorStmt != nil {
+		if cerr := q.listStreamEventsAfterCursorStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listStreamEventsAfterCursorStmt: %w", cerr)
+		}
+	}
 	if q.markPayloadFetchedStmt != nil {
 		if cerr := q.markPayloadFetchedStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing markPayloadFetchedStmt: %w", cerr)
@@ -581,6 +616,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing upsertPollAckStmt: %w", cerr)
 		}
 	}
+	if q.upsertStreamAckStmt != nil {
+		if cerr := q.upsertStreamAckStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing upsertStreamAckStmt: %w", cerr)
+		}
+	}
 	return err
 }
 
@@ -629,6 +669,7 @@ type Queries struct {
 	createJobStmt                             *sql.Stmt
 	createOfferStmt                           *sql.Stmt
 	createPayloadStmt                         *sql.Stmt
+	createStreamEventStmt                     *sql.Stmt
 	deleteEventsBeforeStmt                    *sql.Stmt
 	deleteIdempotencyBeforeStmt               *sql.Stmt
 	deleteJobsTerminalBeforeStmt              *sql.Stmt
@@ -636,6 +677,7 @@ type Queries struct {
 	deleteOffersBeforeStmt                    *sql.Stmt
 	deletePayloadsBeforeStmt                  *sql.Stmt
 	deletePayloadsFetchedBeforeStmt           *sql.Stmt
+	deleteStreamEventsAckedBeforeStmt         *sql.Stmt
 	getBotStmt                                *sql.Stmt
 	getEventCreatedAtStmt                     *sql.Stmt
 	getIdempotencyStmt                        *sql.Stmt
@@ -645,6 +687,7 @@ type Queries struct {
 	getPayloadStmt                            *sql.Stmt
 	getPayloadRecipientStmt                   *sql.Stmt
 	getPollAckStmt                            *sql.Stmt
+	getStreamAckStmt                          *sql.Stmt
 	insertIdempotencyStmt                     *sql.Stmt
 	insertNonceStmt                           *sql.Stmt
 	insertOfferTagStmt                        *sql.Stmt
@@ -676,6 +719,7 @@ type Queries struct {
 	listPayloadMetadataFetchedAfterStmt       *sql.Stmt
 	listPayloadMetadataUnfetchedStmt          *sql.Stmt
 	listPayloadMetadataUnfetchedAfterStmt     *sql.Stmt
+	listStreamEventsAfterCursorStmt           *sql.Stmt
 	markPayloadFetchedStmt                    *sql.Stmt
 	updateBotLastSeenStmt                     *sql.Stmt
 	updateBotRevokeStmt                       *sql.Stmt
@@ -689,6 +733,7 @@ type Queries struct {
 	updateOfferPauseStmt                      *sql.Stmt
 	updateOfferResumeStmt                     *sql.Stmt
 	upsertPollAckStmt                         *sql.Stmt
+	upsertStreamAckStmt                       *sql.Stmt
 }
 
 func (q *Queries) WithTx(tx *sql.Tx) *Queries {
@@ -704,6 +749,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		createJobStmt:                             q.createJobStmt,
 		createOfferStmt:                           q.createOfferStmt,
 		createPayloadStmt:                         q.createPayloadStmt,
+		createStreamEventStmt:                     q.createStreamEventStmt,
 		deleteEventsBeforeStmt:                    q.deleteEventsBeforeStmt,
 		deleteIdempotencyBeforeStmt:               q.deleteIdempotencyBeforeStmt,
 		deleteJobsTerminalBeforeStmt:              q.deleteJobsTerminalBeforeStmt,
@@ -711,6 +757,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		deleteOffersBeforeStmt:                    q.deleteOffersBeforeStmt,
 		deletePayloadsBeforeStmt:                  q.deletePayloadsBeforeStmt,
 		deletePayloadsFetchedBeforeStmt:           q.deletePayloadsFetchedBeforeStmt,
+		deleteStreamEventsAckedBeforeStmt:         q.deleteStreamEventsAckedBeforeStmt,
 		getBotStmt:                                q.getBotStmt,
 		getEventCreatedAtStmt:                     q.getEventCreatedAtStmt,
 		getIdempotencyStmt:                        q.getIdempotencyStmt,
@@ -720,6 +767,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getPayloadStmt:                            q.getPayloadStmt,
 		getPayloadRecipientStmt:                   q.getPayloadRecipientStmt,
 		getPollAckStmt:                            q.getPollAckStmt,
+		getStreamAckStmt:                          q.getStreamAckStmt,
 		insertIdempotencyStmt:                     q.insertIdempotencyStmt,
 		insertNonceStmt:                           q.insertNonceStmt,
 		insertOfferTagStmt:                        q.insertOfferTagStmt,
@@ -751,6 +799,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listPayloadMetadataFetchedAfterStmt:       q.listPayloadMetadataFetchedAfterStmt,
 		listPayloadMetadataUnfetchedStmt:          q.listPayloadMetadataUnfetchedStmt,
 		listPayloadMetadataUnfetchedAfterStmt:     q.listPayloadMetadataUnfetchedAfterStmt,
+		listStreamEventsAfterCursorStmt:           q.listStreamEventsAfterCursorStmt,
 		markPayloadFetchedStmt:                    q.markPayloadFetchedStmt,
 		updateBotLastSeenStmt:                     q.updateBotLastSeenStmt,
 		updateBotRevokeStmt:                       q.updateBotRevokeStmt,
@@ -764,5 +813,6 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		updateOfferPauseStmt:                      q.updateOfferPauseStmt,
 		updateOfferResumeStmt:                     q.updateOfferResumeStmt,
 		upsertPollAckStmt:                         q.upsertPollAckStmt,
+		upsertStreamAckStmt:                       q.upsertStreamAckStmt,
 	}
 }

@@ -47,6 +47,87 @@ func TestDeleteEventsBefore(t *testing.T) {
 	}
 }
 
+func TestDeleteStreamEventsAckedBefore(t *testing.T) {
+	db := setupStoreTestDB(t)
+	defer db.Close()
+
+	st := New(db)
+	now := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+
+	streamKey := "job:stream_cleanup"
+	payload, err := json.Marshal(map[string]any{"job_id": "job_1"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	oldCursor, err := st.CreateStreamEvent(context.Background(), sqlc.CreateStreamEventParams{
+		StreamKey:   streamKey,
+		EventType:   "job.requested",
+		CreatedAt:   now.Add(-2 * time.Hour),
+		PayloadJson: string(payload),
+	})
+	if err != nil {
+		t.Fatalf("create stream event: %v", err)
+	}
+	newCursor, err := st.CreateStreamEvent(context.Background(), sqlc.CreateStreamEventParams{
+		StreamKey:   streamKey,
+		EventType:   "job.paid",
+		CreatedAt:   now,
+		PayloadJson: string(payload),
+	})
+	if err != nil {
+		t.Fatalf("create stream event: %v", err)
+	}
+
+	if err := st.UpsertStreamAck(context.Background(), sqlc.UpsertStreamAckParams{
+		StreamKey: streamKey,
+		AckCursor: oldCursor,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("upsert stream ack: %v", err)
+	}
+
+	unackedStream := "job:unacked"
+	if _, err := st.CreateStreamEvent(context.Background(), sqlc.CreateStreamEventParams{
+		StreamKey:   unackedStream,
+		EventType:   "job.requested",
+		CreatedAt:   now.Add(-2 * time.Hour),
+		PayloadJson: string(payload),
+	}); err != nil {
+		t.Fatalf("create stream event: %v", err)
+	}
+
+	if err := st.DeleteStreamEventsAckedBefore(context.Background(), now.Add(-time.Hour)); err != nil {
+		t.Fatalf("delete stream events: %v", err)
+	}
+
+	remaining, err := st.ListStreamEventsAfterCursor(context.Background(), sqlc.ListStreamEventsAfterCursorParams{
+		StreamKey:   streamKey,
+		SinceCursor: 0,
+		Limit:       10,
+	})
+	if err != nil {
+		t.Fatalf("list stream events: %v", err)
+	}
+	if len(remaining) != 1 {
+		t.Fatalf("expected 1 stream event, got %d", len(remaining))
+	}
+	if remaining[0].Cursor != newCursor {
+		t.Fatalf("expected cursor %d, got %d", newCursor, remaining[0].Cursor)
+	}
+
+	remainingUnacked, err := st.ListStreamEventsAfterCursor(context.Background(), sqlc.ListStreamEventsAfterCursorParams{
+		StreamKey:   unackedStream,
+		SinceCursor: 0,
+		Limit:       10,
+	})
+	if err != nil {
+		t.Fatalf("list unacked stream events: %v", err)
+	}
+	if len(remainingUnacked) != 1 {
+		t.Fatalf("expected unacked stream event retained, got %d", len(remainingUnacked))
+	}
+}
+
 func TestDeletePayloadsFetchedBefore(t *testing.T) {
 	db := setupStoreTestDB(t)
 	defer db.Close()

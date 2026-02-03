@@ -1106,6 +1106,12 @@ func (h *JobHandler) emitJobExpired(ctx context.Context, job sqlc.Job, now time.
 		}); err != nil {
 			return err
 		}
+		if err := emitStreamEvents(ctx, h.Store, recipient, jobExpiredEventType, string(payload), data, now); err != nil {
+			return err
+		}
+		if h.StreamHub != nil {
+			h.StreamHub.NotifyEvent(ctx, recipient, jobExpiredEventType, data)
+		}
 	}
 	return nil
 }
@@ -1286,12 +1292,16 @@ func emitEvent(ctx context.Context, st *store.Store, notifier StreamNotifier, re
 	if err != nil {
 		return err
 	}
+	now := time.Now().UTC()
 	if err := st.CreateEvent(ctx, sqlc.CreateEventParams{
 		RecipientBotID: recipient,
 		EventType:      eventType,
 		DataJson:       string(payload),
-		CreatedAt:      time.Now().UTC(),
+		CreatedAt:      now,
 	}); err != nil {
+		return err
+	}
+	if err := emitStreamEvents(ctx, st, recipient, eventType, string(payload), data, now); err != nil {
 		return err
 	}
 	if notifier != nil {
@@ -1305,12 +1315,16 @@ func emitEventTx(ctx context.Context, qtx *sqlc.Queries, notifier StreamNotifier
 	if err != nil {
 		return err
 	}
+	now := time.Now().UTC()
 	if err := qtx.CreateEvent(ctx, sqlc.CreateEventParams{
 		RecipientBotID: recipient,
 		EventType:      eventType,
 		DataJson:       string(payload),
-		CreatedAt:      time.Now().UTC(),
+		CreatedAt:      now,
 	}); err != nil {
+		return err
+	}
+	if err := emitStreamEvents(ctx, qtx, recipient, eventType, string(payload), data, now); err != nil {
 		return err
 	}
 	if notifier != nil {

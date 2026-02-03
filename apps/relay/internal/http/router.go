@@ -98,7 +98,9 @@ func NewRouter(cfg RouterConfig, opts ...Option) http.Handler {
 		r.With(rlPayloads).Get("/payloads", payloads.List)
 
 		r.With(rlPoll).Get("/poll", poll.Poll)
+		r.With(rlPoll).Post("/poll/batch", poll.Batch)
 		r.With(rlPoll).Post("/poll/ack", poll.Ack)
+		r.With(rlPoll).Post("/ack", poll.AckStream)
 		r.With(rlPoll).Get("/stream", stream.Stream)
 	})
 

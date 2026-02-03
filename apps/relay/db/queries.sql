@@ -676,6 +676,59 @@ WHERE recipient_bot_id = sqlc.arg(recipient_bot_id);
 DELETE FROM events
 WHERE created_at < sqlc.arg(cutoff);
 
+-- Stream events
+-- name: CreateStreamEvent :one
+INSERT INTO stream_events (
+	stream_key,
+	cursor,
+	event_type,
+	created_at,
+	payload_json
+) VALUES (
+	sqlc.arg(stream_key),
+	(SELECT COALESCE(MAX(cursor), 0) + 1 FROM stream_events WHERE stream_key = sqlc.arg(stream_key)),
+	sqlc.arg(event_type),
+	sqlc.arg(created_at),
+	sqlc.arg(payload_json)
+)
+RETURNING cursor;
+
+-- name: ListStreamEventsAfterCursor :many
+SELECT stream_key,
+	cursor,
+	event_type,
+	payload_json,
+	created_at
+FROM stream_events
+WHERE stream_key = sqlc.arg(stream_key)
+	AND cursor > sqlc.arg(since_cursor)
+ORDER BY cursor ASC
+LIMIT sqlc.arg(limit);
+
+-- name: DeleteStreamEventsAckedBefore :exec
+DELETE FROM stream_events
+WHERE created_at < sqlc.arg(cutoff)
+	AND cursor <= COALESCE((SELECT ack_cursor FROM stream_acks WHERE stream_key = stream_events.stream_key), -1);
+
+-- Stream acks
+-- name: GetStreamAck :one
+SELECT * FROM stream_acks
+WHERE stream_key = sqlc.arg(stream_key);
+
+-- name: UpsertStreamAck :exec
+INSERT INTO stream_acks (
+	stream_key,
+	ack_cursor,
+	updated_at
+) VALUES (
+	sqlc.arg(stream_key),
+	sqlc.arg(ack_cursor),
+	sqlc.arg(updated_at)
+)
+ON CONFLICT(stream_key) DO UPDATE SET
+	ack_cursor = excluded.ack_cursor,
+	updated_at = excluded.updated_at;
+
 -- Poll acks
 -- name: GetPollAck :one
 SELECT * FROM poll_acks
