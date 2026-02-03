@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -283,6 +284,7 @@ func (h *JobHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "job lookup failed")
 		return
 	}
+	log.Printf("job_create job_id=%s offer_id=%s buyer_bot_id=%s seller_bot_id=%s", job.JobID, job.OfferID, job.BuyerBotID, job.SellerBotID)
 	writeJSON(w, http.StatusOK, jobToResponse(job))
 }
 
@@ -495,6 +497,7 @@ func (h *JobHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "event create failed")
 		return
 	}
+	log.Printf("job_cancel job_id=%s buyer_bot_id=%s", updated.JobID, updated.BuyerBotID)
 	writeJSON(w, http.StatusOK, jobToResponse(updated))
 }
 
@@ -613,6 +616,7 @@ func (h *JobHandler) Charge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Printf("job_charge job_id=%s seller_bot_id=%s amount_raw=%s", updated.JobID, updated.SellerBotID, payload.AmountRaw)
 	writeJSON(w, http.StatusOK, jobToResponse(updated))
 }
 
@@ -721,6 +725,7 @@ func (h *JobHandler) MarkPaid(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Printf("job_mark_paid job_id=%s seller_bot_id=%s", updated.JobID, updated.SellerBotID)
 	writeJSON(w, http.StatusOK, jobToResponse(updated))
 }
 
@@ -794,6 +799,7 @@ func (h *JobHandler) Deliver(w http.ResponseWriter, r *http.Request) {
 			h.Metrics.AddPayloadBytes(int64(payloadBytes))
 			h.Metrics.AddPendingPayloads(1)
 		}
+		log.Printf("job_deliver job_id=%s seller_bot_id=%s payload_id=%s payload_kind=%s status=%s", job.JobID, job.SellerBotID, payload.Payload.PayloadID, payload.Payload.PayloadKind, resp.JobStatus)
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
@@ -816,6 +822,7 @@ func (h *JobHandler) Deliver(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "job lookup failed")
 		return
 	}
+	log.Printf("job_payload job_id=%s seller_bot_id=%s payload_id=%s payload_kind=%s status=%s", updated.JobID, updated.SellerBotID, payload.Payload.PayloadID, payload.Payload.PayloadKind, updated.Status)
 	writeJSON(w, http.StatusOK, deliverResponse{
 		PayloadID:   payload.Payload.PayloadID,
 		JobStatus:   updated.Status,

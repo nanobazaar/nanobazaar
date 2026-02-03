@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"sort"
 	"strings"
@@ -28,6 +29,8 @@ type StreamHub struct {
 
 	mu      sync.RWMutex
 	streams map[string]map[*streamConn]struct{}
+	conns   map[*streamConn]struct{}
+	botConn map[string]int
 
 	cacheMu           sync.RWMutex
 	botSigningPubkeys map[string]string // bot_id -> signing_pubkey_ed25519 (b64url)
@@ -37,13 +40,15 @@ func NewStreamHub(store *store.Store) *StreamHub {
 	return &StreamHub{
 		store:             store,
 		streams:           make(map[string]map[*streamConn]struct{}),
+		conns:             make(map[*streamConn]struct{}),
+		botConn:           make(map[string]int),
 		botSigningPubkeys: make(map[string]string),
 	}
 }
 
-func (h *StreamHub) Register(conn *streamConn, streams []string) {
+func (h *StreamHub) Register(conn *streamConn, streams []string) (int, int) {
 	if h == nil || conn == nil {
-		return
+		return 0, 0
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -58,11 +63,16 @@ func (h *StreamHub) Register(conn *streamConn, streams []string) {
 		}
 		set[conn] = struct{}{}
 	}
+	h.conns[conn] = struct{}{}
+	if conn.botID != "" {
+		h.botConn[conn.botID] += 1
+	}
+	return len(h.conns), len(h.botConn)
 }
 
-func (h *StreamHub) Unregister(conn *streamConn) {
+func (h *StreamHub) Unregister(conn *streamConn) (int, int) {
 	if h == nil || conn == nil {
-		return
+		return 0, 0
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -76,6 +86,15 @@ func (h *StreamHub) Unregister(conn *streamConn) {
 			delete(h.streams, stream)
 		}
 	}
+	delete(h.conns, conn)
+	if conn.botID != "" {
+		if count := h.botConn[conn.botID]; count <= 1 {
+			delete(h.botConn, conn.botID)
+		} else {
+			h.botConn[conn.botID] = count - 1
+		}
+	}
+	return len(h.conns), len(h.botConn)
 }
 
 func (h *StreamHub) NotifyStream(stream string) {
@@ -194,9 +213,14 @@ func (h *StreamHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
 
-	conn := newStreamConn(streamKeys)
-	h.Hub.Register(conn, streamKeys)
-	defer h.Hub.Unregister(conn)
+	conn := newStreamConn(streamKeys, caller)
+	activeConns, activeBots := h.Hub.Register(conn, streamKeys)
+	remoteAddr := r.RemoteAddr
+	log.Printf("stream_connected bot_id=%s streams=%d active_conns=%d active_bots=%d remote_addr=%s", caller, len(streamKeys), activeConns, activeBots, remoteAddr)
+	defer func() {
+		activeConns, activeBots := h.Hub.Unregister(conn)
+		log.Printf("stream_disconnected bot_id=%s streams=%d active_conns=%d active_bots=%d remote_addr=%s", caller, len(streamKeys), activeConns, activeBots, remoteAddr)
+	}()
 
 	// Initial frame so clients know the connection is established.
 	_, _ = w.Write([]byte(": connected\n\n"))
@@ -354,13 +378,14 @@ func (e *streamHTTPError) Error() string {
 }
 
 type streamConn struct {
+	botID      string
 	subscribed map[string]struct{}
 
 	mu    sync.Mutex
 	dirty map[string]struct{}
 }
 
-func newStreamConn(streams []string) *streamConn {
+func newStreamConn(streams []string, botID string) *streamConn {
 	subscribed := make(map[string]struct{}, len(streams))
 	for _, stream := range streams {
 		if stream != "" {
@@ -368,6 +393,7 @@ func newStreamConn(streams []string) *streamConn {
 		}
 	}
 	return &streamConn{
+		botID:      botID,
 		subscribed: subscribed,
 		dirty:      make(map[string]struct{}),
 	}

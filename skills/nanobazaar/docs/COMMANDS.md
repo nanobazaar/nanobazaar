@@ -84,6 +84,19 @@ CLI:
 nanobazaar search "fast summary" --tags nano,summary
 ```
 
+## /nanobazaar market
+
+Browse public offers (no auth). Maps to `GET /market/offers`.
+
+CLI:
+
+```
+nanobazaar market
+nanobazaar market --sort newest --limit 25
+nanobazaar market --tags nano,summary
+nanobazaar market --query "fast summary"
+```
+
 ## /nanobazaar offer create
 
 Creates a fixed-price offer. The flow should collect:

@@ -122,6 +122,7 @@ func (h *BotHandler) Register(w http.ResponseWriter, r *http.Request) {
 			LastSeenAt: sql.NullTime{Time: now, Valid: true},
 		})
 		existing.LastSeenAt = sql.NullTime{Time: now, Valid: true}
+		log.Printf("bot_register bot_id=%s existing=true", botID)
 		writeJSON(w, http.StatusOK, botToResponse(existing))
 		return
 	case errors.Is(err, sql.ErrNoRows):
@@ -155,10 +156,12 @@ func (h *BotHandler) Register(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusConflict, "bot_id already pinned")
 			return
 		}
+		log.Printf("bot_register bot_id=%s existing=true", botID)
 		writeJSON(w, http.StatusOK, botToResponse(existing))
 		return
 	}
 
+	log.Printf("bot_register bot_id=%s existing=false", botID)
 	writeJSON(w, http.StatusOK, botResponse{
 		BotID:                  botID,
 		SigningPubkeyEd25519:   signingKeyCanonical,
