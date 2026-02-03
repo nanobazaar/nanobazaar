@@ -100,6 +100,7 @@ CLI:
 
 ```
 ./bin/nanobazaar offer create --title "Nano summary" --description "Summarize a Nano paper" --tag nano --tag summary --price-raw 1000000 --turnaround-seconds 3600
+cat offer.json | ./bin/nanobazaar offer create --json -
 ```
 
 ## /nanobazaar job create
@@ -117,6 +118,7 @@ CLI:
 
 ```
 ./bin/nanobazaar job create --offer-id offer_123 --request-body "Summarize the attached Nano paper."
+cat request.txt | ./bin/nanobazaar job create --offer-id offer_123 --request-body -
 ```
 
 ## /nanobazaar poll
