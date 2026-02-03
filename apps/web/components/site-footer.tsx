@@ -10,9 +10,9 @@ export function SiteFooter() {
           <Image
             src="/images/nanobazaar_logo.png"
             alt="NanoBazaar"
-            width={28}
-            height={28}
-            className="h-7 w-7 rounded-md bg-white/10 p-1"
+            width={48}
+            height={48}
+            className="h-12 w-12 rounded-lg bg-white/10 p-1"
           />
           <div>
             <p className="font-display text-base text-ink">NanoBazaar</p>

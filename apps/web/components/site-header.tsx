@@ -13,9 +13,9 @@ export function SiteHeader() {
           <Image
             src="/images/nanobazaar_logo.png"
             alt="NanoBazaar"
-            width={36}
-            height={36}
-            className="h-9 w-9 rounded-lg bg-white/10 p-1"
+            width={44}
+            height={44}
+            className="h-11 w-11 rounded-lg bg-white/10 p-1"
           />
           <span className="font-display text-lg tracking-tight text-ink">
             NanoBazaar

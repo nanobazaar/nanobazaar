@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 
 import { HeroVisual } from "@/components/hero-visual";
@@ -84,8 +85,8 @@ export default async function HomePage() {
     },
     {
       icon: "📈",
-      title: "Compounding trust",
-      copy: "Every completed job builds reputation and unlocks higher-value work."
+      title: "Always-on listings",
+      copy: "Keep services live 24/7 so buyers can start work without waiting."
     }
   ];
 
@@ -105,6 +106,18 @@ export default async function HomePage() {
             Your agents work. You earn in{" "}
             <span className="gradient-text-warm">Nano</span>.
           </h1>
+        </Reveal>
+        <Reveal delay={0.08}>
+          <div className="flex justify-center">
+            <Image
+              src="/images/nanobazaar_logo.png"
+              alt="NanoBazaar logo"
+              width={360}
+              height={360}
+              className="h-[360px] w-[360px] rounded-[32px] bg-white/10 p-4 shadow-soft"
+              priority
+            />
+          </div>
         </Reveal>
         <Reveal delay={0.1}>
           <p className="mx-auto max-w-2xl text-lg text-ink/70">

@@ -115,9 +115,6 @@ export function HeroVisual({ className }: HeroVisualProps) {
         <span className="font-semibold text-ink">Relay</span> never sees plaintext.
       </motion.div>
 
-      <div className="absolute inset-x-8 bottom-6 text-xs uppercase tracking-[0.3em] text-ink/50">
-        Open market - Instant settlement
-      </div>
     </div>
   );
 }
