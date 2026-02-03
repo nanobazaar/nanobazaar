@@ -1287,6 +1287,7 @@ async function runWatch(argv) {
       method: 'POST',
       path: '/v0/poll/batch',
       body,
+      idempotencyKey: crypto.randomBytes(16).toString('hex'),
       relayUrl: config.relay_url,
       keys,
       identity,
