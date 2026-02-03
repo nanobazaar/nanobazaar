@@ -50,9 +50,10 @@ var jobStatusSet = map[string]struct{}{
 
 // JobHandler handles job lifecycle endpoints.
 type JobHandler struct {
-	Store   *store.Store
-	Metrics *metrics.Registry
-	Clock   func() time.Time
+	Store     *store.Store
+	Metrics   *metrics.Registry
+	Clock     func() time.Time
+	StreamHub StreamNotifier
 }
 
 func NewJobHandler(store *store.Store, metrics *metrics.Registry) *JobHandler {
@@ -253,7 +254,7 @@ func (h *JobHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := emitEventTx(r.Context(), qtx, offer.SellerBotID, jobRequestedEventType, map[string]any{
+	if err := emitEventTx(r.Context(), qtx, h.StreamHub, offer.SellerBotID, jobRequestedEventType, map[string]any{
 		"job_id":             payload.JobID,
 		"offer_id":           payload.OfferID,
 		"buyer_bot_id":       botID,
@@ -487,7 +488,7 @@ func (h *JobHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "job lookup failed")
 		return
 	}
-	if err := emitEvent(r.Context(), h.Store, updated.SellerBotID, jobCancelledEventType, map[string]any{
+	if err := emitEvent(r.Context(), h.Store, h.StreamHub, updated.SellerBotID, jobCancelledEventType, map[string]any{
 		"job_id":       updated.JobID,
 		"cancelled_at": updated.CancelledAt.Time.UTC().Format(time.RFC3339Nano),
 	}); err != nil {
@@ -600,7 +601,7 @@ func (h *JobHandler) Charge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := emitEvent(r.Context(), h.Store, updated.BuyerBotID, jobChargeCreatedEventType, map[string]any{
+	if err := emitEvent(r.Context(), h.Store, h.StreamHub, updated.BuyerBotID, jobChargeCreatedEventType, map[string]any{
 		"job_id":             updated.JobID,
 		"charge_id":          payload.ChargeID,
 		"address":            payload.Address,
@@ -715,7 +716,7 @@ func (h *JobHandler) MarkPaid(w http.ResponseWriter, r *http.Request) {
 	if payload.AmountRawReceived != "" {
 		eventPayload["amount_raw_received"] = payload.AmountRawReceived
 	}
-	if err := emitEvent(r.Context(), h.Store, updated.BuyerBotID, jobPaidEventType, eventPayload); err != nil {
+	if err := emitEvent(r.Context(), h.Store, h.StreamHub, updated.BuyerBotID, jobPaidEventType, eventPayload); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "event create failed")
 		return
 	}
@@ -855,7 +856,7 @@ func (h *JobHandler) deliverAndUpdate(ctx context.Context, job sqlc.Job, payload
 		return deliverResponse{}, err
 	}
 
-	if err := emitEventTx(ctx, qtx, job.BuyerBotID, jobPayloadAvailableEventType, map[string]any{
+	if err := emitEventTx(ctx, qtx, h.StreamHub, job.BuyerBotID, jobPayloadAvailableEventType, map[string]any{
 		"job_id":       job.JobID,
 		"payload_id":   payload.PayloadID,
 		"payload_kind": payload.PayloadKind,
@@ -901,7 +902,7 @@ func (h *JobHandler) insertPayload(ctx context.Context, job sqlc.Job, payload pa
 		}
 		return err
 	}
-	if err := emitEvent(ctx, h.Store, job.BuyerBotID, jobPayloadAvailableEventType, map[string]any{
+	if err := emitEvent(ctx, h.Store, h.StreamHub, job.BuyerBotID, jobPayloadAvailableEventType, map[string]any{
 		"job_id":       job.JobID,
 		"payload_id":   payload.PayloadID,
 		"payload_kind": payload.PayloadKind,
@@ -1280,28 +1281,40 @@ func readAll(r *http.Request) ([]byte, error) {
 	return io.ReadAll(r.Body)
 }
 
-func emitEvent(ctx context.Context, st *store.Store, recipient, eventType string, data map[string]any) error {
+func emitEvent(ctx context.Context, st *store.Store, notifier StreamNotifier, recipient, eventType string, data map[string]any) error {
 	payload, err := json.Marshal(data)
 	if err != nil {
 		return err
 	}
-	return st.CreateEvent(ctx, sqlc.CreateEventParams{
+	if err := st.CreateEvent(ctx, sqlc.CreateEventParams{
 		RecipientBotID: recipient,
 		EventType:      eventType,
 		DataJson:       string(payload),
 		CreatedAt:      time.Now().UTC(),
-	})
+	}); err != nil {
+		return err
+	}
+	if notifier != nil {
+		notifier.NotifyEvent(ctx, recipient, eventType, data)
+	}
+	return nil
 }
 
-func emitEventTx(ctx context.Context, qtx *sqlc.Queries, recipient, eventType string, data map[string]any) error {
+func emitEventTx(ctx context.Context, qtx *sqlc.Queries, notifier StreamNotifier, recipient, eventType string, data map[string]any) error {
 	payload, err := json.Marshal(data)
 	if err != nil {
 		return err
 	}
-	return qtx.CreateEvent(ctx, sqlc.CreateEventParams{
+	if err := qtx.CreateEvent(ctx, sqlc.CreateEventParams{
 		RecipientBotID: recipient,
 		EventType:      eventType,
 		DataJson:       string(payload),
 		CreatedAt:      time.Now().UTC(),
-	})
+	}); err != nil {
+		return err
+	}
+	if notifier != nil {
+		notifier.NotifyEvent(ctx, recipient, eventType, data)
+	}
+	return nil
 }

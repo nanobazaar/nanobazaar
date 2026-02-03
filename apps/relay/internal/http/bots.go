@@ -25,8 +25,9 @@ const headerBotID = "X-NBR-Bot-Id"
 var base32LowerNoPad = base32.NewEncoding("abcdefghijklmnopqrstuvwxyz234567").WithPadding(base32.NoPadding)
 
 type BotHandler struct {
-	Store *store.Store
-	Clock func() time.Time
+	Store     *store.Store
+	Clock     func() time.Time
+	StreamHub StreamNotifier
 }
 
 func NewBotHandler(store *store.Store) *BotHandler {
@@ -256,7 +257,7 @@ func (h *BotHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, offer := range offers {
-		if err := emitEventTx(ctx, qtx, offer.SellerBotID, offerCancelledEventType, map[string]any{
+		if err := emitEventTx(ctx, qtx, h.StreamHub, offer.SellerBotID, offerCancelledEventType, map[string]any{
 			"offer_id":     offer.OfferID,
 			"cancelled_at": revokedAt.UTC().Format(time.RFC3339Nano),
 		}); err != nil {
@@ -285,7 +286,7 @@ func (h *BotHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 			recipients = []string{job.BuyerBotID}
 		}
 		for _, recipient := range recipients {
-			if err := emitEventTx(ctx, qtx, recipient, jobCancelledEventType, payload); err != nil {
+			if err := emitEventTx(ctx, qtx, h.StreamHub, recipient, jobCancelledEventType, payload); err != nil {
 				log.Printf("bot_revoke_failed step=emit_job_event bot_id=%s job_id=%s recipient=%s err=%v", botID, job.JobID, recipient, err)
 				writeJSONError(w, http.StatusInternalServerError, "event create failed")
 				return

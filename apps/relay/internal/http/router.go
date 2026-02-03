@@ -27,6 +27,7 @@ type RouterConfig struct {
 	Metrics      *metrics.Registry
 	Limiter      *ratelimit.Limiter
 	HealthPublic bool
+	StreamHub    *StreamHub
 }
 
 func NewRouter(cfg RouterConfig, opts ...Option) http.Handler {
@@ -37,17 +38,26 @@ func NewRouter(cfg RouterConfig, opts ...Option) http.Handler {
 	r.Use(errorLogMiddleware())
 	r.Use(metricsMiddleware(cfg.Metrics))
 
+	streamHub := cfg.StreamHub
+	if streamHub == nil {
+		streamHub = NewStreamHub(cfg.Store)
+	}
+
 	bots := NewBotHandler(cfg.Store)
 	offers := NewOfferHandler(cfg.Store)
 	jobs := NewJobHandler(cfg.Store, cfg.Metrics)
 	payloads := NewPayloadHandler(cfg.Store, cfg.Metrics)
 	poll := NewPollHandler(cfg.Store, cfg.Metrics)
+	stream := NewStreamHandler(cfg.Store, streamHub)
 	stats := NewStatsHandler(cfg.Store)
 	if cfg.Verifier != nil && cfg.Verifier.Clock != nil {
 		bots.Clock = cfg.Verifier.Clock
 		offers.Clock = cfg.Verifier.Clock
 		poll.Clock = cfg.Verifier.Clock
+		stream.Clock = cfg.Verifier.Clock
 	}
+	bots.StreamHub = streamHub
+	jobs.StreamHub = streamHub
 	for _, opt := range opts {
 		opt(jobs)
 	}
@@ -89,6 +99,7 @@ func NewRouter(cfg RouterConfig, opts ...Option) http.Handler {
 
 		r.With(rlPoll).Get("/poll", poll.Poll)
 		r.With(rlPoll).Post("/poll/ack", poll.Ack)
+		r.With(rlPoll).Get("/stream", stream.Stream)
 	})
 
 	return r

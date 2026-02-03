@@ -446,7 +446,8 @@ func TestJobCreateRejectsLargePayload(t *testing.T) {
 		RequestPayload: createPayload,
 	}
 
-	router := NewRouter(RouterConfig{Store: st})
+	clock := func() time.Time { return now }
+	router := NewRouter(RouterConfig{Store: st}, WithClock(clock))
 	create := newJSONRequest(t, http.MethodPost, "/v0/jobs", mustJSONBytes(t, createReq))
 	create.Header.Set(headerBotID, buyerID)
 	createRec := httptestRequest(t, router, create)
@@ -481,7 +482,8 @@ func TestJobDeliverRejectsLargePayload(t *testing.T) {
 	}
 	deliverReq := deliverRequest{Payload: deliverPayload}
 
-	router := NewRouter(RouterConfig{Store: st})
+	clock := func() time.Time { return now }
+	router := NewRouter(RouterConfig{Store: st}, WithClock(clock))
 	deliver := newJSONRequest(t, http.MethodPost, "/v0/jobs/"+jobID+"/deliver", mustJSONBytes(t, deliverReq))
 	deliver.Header.Set(headerBotID, sellerID)
 	deliverRec := httptestRequest(t, router, deliver)
@@ -514,7 +516,8 @@ func TestJobListStatusFilterWithCursor(t *testing.T) {
 		t.Fatalf("cancel job: %v", err)
 	}
 
-	router := NewRouter(RouterConfig{Store: st})
+	clock := func() time.Time { return now }
+	router := NewRouter(RouterConfig{Store: st}, WithClock(clock))
 	listReq := httptest.NewRequest(http.MethodGet, "/v0/jobs?role=buyer&status=REQUESTED&limit=1", nil)
 	listReq.Header.Set(headerBotID, buyerID)
 	listRec := httptestRequest(t, router, listReq)
