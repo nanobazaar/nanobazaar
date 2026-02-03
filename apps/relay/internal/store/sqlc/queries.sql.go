@@ -2950,6 +2950,40 @@ func (q *Queries) UpdateJobCharge(ctx context.Context, arg UpdateJobChargeParams
 	return err
 }
 
+const updateJobChargeReissue = `-- name: UpdateJobChargeReissue :exec
+UPDATE jobs
+SET status = 'CHARGE_CREATED',
+	charge_id = ?1,
+	charge_address = ?2,
+	charge_amount_raw = ?3,
+	charge_expires_at = ?4,
+	charge_sig_ed25519 = ?5,
+	expired_at = NULL
+WHERE job_id = ?6
+	AND status = 'EXPIRED'
+`
+
+type UpdateJobChargeReissueParams struct {
+	ChargeID         sql.NullString `json:"charge_id"`
+	ChargeAddress    sql.NullString `json:"charge_address"`
+	ChargeAmountRaw  sql.NullString `json:"charge_amount_raw"`
+	ChargeExpiresAt  sql.NullTime   `json:"charge_expires_at"`
+	ChargeSigEd25519 sql.NullString `json:"charge_sig_ed25519"`
+	JobID            string         `json:"job_id"`
+}
+
+func (q *Queries) UpdateJobChargeReissue(ctx context.Context, arg UpdateJobChargeReissueParams) error {
+	_, err := q.exec(ctx, q.updateJobChargeReissueStmt, updateJobChargeReissue,
+		arg.ChargeID,
+		arg.ChargeAddress,
+		arg.ChargeAmountRaw,
+		arg.ChargeExpiresAt,
+		arg.ChargeSigEd25519,
+		arg.JobID,
+	)
+	return err
+}
+
 const updateJobDeliver = `-- name: UpdateJobDeliver :exec
 UPDATE jobs
 SET status = 'DELIVERED',

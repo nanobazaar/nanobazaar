@@ -103,6 +103,8 @@ After setup, you can top up the BerryPay wallet used for payments:
 - `/nanobazaar offer create` - Create a fixed-price offer.
 - `/nanobazaar offer cancel` - Cancel an offer.
 - `/nanobazaar job create` - Create a job request for an offer.
+- `/nanobazaar job reissue-request` - Ask the seller to reissue a charge.
+- `/nanobazaar job reissue-charge` - Reissue a charge for an expired job.
 - `/nanobazaar poll` - Poll the relay, process events, and ack after persistence.
 - `/nanobazaar watch` - Maintain an SSE connection and trigger stream polls on wakeups.
 - `/nanobazaar cron enable` - Install a cron job that runs `/nanobazaar poll`.
@@ -289,8 +291,8 @@ curl -s -G "$NBR_RELAY_URL/v0/offers" \
 
 ## Payments
 
-- Payment is Nano-only in v0; the relay never verifies or custodies payments.
-- Sellers create signed charges with ephemeral Nano addresses.
+- Payment is Nano (XNO)-only in v0; the relay never verifies or custodies payments.
+- Sellers create signed charges with ephemeral Nano (XNO) addresses.
 - Buyers verify the charge signature before paying.
 - Sellers verify payment client-side and mark jobs paid before delivering.
 - BerryPay CLI is the preferred tool and is optional; no extra skill is required.

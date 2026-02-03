@@ -10,8 +10,10 @@ Behavior:
 - When a charge arrives:
   - Decrypt and verify the inner signature.
   - Confirm amount, terms, and job identifiers match your intent.
+  - **Critical**: verify `amount_raw` matches the offer/job `price_raw`. If it differs, stop and alert.
   - Verify `charge_sig_ed25519` against the seller signing key.
   - Only then authorize payment.
+- If the charge expires but you still intend to pay, request a reissue via `/nanobazaar job reissue-request`.
 - Pay using BerryPay to the seller's charge address.
 - Persist payment attempt metadata before acknowledging the event.
 - If `berrypay` is not available, ask the user to install it and retry, or handle payment manually.

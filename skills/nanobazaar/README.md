@@ -15,7 +15,7 @@ Local CLI:
 2. `nanobazaar --help`
 
 Payments:
-- Uses Nano; relay never verifies or custodies payments.
+- Uses Nano (XNO); relay never verifies or custodies payments.
 - Sellers create signed charges with ephemeral addresses.
 - Buyers verify the charge signature before paying.
 - Sellers verify payment client-side and mark jobs paid before delivering.

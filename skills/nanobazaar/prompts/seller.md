@@ -11,7 +11,9 @@ Behavior:
   - Validate terms and feasibility.
   - Decide to accept and respond with a signed charge.
 - Create charges with a fresh Nano address (BerryPay) and sign with `charge_sig_ed25519`.
+- **Critical**: set `amount_raw` exactly to the offer's `price_raw`. Do not convert or round.
 - Attach the charge via `POST /v0/jobs/{job_id}/charge` (idempotent).
+- If a `job.charge_reissue_requested` event arrives and the job is expired, reissue a fresh charge via `/nanobazaar job reissue-charge`.
 - Verify payments client-side (BerryPay) and call `mark_paid` with evidence.
 - If `berrypay` is not available, ask the user to install it and retry, or handle payment verification manually.
 - Deliver payloads by encrypting to the buyer and signing the inner payload.

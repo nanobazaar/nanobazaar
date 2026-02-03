@@ -219,6 +219,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.updateJobChargeStmt, err = db.PrepareContext(ctx, updateJobCharge); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateJobCharge: %w", err)
 	}
+	if q.updateJobChargeReissueStmt, err = db.PrepareContext(ctx, updateJobChargeReissue); err != nil {
+		return nil, fmt.Errorf("error preparing query UpdateJobChargeReissue: %w", err)
+	}
 	if q.updateJobDeliverStmt, err = db.PrepareContext(ctx, updateJobDeliver); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateJobDeliver: %w", err)
 	}
@@ -576,6 +579,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing updateJobChargeStmt: %w", cerr)
 		}
 	}
+	if q.updateJobChargeReissueStmt != nil {
+		if cerr := q.updateJobChargeReissueStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing updateJobChargeReissueStmt: %w", cerr)
+		}
+	}
 	if q.updateJobDeliverStmt != nil {
 		if cerr := q.updateJobDeliverStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing updateJobDeliverStmt: %w", cerr)
@@ -725,6 +733,7 @@ type Queries struct {
 	updateBotRevokeStmt                       *sql.Stmt
 	updateJobCancelStmt                       *sql.Stmt
 	updateJobChargeStmt                       *sql.Stmt
+	updateJobChargeReissueStmt                *sql.Stmt
 	updateJobDeliverStmt                      *sql.Stmt
 	updateJobExpireStmt                       *sql.Stmt
 	updateJobMarkPaidStmt                     *sql.Stmt
@@ -805,6 +814,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		updateBotRevokeStmt:                       q.updateBotRevokeStmt,
 		updateJobCancelStmt:                       q.updateJobCancelStmt,
 		updateJobChargeStmt:                       q.updateJobChargeStmt,
+		updateJobChargeReissueStmt:                q.updateJobChargeReissueStmt,
 		updateJobDeliverStmt:                      q.updateJobDeliverStmt,
 		updateJobExpireStmt:                       q.updateJobExpireStmt,
 		updateJobMarkPaidStmt:                     q.updateJobMarkPaidStmt,

@@ -259,8 +259,63 @@ function ensureMap(value, keyField) {
   return map;
 }
 
+const RAW_PER_XNO = 10n ** 30n;
+
+function rawToXnoString(raw) {
+  if (raw === undefined || raw === null) {
+    return null;
+  }
+  const rawString = String(raw).trim();
+  if (!rawString) {
+    return null;
+  }
+  if (!/^\d+$/.test(rawString)) {
+    return null;
+  }
+  const rawInt = BigInt(rawString);
+  const whole = rawInt / RAW_PER_XNO;
+  const frac = rawInt % RAW_PER_XNO;
+  if (frac === 0n) {
+    return whole.toString();
+  }
+  const fracStr = frac.toString().padStart(30, '0').replace(/0+$/, '');
+  return `${whole.toString()}.${fracStr}`;
+}
+
+function withXnoPrices(value) {
+  if (Array.isArray(value)) {
+    return value.map((entry) => withXnoPrices(entry));
+  }
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+  const out = {};
+  for (const [key, entry] of Object.entries(value)) {
+    out[key] = withXnoPrices(entry);
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'price_raw') && out.price_xno === undefined) {
+    const xno = rawToXnoString(value.price_raw);
+    if (xno !== null) {
+      out.price_xno = xno;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'amount_raw') && out.amount_xno === undefined) {
+    const xno = rawToXnoString(value.amount_raw);
+    if (xno !== null) {
+      out.amount_xno = xno;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'amount_raw_received') && out.amount_raw_received_xno === undefined) {
+    const xno = rawToXnoString(value.amount_raw_received);
+    if (xno !== null) {
+      out.amount_raw_received_xno = xno;
+    }
+  }
+  return out;
+}
+
 function stringifyJson(data, compact) {
-  return JSON.stringify(data, null, compact ? 0 : 2);
+  return JSON.stringify(withXnoPrices(data), null, compact ? 0 : 2);
 }
 
 function printJson(data, compact) {
@@ -396,6 +451,11 @@ Commands:
                              Cancel an offer
   job create [--json <json|@file>] [--offer-id ... --request-body ...]
                              Create a job request
+  job reissue-request --job-id <id> [--note "..."] [--requested-expires-at <rfc3339>]
+                             Request a new charge from the seller
+  job reissue-charge --job-id <id> --charge-id <id> --address <addr>
+                     --amount-raw <raw> --charge-expires-at <rfc3339> --charge-sig-ed25519 <sig>
+                             Reissue a charge for an expired job
   poll [--since-event-id <id>] [--limit <n>] [--types a,b] [--no-ack]
                              Poll events and optionally ack
   watch [--streams a,b] [--stream-path /v0/stream] [--safety-poll-interval <seconds>]
@@ -892,6 +952,88 @@ async function runJobCreate(argv) {
   state.signing_kid = identity.signingKid;
   state.encryption_kid = identity.encryptionKid;
   saveState(config.state_path, state);
+
+  printJson(result.data, !!flags.compact);
+}
+
+async function runJobReissueRequest(argv) {
+  const {flags, positionals} = parseArgs(argv);
+  const jobId = flags.jobId || flags.job || positionals[0];
+  if (!jobId) {
+    throw new Error('Missing job id. Provide --job-id or a positional job id.');
+  }
+
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  const body = {};
+  if (flags.note) {
+    body.note = String(flags.note);
+  }
+  if (flags.requestedExpiresAt) {
+    body.requested_expires_at = String(flags.requestedExpiresAt);
+  }
+
+  const result = await signedRequest({
+    method: 'POST',
+    path: `/v0/jobs/${jobId}/charge/reissue_request`,
+    body: Object.keys(body).length > 0 ? body : undefined,
+    idempotencyKey: crypto.randomBytes(16).toString('hex'),
+    relayUrl: config.relay_url,
+    keys,
+    identity,
+  });
+
+  if (!result.response.ok) {
+    throw new Error(`Reissue request failed (${result.response.status}): ${result.text || result.response.statusText}`);
+  }
+
+  printJson(result.data, !!flags.compact);
+}
+
+async function runJobReissueCharge(argv) {
+  const {flags, positionals} = parseArgs(argv);
+  const jobId = flags.jobId || flags.job || positionals[0];
+  if (!jobId) {
+    throw new Error('Missing job id. Provide --job-id or a positional job id.');
+  }
+
+  let payload;
+  if (flags.json) {
+    payload = readJsonInput(flags.json, '--json');
+  } else {
+    if (!flags.chargeId || !flags.address || !flags.amountRaw || !flags.chargeExpiresAt || !flags.chargeSigEd25519) {
+      throw new Error('Missing required fields. Provide --charge-id, --address, --amount-raw, --charge-expires-at, and --charge-sig-ed25519.');
+    }
+    payload = {
+      charge_id: String(flags.chargeId),
+      address: String(flags.address),
+      amount_raw: String(flags.amountRaw),
+      charge_expires_at: String(flags.chargeExpiresAt),
+      charge_sig_ed25519: String(flags.chargeSigEd25519),
+    };
+  }
+
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  const result = await signedRequest({
+    method: 'POST',
+    path: `/v0/jobs/${jobId}/charge/reissue`,
+    body: payload,
+    idempotencyKey: crypto.randomBytes(16).toString('hex'),
+    relayUrl: config.relay_url,
+    keys,
+    identity,
+  });
+
+  if (!result.response.ok) {
+    throw new Error(`Reissue charge failed (${result.response.status}): ${result.text || result.response.statusText}`);
+  }
 
   printJson(result.data, !!flags.compact);
 }
@@ -1638,7 +1780,15 @@ async function main() {
         await runJobCreate(rest.slice(1));
         return;
       }
-      throw new Error('Unknown job command. Use: job create');
+      if (sub === 'reissue-request') {
+        await runJobReissueRequest(rest.slice(1));
+        return;
+      }
+      if (sub === 'reissue-charge') {
+        await runJobReissueCharge(rest.slice(1));
+        return;
+      }
+      throw new Error('Unknown job command. Use: job create|reissue-request|reissue-charge');
     }
     case 'poll':
       await runPoll(rest);

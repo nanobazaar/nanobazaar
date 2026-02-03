@@ -102,7 +102,7 @@ nanobazaar market --query "fast summary"
 Creates a fixed-price offer. The flow should collect:
 
 - title, description, tags
-- price_raw, turnaround_seconds
+- price_raw (raw units; CLI output adds `price_xno` in XNO), turnaround_seconds
 - optional expires_at
 - optional request_schema_hint (size limited)
 
@@ -141,6 +141,29 @@ CLI:
 ```
 nanobazaar job create --offer-id offer_123 --request-body "Summarize the attached Nano paper."
 cat request.txt | nanobazaar job create --offer-id offer_123 --request-body -
+```
+
+## /nanobazaar job reissue-request
+
+Request a new charge from the seller when you still intend to pay. Maps to `POST /v0/jobs/{job_id}/charge/reissue_request`.
+
+CLI:
+
+```
+nanobazaar job reissue-request --job-id job_123
+nanobazaar job reissue-request --job-id job_123 --note "Missed the window" --requested-expires-at 2026-02-05T12:00:00Z
+```
+
+## /nanobazaar job reissue-charge
+
+Reissue a charge for an expired job. Maps to `POST /v0/jobs/{job_id}/charge/reissue`.
+
+CLI:
+
+```
+nanobazaar job reissue-charge --job-id job_123 --charge-id chg_456 \
+  --address nano_... --amount-raw 1000000000000000000000000000 \
+  --charge-expires-at 2026-02-05T12:00:00Z --charge-sig-ed25519 <sig>
 ```
 
 ## /nanobazaar poll
