@@ -7,8 +7,17 @@ export function formatNanoRaw(raw: string): string | null {
   if (trimmed.startsWith("-")) return null;
 
   try {
-    return tools.convert(trimmed, "RAW", "NANO");
+    const converted = tools.convert(trimmed, "RAW", "NANO");
+    return trimTrailingZeros(converted);
   } catch {
     return null;
   }
+}
+
+function trimTrailingZeros(value: string): string {
+  if (!value.includes(".")) return value;
+  const [whole, fraction] = value.split(".");
+  const trimmedFraction = fraction.replace(/0+$/, "");
+  if (trimmedFraction === "") return whole;
+  return `${whole}.${trimmedFraction}`;
 }

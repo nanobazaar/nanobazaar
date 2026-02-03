@@ -31,6 +31,48 @@ type PublicOfferQuery = {
 };
 
 const DEFAULT_MAX_PAGES = 10;
+const MOCK_PUBLIC_OFFERS: PublicOffer[] = [
+  {
+    offerId: "mock_offer_counterpoint",
+    title: "Counterpoint Chaos: Savage, Hilarious Rebuttals",
+    description:
+      "Bring your argument. I'll return a hilarious, unhinged counterpoint that's still logically sharp.",
+    tags: ["humor", "debate", "writing"],
+    priceRaw: "100000000000000000000000000",
+    purchaseCount: 0,
+    createdAt: "2026-02-01T12:00:00Z"
+  },
+  {
+    offerId: "mock_offer_pitch",
+    title: "Pitch-Perfect Startup One-Liner",
+    description:
+      "I'll craft a punchy one-liner that explains your product in 140 characters.",
+    tags: ["copywriting", "branding", "startup"],
+    priceRaw: "50000000000000000000000000000",
+    purchaseCount: 9,
+    createdAt: "2026-01-30T09:45:00Z"
+  },
+  {
+    offerId: "mock_offer_research",
+    title: "Rapid Market Scan + Insight Summary",
+    description:
+      "Get a crisp summary of competitors, positioning, and key differentiators.",
+    tags: ["research", "strategy", "market"],
+    priceRaw: "2000000000000000000000000000000",
+    purchaseCount: 3,
+    createdAt: "2026-01-28T15:30:00Z"
+  },
+  {
+    offerId: "mock_offer_productivity",
+    title: "Personalized Focus Sprint Plan",
+    description:
+      "A 7-day plan to help you ship one meaningful task with daily check-ins.",
+    tags: ["productivity", "coaching", "planning"],
+    priceRaw: "75000000000000000000000000000",
+    purchaseCount: 1,
+    createdAt: "2026-01-25T18:10:00Z"
+  }
+];
 
 function resolveRelayBaseUrl(): string | null {
   const base =
@@ -45,7 +87,15 @@ export async function getPublicOffers(
   options: PublicOfferQuery = {}
 ): Promise<{ offers: PublicOffer[]; nextCursor?: string } | null> {
   const baseUrl = resolveRelayBaseUrl();
-  if (!baseUrl) return null;
+  if (!baseUrl) {
+    if (process.env.NODE_ENV === "development") {
+      return {
+        offers: filterMockOffers(options),
+        nextCursor: undefined
+      };
+    }
+    return null;
+  }
 
   const url = new URL("/market/offers", baseUrl);
   if (options.sort) url.searchParams.set("sort", options.sort);
@@ -82,6 +132,42 @@ export async function getPublicOffers(
   } catch {
     return null;
   }
+}
+
+function filterMockOffers(options: PublicOfferQuery): PublicOffer[] {
+  let offers = [...MOCK_PUBLIC_OFFERS];
+
+  if (options.query) {
+    const query = options.query.toLowerCase();
+    offers = offers.filter((offer) => {
+      return (
+        offer.title.toLowerCase().includes(query) ||
+        offer.description.toLowerCase().includes(query) ||
+        offer.tags.some((tag) => tag.toLowerCase().includes(query))
+      );
+    });
+  }
+
+  if (options.tags && options.tags.length > 0) {
+    const tags = options.tags.map((tag) => tag.toLowerCase());
+    offers = offers.filter((offer) =>
+      tags.every((tag) =>
+        offer.tags.some((offerTag) => offerTag.toLowerCase() === tag)
+      )
+    );
+  }
+
+  if (options.sort === "most_purchased") {
+    offers.sort((a, b) => b.purchaseCount - a.purchaseCount);
+  } else {
+    offers.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  if (options.limit && options.limit > 0) {
+    return offers.slice(0, options.limit);
+  }
+
+  return offers;
 }
 
 export async function getAllPublicOffers(
