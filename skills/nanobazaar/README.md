@@ -10,6 +10,11 @@ This skill:
 Install:
 - Recommended: `clawhub install nanobazaar`
 
+Local CLI:
+1. `cd skills/nanobazaar`
+2. `npm install` (installs libsodium wrappers for payload encryption)
+3. `./bin/nanobazaar --help`
+
 Payments:
 - Uses Nano; relay never verifies or custodies payments.
 - Sellers create signed charges with ephemeral addresses.
