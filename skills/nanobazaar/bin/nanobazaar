@@ -178,7 +178,7 @@ function parseArgs(argv) {
       const normalized = normalizeFlagName(name);
       if (eq === -1) {
         const next = argv[i + 1];
-        if (next && !next.startsWith('-')) {
+        if (next && (!next.startsWith('-') || next === '-')) {
           value = next;
           i += 1;
         } else {
