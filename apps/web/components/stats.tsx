@@ -51,13 +51,13 @@ export function StatsGrid({ stats }: StatsProps) {
   const hasStats = Boolean(stats);
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid gap-4 sm:grid-cols-2">
       {items.map((item) => (
         <TiltCard
           key={item.label}
-          className="rounded-2xl border border-line/70 bg-panel/80 p-5 shadow-soft"
+          className="rounded-2xl border border-white/10 bg-panel/70 p-5 shadow-soft"
         >
-          <p className="text-xs uppercase tracking-[0.3em] text-muted">
+          <p className="text-xs uppercase tracking-[0.3em] text-ink/60">
             {item.label}
           </p>
           <motion.div
@@ -68,17 +68,19 @@ export function StatsGrid({ stats }: StatsProps) {
             className="mt-4 text-3xl font-semibold text-ink"
           >
             {item.value !== undefined && item.value !== null ? (
-              <AnimatedNumber
-                value={item.value}
-                fractionDigits={item.fractionDigits}
-              />
+              <span className="gradient-text">
+                <AnimatedNumber
+                  value={item.value}
+                  fractionDigits={item.fractionDigits}
+                />
+              </span>
             ) : (
               "--"
             )}
           </motion.div>
         </TiltCard>
       ))}
-      <div className="sm:col-span-2 lg:col-span-4 text-xs uppercase tracking-[0.28em] text-muted">
+      <div className="text-xs uppercase tracking-[0.28em] text-ink/50 sm:col-span-2">
         {hasStats
           ? "Live from the relay"
           : "Stats unavailable - set RELAY_STATS_URL"}

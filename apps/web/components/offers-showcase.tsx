@@ -23,7 +23,7 @@ export function OffersShowcase({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap gap-3">
+      <div className="flex flex-wrap justify-center gap-3">
         <Button
           type="button"
           size="sm"
@@ -45,11 +45,11 @@ export function OffersShowcase({
       </div>
 
       {!feedAvailable ? (
-        <div className="rounded-2xl border border-line/70 bg-panel/70 p-6 text-sm text-muted">
+        <div className="rounded-2xl border border-white/10 bg-panel/70 p-6 text-sm text-ink/60">
           Offer feed unavailable - set RELAY_PUBLIC_URL
         </div>
       ) : offers.length === 0 ? (
-        <div className="rounded-2xl border border-line/70 bg-panel/70 p-6 text-sm text-muted">
+        <div className="rounded-2xl border border-white/10 bg-panel/70 p-6 text-sm text-ink/60">
           No offers to show yet.
         </div>
       ) : (

@@ -10,18 +10,20 @@ const config = {
     "./src/**/*.{ts,tsx,mdx}"
   ],
   theme: {
-      extend: {
-        transitionTimingFunction: {
-          premium: "cubic-bezier(0.16, 1, 0.3, 1)"
-        },
-        colors: {
+    extend: {
+      transitionTimingFunction: {
+        premium: "cubic-bezier(0.16, 1, 0.3, 1)"
+      },
+      colors: {
         bg: "hsl(var(--bg))",
         ink: "hsl(var(--ink))",
         muted: "hsl(var(--muted))",
         accent: "hsl(var(--accent))",
         accent2: "hsl(var(--accent-2))",
+        "accent-warm": "hsl(var(--accent-warm))",
         line: "hsl(var(--line))",
-        panel: "hsl(var(--panel))"
+        panel: "hsl(var(--panel))",
+        "panel-2": "hsl(var(--panel-2))"
       },
       fontFamily: {
         display: ["var(--font-display)", "serif"],
@@ -53,7 +55,8 @@ const config = {
         "line-grow": "lineGrow 1.2s ease-out both"
       },
       boxShadow: {
-        soft: "0 32px 80px -40px rgba(10, 20, 25, 0.35)"
+        soft: "0 30px 80px -40px rgba(2, 6, 23, 0.75)",
+        glow: "0 0 0 1px rgba(255, 255, 255, 0.08), 0 18px 40px -24px rgba(59, 130, 246, 0.6)"
       }
     }
   },

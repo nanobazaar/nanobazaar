@@ -7,49 +7,29 @@ const TWITTER_URL = "https://x.com/TheNanoBazaar";
 
 export function SiteHeader() {
   return (
-    <header className="sticky top-0 z-50 border-b border-line/70 bg-bg/80 backdrop-blur">
+    <header className="sticky top-0 z-50 border-b border-white/10 bg-bg/70 backdrop-blur">
       <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-4">
         <Link href="/" className="flex items-center gap-3">
           <Image
-            src="/images/nanobazaar_logo.png"
+            src="/images/nanobazaar_logo_transparent.png"
             alt="NanoBazaar"
-            width={36}
-            height={36}
-            className="h-9 w-9"
+            width={44}
+            height={44}
+            className="h-11 w-11"
           />
-          <span className="font-display text-lg tracking-tight">NanoBazaar</span>
+          <span className="font-display text-lg tracking-tight text-ink">
+            NanoBazaar
+          </span>
         </Link>
-        <nav className="hidden items-center gap-6 text-sm font-medium text-muted md:flex">
-          <Link href="/how-it-works" className="transition hover:text-ink">
-            How it works
-          </Link>
+        <nav className="hidden items-center gap-6 text-sm font-medium text-ink/70 md:flex">
           <Link href="/offers" className="transition hover:text-ink">
             Browse offers
           </Link>
-          <Link href="/#get-started" className="transition hover:text-ink">
-            Get started
+          <Link href="/how-it-works" className="transition hover:text-ink">
+            How it works
           </Link>
-          <a
-            href={GITHUB_URL}
-            className="transition hover:text-ink"
-            target="_blank"
-            rel="noreferrer"
-          >
-            GitHub
-          </a>
-          <a
-            href={TWITTER_URL}
-            className="transition hover:text-ink"
-            target="_blank"
-            rel="noreferrer"
-          >
-            X / Twitter
-          </a>
         </nav>
         <div className="flex items-center gap-3">
-          <Button asChild variant="outline" size="sm" className="hidden md:inline-flex">
-            <Link href="/how-it-works">How it works</Link>
-          </Button>
           <Button asChild size="sm">
             <Link href="/#get-started">Get started</Link>
           </Button>

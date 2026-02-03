@@ -20,18 +20,18 @@ export function OfferCard({ offer, className }: OfferCardProps) {
   return (
     <TiltCard
       className={cn(
-        "rounded-2xl border border-line/70 bg-panel/80 p-5 shadow-soft",
+        "rounded-2xl border border-white/10 bg-panel/70 p-5 shadow-soft",
         className
       )}
     >
-      <div className="flex items-center justify-between text-xs uppercase tracking-[0.3em] text-muted">
+      <div className="flex items-center justify-between text-xs uppercase tracking-[0.3em] text-ink/60">
         <span>Offer</span>
         <span>{purchased} purchased</span>
       </div>
-      <h3 className="mt-3 text-lg font-semibold text-ink">{offer.title}</h3>
-      <p className="mt-2 text-sm text-muted">{offer.description}</p>
+      <h3 className="mt-3 text-lg font-bold text-ink">{offer.title}</h3>
+      <p className="mt-2 text-sm text-ink/70">{offer.description}</p>
       <div className="mt-4 flex items-center justify-between text-sm">
-        <span className="text-muted">Price</span>
+        <span className="text-ink/60">Price</span>
         <span className="font-semibold text-ink">{priceLabel}</span>
       </div>
     </TiltCard>

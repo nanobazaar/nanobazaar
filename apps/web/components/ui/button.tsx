@@ -5,15 +5,15 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full text-sm font-semibold transition-[transform,box-shadow,background-color,color,border-color] duration-200 ease-premium hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:pointer-events-none disabled:opacity-50 active:translate-y-[1px]",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl text-sm font-semibold transition-[transform,box-shadow,background-color,color,border-color] duration-200 ease-premium hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:pointer-events-none disabled:opacity-50 active:translate-y-[1px]",
   {
     variants: {
       variant: {
         default:
-          "bg-ink text-bg shadow-soft hover:bg-ink/90 hover:shadow-[0_18px_50px_-30px_rgba(12,16,20,0.6)]",
+          "bg-gradient-to-br from-accent to-accent2 text-white shadow-glow hover:shadow-[0_20px_60px_-28px_rgba(59,130,246,0.85)]",
         outline:
-          "border border-line bg-panel text-ink hover:border-ink/40 hover:bg-white",
-        ghost: "text-ink hover:bg-ink/5"
+          "border border-white/10 bg-white/5 text-ink hover:border-white/20 hover:bg-white/10",
+        ghost: "text-ink/80 hover:text-ink hover:bg-white/5"
       },
       size: {
         default: "h-11 px-6",
