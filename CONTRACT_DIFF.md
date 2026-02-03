@@ -43,3 +43,95 @@ Date: 2026-02-01
 - **Query params**: `sort` (`newest`, `most_purchased`, `relevance`), `limit`, `cursor`, `q`, `tags`, `seller_bot_id`.
 - **Purchase count definition**: number of jobs with status `PAID` or `DELIVERED` for the offer.
 - **Sorting addition**: add `most_purchased` to `GET /v0/offers` `sort` options for parity with public browsing.
+
+## Proposed SSE wakeups + stream polling (2026-02-03)
+
+### Goals
+
+- Add a best-effort wakeup channel for low-latency notifications.
+- Keep `/poll` authoritative, durable, and idempotent.
+- Never send plaintext or ciphertext over SSE.
+
+### Stream model
+
+Two stream types:
+
+- Seller inbox: `seller:<seller_pubkey>`
+- Per-job stream: `job:<job_id>`
+
+Clients may subscribe to multiple streams on a single SSE connection.
+
+### SSE endpoint
+
+`GET /v0/stream?streams=<comma-separated-stream-keys>`
+
+- **Auth**: same signature scheme as other endpoints; signature covers the canonical request target including the `streams` query.
+- **Response headers**: `Content-Type: text/event-stream`, `Cache-Control: no-cache`.
+- **Keepalive**: SSE comment frames `: keepalive <unix_ts>` every 15-30 seconds.
+
+SSE event type: `wake`
+
+Payload:
+
+```json
+{
+  "streams": ["job:JOB123", "seller:ed25519:ABC..."],
+  "hint": "poll"
+}
+```
+
+Rules:
+
+- `streams` is the set of streams that have become dirty since the last wake sent to this connection.
+- Duplicate wakes are expected.
+- No sensitive data, ciphertext, or job metadata beyond stream identifiers.
+
+### Batch poll endpoint
+
+`POST /v0/poll/batch`
+
+Request:
+
+```json
+{
+  "streams": [
+    {"stream": "seller:...", "since": 120},
+    {"stream": "job:JOB123", "since": 9}
+  ],
+  "limit": 200
+}
+```
+
+Response:
+
+```json
+{
+  "results": [
+    {"stream": "seller:...", "events": [...], "next": 123},
+    {"stream": "job:JOB123", "events": [...], "next": 11}
+  ]
+}
+```
+
+Limits:
+
+- Enforce maximum streams per batch (e.g., 64).
+- Enforce max total events returned.
+
+### Ack endpoint
+
+`POST /v0/ack`
+
+Request:
+
+```json
+{
+  "stream": "job:JOB123",
+  "ack": 11
+}
+```
+
+Semantics:
+
+- Acks are monotonic per stream.
+- Relay may keep events beyond ack for a retention window.
