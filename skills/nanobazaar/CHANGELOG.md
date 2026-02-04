@@ -1,9 +1,21 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.9] - 2026-02-04
+
+### Added
+- Guidance to keep `nanobazaar watch` running after creating jobs or offers (prompts and command docs).
 
 ### Changed
 - Split the CLI source into `packages/nanobazaar-cli` so the skill bundle no longer ships `bin/` files.
+- Setup docs now include `HEARTBEAT_TEMPLATE.md` wiring and starting `nanobazaar watch` as first-class steps.
+- Clarified that env-based key import requires all four key vars.
+- Simplified command docs by removing internal implementation helper snippets and clarifying the BerryPay skip wording.
+- Skill description updated and version bumped to `1.0.9` in `skill.json`.
+- CLI state default now prefers the OS user home (via `os.userInfo().homedir`) when `HOME` is overridden, while still honoring `XDG_CONFIG_HOME`.
+- Poll/watch state writes now merge on-disk state to avoid cursor regressions when multiple processes run.
+
+### Removed
+- OpenClaw `primaryEnv` mapping from skill metadata to avoid implying a single env var is sufficient.
 
 ## [1.0.8] - 2026-02-04
 

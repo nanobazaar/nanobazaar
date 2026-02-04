@@ -167,6 +167,7 @@ Additional guidance:
 - On 410 (cursor too old), follow the recovery playbook in `docs/POLLING.md`.
 - The watcher is best-effort; `/nanobazaar poll` remains authoritative.
 - Notify the user if setup fails, payments are under/overpaid, or jobs expire unexpectedly.
+- For quicker wake-ups on local state changes, consider a filesystem watcher that triggers an immediate OpenClaw system event. See `{baseDir}/HEARTBEAT_TEMPLATE.md` for a `fswatch` example.
 
 ## References
 

@@ -10,8 +10,25 @@ const {spawnSync} = require('child_process');
 const DEFAULT_RELAY_URL = 'https://relay.nanobazaar.ai';
 const ENC_ALG = 'libsodium.crypto_box_seal.x25519.xsalsa20poly1305';
 const BASE_DIR = path.resolve(__dirname, '..');
+function resolveHomeDir() {
+  const envHome = (process.env.HOME || '').trim();
+  try {
+    const info = os.userInfo();
+    if (info && typeof info.homedir === 'string' && info.homedir.trim()) {
+      return info.homedir.trim();
+    }
+  } catch (_) {
+    // ignore lookup errors (sandboxed environments)
+  }
+  if (envHome) {
+    return envHome;
+  }
+  return os.homedir();
+}
+
+const HOME_DIR = resolveHomeDir();
 const XDG_CONFIG_HOME = (process.env.XDG_CONFIG_HOME || '').trim();
-const CONFIG_BASE_DIR = XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+const CONFIG_BASE_DIR = XDG_CONFIG_HOME || path.join(HOME_DIR, '.config');
 const STATE_DEFAULT = path.join(CONFIG_BASE_DIR, 'nanobazaar', 'nanobazaar.json');
 
 function requireFetch() {
@@ -73,6 +90,97 @@ function saveState(filePath, state) {
   }
 }
 
+function mergeMapField(state, disk, field, keyField) {
+  if (!disk || !disk[field]) {
+    return;
+  }
+  const diskMap = ensureMap(disk[field], keyField);
+  if (!diskMap || typeof diskMap !== 'object') {
+    return;
+  }
+  const stateMap = ensureMap(state[field], keyField);
+  for (const [key, value] of Object.entries(diskMap)) {
+    if (stateMap[key] === undefined) {
+      stateMap[key] = value;
+    }
+  }
+  state[field] = stateMap;
+}
+
+function mergeStreamCursors(state, disk) {
+  if (!disk || !disk.stream_cursors) {
+    return;
+  }
+  const diskMap = ensureMap(disk.stream_cursors, 'stream');
+  if (!diskMap || typeof diskMap !== 'object') {
+    return;
+  }
+  const stateMap = ensureMap(state.stream_cursors, 'stream');
+  for (const [stream, diskCursor] of Object.entries(diskMap)) {
+    if (typeof diskCursor !== 'number' || !Number.isFinite(diskCursor)) {
+      continue;
+    }
+    const current = stateMap[stream];
+    if (typeof current === 'number' && Number.isFinite(current)) {
+      stateMap[stream] = Math.max(current, diskCursor);
+    } else {
+      stateMap[stream] = diskCursor;
+    }
+  }
+  state.stream_cursors = stateMap;
+}
+
+function mergeStateFromDisk(filePath, state, options) {
+  const disk = loadState(filePath);
+  if (!disk || typeof disk !== 'object') {
+    return state;
+  }
+  const opts = options || {};
+  if (opts.mergeLastAcked) {
+    const diskAcked = disk.last_acked_event_id;
+    if (typeof diskAcked === 'number' && Number.isFinite(diskAcked)) {
+      const current = state.last_acked_event_id;
+      if (typeof current === 'number' && Number.isFinite(current)) {
+        state.last_acked_event_id = Math.max(current, diskAcked);
+      } else {
+        state.last_acked_event_id = diskAcked;
+      }
+    }
+  }
+  if (opts.mergeStreamCursors) {
+    mergeStreamCursors(state, disk);
+  }
+  if (opts.mergeKnownMaps) {
+    mergeMapField(state, disk, 'known_offers', 'offer_id');
+    mergeMapField(state, disk, 'known_jobs', 'job_id');
+    mergeMapField(state, disk, 'known_payloads', 'payload_id');
+  }
+  if (opts.mergeEventLog && Array.isArray(disk.event_log)) {
+    appendEvents(state, disk.event_log);
+  }
+  if (!state.keys && disk.keys) {
+    state.keys = disk.keys;
+  }
+  if (!state.relay_url && disk.relay_url) {
+    state.relay_url = disk.relay_url;
+  }
+  if (!state.bot_id && disk.bot_id) {
+    state.bot_id = disk.bot_id;
+  }
+  if (!state.signing_kid && disk.signing_kid) {
+    state.signing_kid = disk.signing_kid;
+  }
+  if (!state.encryption_kid && disk.encryption_kid) {
+    state.encryption_kid = disk.encryption_kid;
+  }
+  return state;
+}
+
+function saveStateMerged(filePath, state, options) {
+  mergeStateFromDisk(filePath, state, options);
+  saveState(filePath, state);
+}
+
 function getEnvValue(name) {
   const value = process.env[name];
   return value && value.trim() ? value.trim() : '';
@@ -84,12 +192,12 @@ function expandHomePath(value) {
   }
   let expanded = value;
   if (expanded === '~') {
-    expanded = os.homedir();
+    expanded = HOME_DIR;
   } else if (expanded.startsWith('~/') || expanded.startsWith('~\\')) {
-    expanded = path.join(os.homedir(), expanded.slice(2));
+    expanded = path.join(HOME_DIR, expanded.slice(2));
   }
   if (expanded.includes('$HOME') || expanded.includes('${HOME}')) {
-    expanded = expanded.replace(/\$\{HOME\}/g, os.homedir()).replace(/\$HOME\b/g, os.homedir());
+    expanded = expanded.replace(/\$\{HOME\}/g, HOME_DIR).replace(/\$HOME\b/g, HOME_DIR);
   }
   return expanded;
 }
@@ -619,7 +727,12 @@ async function runSearch(argv) {
   state.bot_id = identity.botId;
   state.signing_kid = identity.signingKid;
   state.encryption_kid = identity.encryptionKid;
-  saveState(config.state_path, state);
+  saveStateMerged(config.state_path, state, {
+    mergeLastAcked: true,
+    mergeStreamCursors: true,
+    mergeKnownMaps: true,
+    mergeEventLog: true,
+  });
 
   printJson(result.data, !!flags.compact);
 }
@@ -1177,7 +1290,12 @@ async function runPoll(argv, options) {
 
     if (typeof ackedId === 'number' && ackedId !== state.last_acked_event_id) {
       state.last_acked_event_id = ackedId;
-      saveState(config.state_path, state);
+      saveStateMerged(config.state_path, state, {
+        mergeLastAcked: true,
+        mergeStreamCursors: true,
+        mergeKnownMaps: true,
+        mergeEventLog: true,
+      });
     }
   }
 
@@ -1538,7 +1656,12 @@ async function runWatch(argv) {
 
     const addedEvents = appendEvents(state, allEvents);
     if (addedEvents > 0) {
-      saveState(config.state_path, state);
+      saveStateMerged(config.state_path, state, {
+        mergeLastAcked: true,
+        mergeStreamCursors: true,
+        mergeKnownMaps: true,
+        mergeEventLog: true,
+      });
     }
 
     let ackedStreams = 0;
@@ -1568,7 +1691,12 @@ async function runWatch(argv) {
         }
 
         setStreamCursor(state, entry.stream, next);
-        saveState(config.state_path, state);
+        saveStateMerged(config.state_path, state, {
+          mergeLastAcked: true,
+          mergeStreamCursors: true,
+          mergeKnownMaps: true,
+          mergeEventLog: true,
+        });
         ackedStreams += 1;
       }
     }

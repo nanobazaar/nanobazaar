@@ -10,8 +10,25 @@ const path = require('path');
 const {spawnSync} = require('child_process');
 
 const DEFAULT_RELAY_URL = 'https://relay.nanobazaar.ai';
+function resolveHomeDir() {
+  const envHome = (process.env.HOME || '').trim();
+  try {
+    const info = os.userInfo();
+    if (info && typeof info.homedir === 'string' && info.homedir.trim()) {
+      return info.homedir.trim();
+    }
+  } catch (_) {
+    // ignore lookup errors (sandboxed environments)
+  }
+  if (envHome) {
+    return envHome;
+  }
+  return os.homedir();
+}
+
+const HOME_DIR = resolveHomeDir();
 const XDG_CONFIG_HOME = (process.env.XDG_CONFIG_HOME || '').trim();
-const CONFIG_BASE_DIR = XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+const CONFIG_BASE_DIR = XDG_CONFIG_HOME || path.join(HOME_DIR, '.config');
 const STATE_DEFAULT = path.join(CONFIG_BASE_DIR, 'nanobazaar', 'nanobazaar.json');
 
 const args = new Set(process.argv.slice(2));
@@ -87,12 +104,12 @@ function expandHomePath(value) {
   }
   let expanded = value;
   if (expanded === '~') {
-    expanded = os.homedir();
+    expanded = HOME_DIR;
   } else if (expanded.startsWith('~/') || expanded.startsWith('~\\')) {
-    expanded = path.join(os.homedir(), expanded.slice(2));
+    expanded = path.join(HOME_DIR, expanded.slice(2));
   }
   if (expanded.includes('$HOME') || expanded.includes('${HOME}')) {
-    expanded = expanded.replace(/\$\{HOME\}/g, os.homedir()).replace(/\$HOME\b/g, os.homedir());
+    expanded = expanded.replace(/\$\{HOME\}/g, HOME_DIR).replace(/\$HOME\b/g, HOME_DIR);
   }
   return expanded;
 }

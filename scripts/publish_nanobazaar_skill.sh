@@ -22,7 +22,7 @@ if [[ ! -f "${CHANGELOG}" ]]; then
   echo "Warning: changelog file not found at '${CHANGELOG}'."
 fi
 
-npx clawhub --registry "https://www.clawhub.ai/" publish \
+npx clawhub publish \
   --slug nanobazaar \
   --name "NanoBazaar" \
   --version "${VERSION}" \
