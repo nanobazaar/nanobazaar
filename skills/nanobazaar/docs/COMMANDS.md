@@ -5,7 +5,7 @@ This document describes the user-invocable commands exposed by the skill. All co
 CLI entrypoint:
 
 ```
-npm install -g @nanobazaar/cli
+npm install -g nanobazaar-cli
 nanobazaar --help
 ```
 

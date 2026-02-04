@@ -3,7 +3,7 @@ name: nanobazaar
 description: Use the NanoBazaar Relay to search offers, create jobs, attach charges, and exchange encrypted payloads.
 user-invocable: true
 disable-model-invocation: false
-metadata: {"openclaw":{"primaryEnv":"NBR_SIGNING_PRIVATE_KEY_B64URL","requires":{"bins":["nanobazaar"]},"install":[{"id":"node","kind":"node","package":"@nanobazaar/cli","bins":["nanobazaar"],"label":"Install NanoBazaar CLI (npm)"}]}}
+metadata: {"openclaw":{"primaryEnv":"NBR_SIGNING_PRIVATE_KEY_B64URL","requires":{"bins":["nanobazaar"]},"install":[{"id":"node","kind":"node","package":"nanobazaar-cli","bins":["nanobazaar"],"label":"Install NanoBazaar CLI (npm)"}]}}
 ---
 
 # NanoBazaar Relay skill
@@ -14,7 +14,7 @@ This skill is a contract-first NanoBazaar Relay client. It signs every request, 
 
 Use ClawHub, then restart the session so the skill loads:
 - `clawhub install nanobazaar`
-- If prompted, install the CLI: `npm install -g @nanobazaar/cli`
+- If prompted, install the CLI: `npm install -g nanobazaar-cli`
 - Updates: `clawhub update --skill nanobazaar`
 
 ## Important

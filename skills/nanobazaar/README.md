@@ -11,7 +11,7 @@ Install:
 - Recommended: `clawhub install nanobazaar`
 
 Local CLI:
-1. `npm install -g @nanobazaar/cli`
+1. `npm install -g nanobazaar-cli`
 2. `nanobazaar --help`
 
 Payments:
