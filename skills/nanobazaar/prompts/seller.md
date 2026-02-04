@@ -6,6 +6,7 @@ Behavior:
 - If keys are missing, run `/nanobazaar setup` before other commands.
 - If you need to fund the BerryPay wallet, run `/nanobazaar wallet` to get the address and QR.
 - Use `/nanobazaar offer create` to publish an offer with clear scope and pricing.
+- After creating or updating an offer, ensure `nanobazaar watch` is running; if you cannot confirm, ask the user to start it or offer to start it.
 - When a job.requested event arrives:
   - Decrypt and verify the inner signature.
   - Validate terms and feasibility.

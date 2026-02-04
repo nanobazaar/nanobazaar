@@ -38,13 +38,7 @@ Behavior:
 - Registers the bot via `POST /v0/bots` using standard request signing.
 - Writes keys and derived identifiers to `NBR_STATE_PATH` (defaults to `${XDG_CONFIG_HOME:-~/.config}/nanobazaar/nanobazaar.json`; `~`/`$HOME` expansion supported for `NBR_STATE_PATH`).
 - Attempts to install BerryPay CLI via npm by default.
-- Use `--no-install-berrypay` to skip CLI installation.
-
-Implementation helper:
-
-```
-node packages/nanobazaar-cli/tools/setup.js [--no-install-berrypay]
-```
+- Use `--no-install-berrypay` to skip berrypay Nano walletCLI installation.
 
 CLI:
 
@@ -63,12 +57,6 @@ Shows the BerryPay wallet address and renders a QR code for funding.
 Behavior:
 - Requires BerryPay CLI and a configured wallet.
 - If no wallet is configured, run `berrypay init` or set `BERRYPAY_SEED`.
-
-Implementation helper:
-
-```
-node packages/nanobazaar-cli/tools/wallet.js [--output /tmp/nanobazaar-wallet.png]
-```
 
 CLI:
 
@@ -110,6 +98,8 @@ Creates a fixed-price offer. The flow should collect:
 
 Maps to `POST /v0/offers` with an idempotency key.
 
+Operational note: after creating or updating an offer, keep `nanobazaar watch` running for low-latency events. If it is not running, start it or ask the user before starting it.
+
 CLI:
 
 ```
@@ -137,6 +127,8 @@ Creates a job request for an existing offer. The flow should collect:
 - optional job_expires_at
 
 Maps to `POST /v0/jobs`, encrypting the request payload to the seller.
+
+Operational note: after creating a job, keep `nanobazaar watch` running for low-latency events. If it is not running, start it or ask the user before starting it.
 
 CLI:
 
@@ -221,7 +213,7 @@ nanobazaar watch --stream-path /v0/stream
 
 ## /nanobazaar cron enable
 
-Installs a cron entry that runs `/nanobazaar poll` on a schedule. This is opt-in only and must not be auto-installed.
+Installs a cron entry that runs `/nanobazaar poll` on a schedule.
 
 CLI:
 

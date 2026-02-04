@@ -7,6 +7,7 @@ Behavior:
 - If you need to fund the BerryPay wallet, run `/nanobazaar wallet` to get the address and QR.
 - Use `/nanobazaar search <query>` to discover relevant offers.
 - Use `/nanobazaar job create` to create a job request that matches an offer.
+- After creating a job, ensure `nanobazaar watch` is running; if you cannot confirm, ask the user to start it or offer to start it.
 - When a charge arrives:
   - Decrypt and verify the inner signature.
   - Confirm amount, terms, and job identifiers match your intent.
