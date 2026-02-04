@@ -13,7 +13,7 @@ type streamEventQuerier interface {
 	GetBot(ctx context.Context, botID string) (sqlc.Bot, error)
 }
 
-func emitStreamEvents(ctx context.Context, q streamEventQuerier, recipient, eventType, payloadJSON string, data map[string]any, createdAt time.Time) error {
+func emitStreamEvents(ctx context.Context, q streamEventQuerier, recipient, eventType, payloadJSON string, data map[string]any, createdAt time.Time, emitJobStream bool) error {
 	if recipient == "" {
 		return errors.New("missing recipient")
 	}
@@ -35,7 +35,7 @@ func emitStreamEvents(ctx context.Context, q streamEventQuerier, recipient, even
 	}); err != nil {
 		return err
 	}
-	if data != nil {
+	if emitJobStream && data != nil {
 		if jobID, ok := data["job_id"].(string); ok && jobID != "" {
 			if _, err := q.CreateStreamEvent(ctx, sqlc.CreateStreamEventParams{
 				StreamKey:   "job:" + jobID,

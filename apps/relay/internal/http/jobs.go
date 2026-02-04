@@ -279,7 +279,7 @@ func (h *JobHandler) Create(w http.ResponseWriter, r *http.Request) {
 		"turnaround_seconds": offer.TurnaroundSeconds,
 		"request_payload_id": payload.RequestPayload.PayloadID,
 		"job_expires_at":     jobExpiresAt.UTC().Format(time.RFC3339Nano),
-	}); err != nil {
+	}, true); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "event create failed")
 		return
 	}
@@ -508,7 +508,7 @@ func (h *JobHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 	if err := emitEvent(r.Context(), h.Store, h.StreamHub, updated.SellerBotID, jobCancelledEventType, map[string]any{
 		"job_id":       updated.JobID,
 		"cancelled_at": updated.CancelledAt.Time.UTC().Format(time.RFC3339Nano),
-	}); err != nil {
+	}, true); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "event create failed")
 		return
 	}
@@ -626,7 +626,7 @@ func (h *JobHandler) Charge(w http.ResponseWriter, r *http.Request) {
 		"amount_raw":         payload.AmountRaw,
 		"charge_expires_at":  chargeExpiresAt.UTC().Format(time.RFC3339Nano),
 		"charge_sig_ed25519": payload.ChargeSig,
-	}); err != nil {
+	}, true); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "event create failed")
 		return
 	}
@@ -721,7 +721,7 @@ func (h *JobHandler) PaymentSent(w http.ResponseWriter, r *http.Request) {
 		eventPayload["note"] = payload.Note
 	}
 
-	if err := emitEvent(r.Context(), h.Store, h.StreamHub, job.SellerBotID, jobPaymentSentEventType, eventPayload); err != nil {
+	if err := emitEvent(r.Context(), h.Store, h.StreamHub, job.SellerBotID, jobPaymentSentEventType, eventPayload, true); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "event create failed")
 		return
 	}
@@ -806,7 +806,7 @@ func (h *JobHandler) ReissueChargeRequest(w http.ResponseWriter, r *http.Request
 		eventPayload["requested_expires_at"] = parsed.UTC().Format(time.RFC3339Nano)
 	}
 
-	if err := emitEvent(r.Context(), h.Store, h.StreamHub, job.SellerBotID, jobChargeReissueReqEventType, eventPayload); err != nil {
+	if err := emitEvent(r.Context(), h.Store, h.StreamHub, job.SellerBotID, jobChargeReissueReqEventType, eventPayload, true); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "event create failed")
 		return
 	}
@@ -922,7 +922,7 @@ func (h *JobHandler) ReissueCharge(w http.ResponseWriter, r *http.Request) {
 		"amount_raw":         payload.AmountRaw,
 		"charge_expires_at":  chargeExpiresAt.UTC().Format(time.RFC3339Nano),
 		"charge_sig_ed25519": payload.ChargeSig,
-	}); err != nil {
+	}, true); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "event create failed")
 		return
 	}
@@ -1031,7 +1031,7 @@ func (h *JobHandler) MarkPaid(w http.ResponseWriter, r *http.Request) {
 	if payload.AmountRawReceived != "" {
 		eventPayload["amount_raw_received"] = payload.AmountRawReceived
 	}
-	if err := emitEvent(r.Context(), h.Store, h.StreamHub, updated.BuyerBotID, jobPaidEventType, eventPayload); err != nil {
+	if err := emitEvent(r.Context(), h.Store, h.StreamHub, updated.BuyerBotID, jobPaidEventType, eventPayload, true); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "event create failed")
 		return
 	}
@@ -1178,7 +1178,7 @@ func (h *JobHandler) deliverAndUpdate(ctx context.Context, job sqlc.Job, payload
 		"job_id":       job.JobID,
 		"payload_id":   payload.PayloadID,
 		"payload_kind": payload.PayloadKind,
-	}); err != nil {
+	}, true); err != nil {
 		return deliverResponse{}, err
 	}
 
@@ -1224,7 +1224,7 @@ func (h *JobHandler) insertPayload(ctx context.Context, job sqlc.Job, payload pa
 		"job_id":       job.JobID,
 		"payload_id":   payload.PayloadID,
 		"payload_kind": payload.PayloadKind,
-	}); err != nil {
+	}, true); err != nil {
 		return err
 	}
 	return nil
@@ -1415,7 +1415,7 @@ func (h *JobHandler) emitJobExpired(ctx context.Context, job sqlc.Job, now time.
 	if job.BuyerBotID == job.SellerBotID {
 		recipients = []string{job.BuyerBotID}
 	}
-	for _, recipient := range recipients {
+	for i, recipient := range recipients {
 		if err := h.Store.CreateEvent(ctx, sqlc.CreateEventParams{
 			RecipientBotID: recipient,
 			EventType:      jobExpiredEventType,
@@ -1424,7 +1424,8 @@ func (h *JobHandler) emitJobExpired(ctx context.Context, job sqlc.Job, now time.
 		}); err != nil {
 			return err
 		}
-		if err := emitStreamEvents(ctx, h.Store, recipient, jobExpiredEventType, string(payload), data, now); err != nil {
+		emitJobStream := i == 0
+		if err := emitStreamEvents(ctx, h.Store, recipient, jobExpiredEventType, string(payload), data, now, emitJobStream); err != nil {
 			return err
 		}
 		if h.StreamHub != nil {
@@ -1605,7 +1606,7 @@ func readAll(r *http.Request) ([]byte, error) {
 	return io.ReadAll(r.Body)
 }
 
-func emitEvent(ctx context.Context, st *store.Store, notifier StreamNotifier, recipient, eventType string, data map[string]any) error {
+func emitEvent(ctx context.Context, st *store.Store, notifier StreamNotifier, recipient, eventType string, data map[string]any, emitJobStream bool) error {
 	payload, err := json.Marshal(data)
 	if err != nil {
 		return err
@@ -1619,7 +1620,7 @@ func emitEvent(ctx context.Context, st *store.Store, notifier StreamNotifier, re
 	}); err != nil {
 		return err
 	}
-	if err := emitStreamEvents(ctx, st, recipient, eventType, string(payload), data, now); err != nil {
+	if err := emitStreamEvents(ctx, st, recipient, eventType, string(payload), data, now, emitJobStream); err != nil {
 		return err
 	}
 	if notifier != nil {
@@ -1628,7 +1629,7 @@ func emitEvent(ctx context.Context, st *store.Store, notifier StreamNotifier, re
 	return nil
 }
 
-func emitEventTx(ctx context.Context, qtx *sqlc.Queries, notifier StreamNotifier, recipient, eventType string, data map[string]any) error {
+func emitEventTx(ctx context.Context, qtx *sqlc.Queries, notifier StreamNotifier, recipient, eventType string, data map[string]any, emitJobStream bool) error {
 	payload, err := json.Marshal(data)
 	if err != nil {
 		return err
@@ -1642,7 +1643,7 @@ func emitEventTx(ctx context.Context, qtx *sqlc.Queries, notifier StreamNotifier
 	}); err != nil {
 		return err
 	}
-	if err := emitStreamEvents(ctx, qtx, recipient, eventType, string(payload), data, now); err != nil {
+	if err := emitStreamEvents(ctx, qtx, recipient, eventType, string(payload), data, now, emitJobStream); err != nil {
 		return err
 	}
 	if notifier != nil {

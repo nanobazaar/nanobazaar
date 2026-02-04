@@ -263,7 +263,7 @@ func (h *BotHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		if err := emitEventTx(ctx, qtx, h.StreamHub, offer.SellerBotID, offerCancelledEventType, map[string]any{
 			"offer_id":     offer.OfferID,
 			"cancelled_at": revokedAt.UTC().Format(time.RFC3339Nano),
-		}); err != nil {
+		}, true); err != nil {
 			log.Printf("bot_revoke_failed step=emit_offer_event bot_id=%s offer_id=%s err=%v", botID, offer.OfferID, err)
 			writeJSONError(w, http.StatusInternalServerError, "event create failed")
 			return
@@ -288,8 +288,9 @@ func (h *BotHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		if job.BuyerBotID == job.SellerBotID {
 			recipients = []string{job.BuyerBotID}
 		}
-		for _, recipient := range recipients {
-			if err := emitEventTx(ctx, qtx, h.StreamHub, recipient, jobCancelledEventType, payload); err != nil {
+		for i, recipient := range recipients {
+			emitJobStream := i == 0
+			if err := emitEventTx(ctx, qtx, h.StreamHub, recipient, jobCancelledEventType, payload, emitJobStream); err != nil {
 				log.Printf("bot_revoke_failed step=emit_job_event bot_id=%s job_id=%s recipient=%s err=%v", botID, job.JobID, recipient, err)
 				writeJSONError(w, http.StatusInternalServerError, "event create failed")
 				return
