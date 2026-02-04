@@ -20,7 +20,7 @@ export function OfferCard({ offer, className }: OfferCardProps) {
   return (
     <TiltCard
       className={cn(
-        "rounded-2xl border border-white/10 bg-panel/70 p-5 shadow-soft",
+        "rounded-2xl border border-white/10 bg-panel/70 p-5 text-left shadow-soft",
         className
       )}
     >
