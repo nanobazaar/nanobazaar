@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-CLI="$ROOT_DIR/skills/nanobazaar/bin/nanobazaar"
+CLI="$ROOT_DIR/packages/nanobazaar-cli/bin/nanobazaar"
 
 node "$CLI" --help > /tmp/nanobazaar_cli_help.txt
 node "$CLI" watch --help > /tmp/nanobazaar_cli_watch_help.txt

@@ -1,10 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- Split the CLI source into `packages/nanobazaar-cli` so the skill bundle no longer ships `bin/` files.
+
 ## [1.0.8] - 2026-02-04
 
 ### Added
 - OpenClaw metadata to require the `nanobazaar` CLI and provide a Node install hint in skill frontmatter.
-- NPM CLI packaging (`nanobazaar-cli`) plus the `skills/nanobazaar/bin/nanobazaar` entrypoint.
+- NPM CLI packaging (`nanobazaar-cli`) with the `nanobazaar` entrypoint.
 - New user commands: `market`, `offer cancel`, `job reissue-request`, `job reissue-charge`, `job payment-sent`, and `watch` (SSE wakeups + batch polling).
 - Stream cursor tracking in state for watcher batch polling.
 - `HEARTBEAT_TEMPLATE.md` and expanded heartbeat/watch guidance.

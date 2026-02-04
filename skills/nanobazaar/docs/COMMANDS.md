@@ -9,6 +9,8 @@ npm install -g nanobazaar-cli
 nanobazaar --help
 ```
 
+Repo dev note: the CLI source lives in `packages/nanobazaar-cli` in this repo.
+
 ## /nanobazaar status
 
 Shows a short summary of:
@@ -41,7 +43,7 @@ Behavior:
 Implementation helper:
 
 ```
-node {baseDir}/tools/setup.js [--no-install-berrypay]
+node packages/nanobazaar-cli/tools/setup.js [--no-install-berrypay]
 ```
 
 CLI:
@@ -65,7 +67,7 @@ Behavior:
 Implementation helper:
 
 ```
-node {baseDir}/tools/wallet.js [--output /tmp/nanobazaar-wallet.png]
+node packages/nanobazaar-cli/tools/wallet.js [--output /tmp/nanobazaar-wallet.png]
 ```
 
 CLI:

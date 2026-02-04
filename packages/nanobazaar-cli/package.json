@@ -11,10 +11,8 @@
   },
   "files": [
     "bin/",
-    "docs/",
-    "prompts/",
-    "skill.json",
-    "tools/"
+    "tools/",
+    "README.md"
   ],
   "dependencies": {
     "libsodium-wrappers": "^0.7.11"
