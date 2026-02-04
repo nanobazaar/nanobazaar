@@ -25,8 +25,9 @@ const headerBotID = "X-NBR-Bot-Id"
 var base32LowerNoPad = base32.NewEncoding("abcdefghijklmnopqrstuvwxyz234567").WithPadding(base32.NoPadding)
 
 type BotHandler struct {
-	Store *store.Store
-	Clock func() time.Time
+	Store     *store.Store
+	Clock     func() time.Time
+	StreamHub StreamNotifier
 }
 
 func NewBotHandler(store *store.Store) *BotHandler {
@@ -121,6 +122,7 @@ func (h *BotHandler) Register(w http.ResponseWriter, r *http.Request) {
 			LastSeenAt: sql.NullTime{Time: now, Valid: true},
 		})
 		existing.LastSeenAt = sql.NullTime{Time: now, Valid: true}
+		log.Printf("bot_register bot_id=%s existing=true", botID)
 		writeJSON(w, http.StatusOK, botToResponse(existing))
 		return
 	case errors.Is(err, sql.ErrNoRows):
@@ -154,10 +156,12 @@ func (h *BotHandler) Register(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusConflict, "bot_id already pinned")
 			return
 		}
+		log.Printf("bot_register bot_id=%s existing=true", botID)
 		writeJSON(w, http.StatusOK, botToResponse(existing))
 		return
 	}
 
+	log.Printf("bot_register bot_id=%s existing=false", botID)
 	writeJSON(w, http.StatusOK, botResponse{
 		BotID:                  botID,
 		SigningPubkeyEd25519:   signingKeyCanonical,
@@ -256,10 +260,10 @@ func (h *BotHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, offer := range offers {
-		if err := emitEventTx(ctx, qtx, offer.SellerBotID, offerCancelledEventType, map[string]any{
+		if err := emitEventTx(ctx, qtx, h.StreamHub, offer.SellerBotID, offerCancelledEventType, map[string]any{
 			"offer_id":     offer.OfferID,
 			"cancelled_at": revokedAt.UTC().Format(time.RFC3339Nano),
-		}); err != nil {
+		}, true); err != nil {
 			log.Printf("bot_revoke_failed step=emit_offer_event bot_id=%s offer_id=%s err=%v", botID, offer.OfferID, err)
 			writeJSONError(w, http.StatusInternalServerError, "event create failed")
 			return
@@ -284,8 +288,9 @@ func (h *BotHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		if job.BuyerBotID == job.SellerBotID {
 			recipients = []string{job.BuyerBotID}
 		}
-		for _, recipient := range recipients {
-			if err := emitEventTx(ctx, qtx, recipient, jobCancelledEventType, payload); err != nil {
+		for i, recipient := range recipients {
+			emitJobStream := i == 0
+			if err := emitEventTx(ctx, qtx, h.StreamHub, recipient, jobCancelledEventType, payload, emitJobStream); err != nil {
 				log.Printf("bot_revoke_failed step=emit_job_event bot_id=%s job_id=%s recipient=%s err=%v", botID, job.JobID, recipient, err)
 				writeJSONError(w, http.StatusInternalServerError, "event create failed")
 				return

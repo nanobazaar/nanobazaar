@@ -1,0 +1,1907 @@
+#!/usr/bin/env node
+'use strict';
+
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const crypto = require('crypto');
+const {spawnSync} = require('child_process');
+
+const DEFAULT_RELAY_URL = 'https://relay.nanobazaar.ai';
+const ENC_ALG = 'libsodium.crypto_box_seal.x25519.xsalsa20poly1305';
+const BASE_DIR = path.resolve(__dirname, '..');
+const XDG_CONFIG_HOME = (process.env.XDG_CONFIG_HOME || '').trim();
+const CONFIG_BASE_DIR = XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+const STATE_DEFAULT = path.join(CONFIG_BASE_DIR, 'nanobazaar', 'nanobazaar.json');
+
+function requireFetch() {
+  if (typeof fetch !== 'function') {
+    throw new Error('Node.js 18+ is required (global fetch is missing).');
+  }
+}
+
+function base32Encode(buffer) {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz234567';
+  let bits = 0;
+  let value = 0;
+  let output = '';
+
+  for (const byte of buffer) {
+    value = (value << 8) | byte;
+    bits += 8;
+    while (bits >= 5) {
+      output += alphabet[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+
+  if (bits > 0) {
+    output += alphabet[(value << (5 - bits)) & 31];
+  }
+
+  return output;
+}
+
+function multibaseBase32(buffer) {
+  return 'b' + base32Encode(buffer);
+}
+
+function sha256(buffer) {
+  return crypto.createHash('sha256').update(buffer).digest();
+}
+
+function sha256Hex(buffer) {
+  return crypto.createHash('sha256').update(buffer).digest('hex');
+}
+
+function loadState(filePath) {
+  try {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    return JSON.parse(raw);
+  } catch (_) {
+    return {};
+  }
+}
+
+function saveState(filePath, state) {
+  fs.mkdirSync(path.dirname(filePath), {recursive: true});
+  fs.writeFileSync(filePath, JSON.stringify(state, null, 2));
+  try {
+    fs.chmodSync(filePath, 0o600);
+  } catch (_) {
+    // ignore chmod errors on unsupported platforms
+  }
+}
+
+function getEnvValue(name) {
+  const value = process.env[name];
+  return value && value.trim() ? value.trim() : '';
+}
+
+function expandHomePath(value) {
+  if (!value) {
+    return value;
+  }
+  let expanded = value;
+  if (expanded === '~') {
+    expanded = os.homedir();
+  } else if (expanded.startsWith('~/') || expanded.startsWith('~\\')) {
+    expanded = path.join(os.homedir(), expanded.slice(2));
+  }
+  if (expanded.includes('$HOME') || expanded.includes('${HOME}')) {
+    expanded = expanded.replace(/\$\{HOME\}/g, os.homedir()).replace(/\$HOME\b/g, os.homedir());
+  }
+  return expanded;
+}
+
+function loadKeysFromEnv() {
+  const signingPrivate = getEnvValue('NBR_SIGNING_PRIVATE_KEY_B64URL');
+  const signingPublic = getEnvValue('NBR_SIGNING_PUBLIC_KEY_B64URL');
+  const encryptionPrivate = getEnvValue('NBR_ENCRYPTION_PRIVATE_KEY_B64URL');
+  const encryptionPublic = getEnvValue('NBR_ENCRYPTION_PUBLIC_KEY_B64URL');
+
+  if (!signingPrivate || !signingPublic || !encryptionPrivate || !encryptionPublic) {
+    return null;
+  }
+
+  return {
+    signing_private_key_b64url: signingPrivate,
+    signing_public_key_b64url: signingPublic,
+    encryption_private_key_b64url: encryptionPrivate,
+    encryption_public_key_b64url: encryptionPublic,
+  };
+}
+
+function resolveKeys(state) {
+  const envKeys = loadKeysFromEnv();
+  if (envKeys) {
+    return {keys: envKeys, source: 'env'};
+  }
+
+  if (state.keys &&
+      state.keys.signing_private_key_b64url &&
+      state.keys.signing_public_key_b64url &&
+      state.keys.encryption_private_key_b64url &&
+      state.keys.encryption_public_key_b64url) {
+    return {keys: state.keys, source: 'state'};
+  }
+
+  return null;
+}
+
+function requireKeys(state) {
+  const resolved = resolveKeys(state);
+  if (!resolved) {
+    throw new Error('Missing keys. Run `nanobazaar setup` or set NBR_*_KEY_B64URL env vars.');
+  }
+  return resolved;
+}
+
+function deriveIdentity(keys) {
+  const signingPubBytes = Buffer.from(keys.signing_public_key_b64url, 'base64url');
+  const encryptionPubBytes = Buffer.from(keys.encryption_public_key_b64url, 'base64url');
+  const signingHash = sha256(signingPubBytes);
+  const encryptionHash = sha256(encryptionPubBytes);
+
+  return {
+    botId: multibaseBase32(signingHash),
+    signingKid: multibaseBase32(signingHash.subarray(0, 16)),
+    encryptionKid: multibaseBase32(encryptionHash.subarray(0, 16)),
+  };
+}
+
+function signCanonical(keys, canonical) {
+  const signingKey = crypto.createPrivateKey({
+    format: 'jwk',
+    key: {
+      kty: 'OKP',
+      crv: 'Ed25519',
+      x: keys.signing_public_key_b64url,
+      d: keys.signing_private_key_b64url,
+    },
+  });
+  return crypto.sign(null, Buffer.from(canonical, 'utf8'), signingKey).toString('base64url');
+}
+
+function normalizeFlagName(name) {
+  return name.replace(/-([a-z])/g, (_, char) => char.toUpperCase());
+}
+
+function parseArgs(argv) {
+  const flags = {};
+  const positionals = [];
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === '--') {
+      positionals.push(...argv.slice(i + 1));
+      break;
+    }
+    if (arg.startsWith('--')) {
+      const eq = arg.indexOf('=');
+      let name = '';
+      let value;
+      if (eq !== -1) {
+        name = arg.slice(2, eq);
+        value = arg.slice(eq + 1);
+      } else {
+        name = arg.slice(2);
+      }
+
+      if (name.startsWith('no-')) {
+        const normalized = normalizeFlagName(name.slice(3));
+        flags[normalized] = false;
+        continue;
+      }
+
+      const normalized = normalizeFlagName(name);
+      if (eq === -1) {
+        const next = argv[i + 1];
+        if (next && (!next.startsWith('-') || next === '-')) {
+          value = next;
+          i += 1;
+        } else {
+          value = true;
+        }
+      }
+
+      if (flags[normalized] !== undefined && value !== true) {
+        if (Array.isArray(flags[normalized])) {
+          flags[normalized].push(value);
+        } else {
+          flags[normalized] = [flags[normalized], value];
+        }
+      } else {
+        flags[normalized] = value;
+      }
+      continue;
+    }
+
+    positionals.push(arg);
+  }
+
+  return {flags, positionals};
+}
+
+function readTextInput(value, label) {
+  if (value === undefined || value === null) {
+    return '';
+  }
+  if (value === '-') {
+    return fs.readFileSync(0, 'utf8');
+  }
+  if (value.startsWith('@')) {
+    const filePath = value.slice(1);
+    return fs.readFileSync(filePath, 'utf8');
+  }
+  return value;
+}
+
+function readJsonInput(value, label) {
+  const raw = readTextInput(value, label);
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`Invalid JSON for ${label}: ${err.message}`);
+  }
+}
+
+function countRecords(value) {
+  if (!value) {
+    return 0;
+  }
+  if (Array.isArray(value)) {
+    return value.length;
+  }
+  if (typeof value === 'object') {
+    return Object.keys(value).length;
+  }
+  return 0;
+}
+
+function ensureMap(value, keyField) {
+  if (!value) {
+    return {};
+  }
+  if (!Array.isArray(value)) {
+    return value;
+  }
+  const map = {};
+  for (const item of value) {
+    if (item && item[keyField]) {
+      map[item[keyField]] = item;
+    }
+  }
+  return map;
+}
+
+const RAW_PER_XNO = 10n ** 30n;
+
+function rawToXnoString(raw) {
+  if (raw === undefined || raw === null) {
+    return null;
+  }
+  const rawString = String(raw).trim();
+  if (!rawString) {
+    return null;
+  }
+  if (!/^\d+$/.test(rawString)) {
+    return null;
+  }
+  const rawInt = BigInt(rawString);
+  const whole = rawInt / RAW_PER_XNO;
+  const frac = rawInt % RAW_PER_XNO;
+  if (frac === 0n) {
+    return whole.toString();
+  }
+  const fracStr = frac.toString().padStart(30, '0').replace(/0+$/, '');
+  return `${whole.toString()}.${fracStr}`;
+}
+
+function withXnoPrices(value) {
+  if (Array.isArray(value)) {
+    return value.map((entry) => withXnoPrices(entry));
+  }
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+  const out = {};
+  for (const [key, entry] of Object.entries(value)) {
+    out[key] = withXnoPrices(entry);
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'price_raw') && out.price_xno === undefined) {
+    const xno = rawToXnoString(value.price_raw);
+    if (xno !== null) {
+      out.price_xno = xno;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'amount_raw') && out.amount_xno === undefined) {
+    const xno = rawToXnoString(value.amount_raw);
+    if (xno !== null) {
+      out.amount_xno = xno;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'amount_raw_received') && out.amount_raw_received_xno === undefined) {
+    const xno = rawToXnoString(value.amount_raw_received);
+    if (xno !== null) {
+      out.amount_raw_received_xno = xno;
+    }
+  }
+  return out;
+}
+
+function stringifyJson(data, compact) {
+  return JSON.stringify(withXnoPrices(data), null, compact ? 0 : 2);
+}
+
+function printJson(data, compact) {
+  console.log(stringifyJson(data, compact));
+}
+
+function shellEscape(value) {
+  if (value === '') {
+    return "''";
+  }
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+let sodiumPromise;
+async function loadSodium() {
+  if (!sodiumPromise) {
+    try {
+      const sodium = require('libsodium-wrappers');
+      sodiumPromise = sodium.ready.then(() => sodium);
+    } catch (err) {
+      throw new Error('Missing dependency libsodium-wrappers. Run: (cd skills/nanobazaar && npm install)');
+    }
+  }
+  return sodiumPromise;
+}
+
+function buildSignedFetch({method, path, query, body, idempotencyKey, relayUrl, keys, identity, extraHeaders, signal}) {
+  requireFetch();
+  const base = new URL(relayUrl);
+  const basePath = base.pathname.endsWith('/') ? base.pathname.slice(0, -1) : base.pathname;
+  const url = new URL(basePath + path, base);
+  if (query) {
+    for (const [key, value] of Object.entries(query)) {
+      if (value === undefined || value === null || value === '') {
+        continue;
+      }
+      url.searchParams.append(key, String(value));
+    }
+  }
+
+  const bodyString = body ? (typeof body === 'string' ? body : JSON.stringify(body)) : '';
+  const bodyHash = sha256Hex(bodyString);
+  const timestamp = new Date().toISOString();
+  const nonce = crypto.randomBytes(8).toString('hex');
+  const canonical = `${method.toUpperCase()}\n${url.pathname}${url.search}\n${timestamp}\n${nonce}\n${bodyHash}`;
+  const signature = signCanonical(keys, canonical);
+
+  const headers = {
+    'X-NBR-Bot-Id': identity.botId,
+    'X-NBR-Timestamp': timestamp,
+    'X-NBR-Nonce': nonce,
+    'X-NBR-Body-SHA256': bodyHash,
+    'X-NBR-Signature': signature,
+  };
+  if (bodyString) {
+    headers['Content-Type'] = 'application/json';
+  }
+  if (idempotencyKey) {
+    headers['X-Idempotency-Key'] = idempotencyKey;
+  }
+  if (extraHeaders) {
+    for (const [key, value] of Object.entries(extraHeaders)) {
+      if (value === undefined || value === null || value === '') {
+        continue;
+      }
+      headers[key] = String(value);
+    }
+  }
+
+  return {
+    url,
+    init: {
+      method: method.toUpperCase(),
+      headers,
+      body: bodyString ? bodyString : undefined,
+      signal,
+    },
+  };
+}
+
+function buildURL({path, query, relayUrl}) {
+  requireFetch();
+  const base = new URL(relayUrl || DEFAULT_RELAY_URL);
+  const basePath = base.pathname.endsWith('/') ? base.pathname.slice(0, -1) : base.pathname;
+  const url = new URL(basePath + path, base);
+  if (query) {
+    for (const [key, value] of Object.entries(query)) {
+      if (value === undefined || value === null || value === '') {
+        continue;
+      }
+      url.searchParams.append(key, String(value));
+    }
+  }
+  return url;
+}
+
+async function signedRequest({method, path, query, body, idempotencyKey, relayUrl, keys, identity, extraHeaders, signal}) {
+  const {url, init} = buildSignedFetch({method, path, query, body, idempotencyKey, relayUrl, keys, identity, extraHeaders, signal});
+  const response = await fetch(url, init);
+  const text = await response.text();
+  let data = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch (_) {
+      data = text;
+    }
+  }
+  return {response, data, text};
+}
+
+function printHelp() {
+  console.log(`NanoBazaar CLI (OpenClaw skill)
+
+Usage:
+  nanobazaar <command> [options]
+
+Commands:
+  status                     Show config + state summary
+  config [--json]            Show derived config (env + state paths)
+  setup [--no-install-berrypay] [--skip-register]
+                             Generate keys, register bot, persist state
+  wallet [--output <path>] [--no-qr]
+                             Show BerryPay wallet address + QR
+  search <query> [--tags a,b] [--seller <bot_id>] [--mine]
+                             Search offers
+  market [--query <q>] [--tags a,b] [--seller <bot_id>] [--sort <mode>]
+         [--limit <n>] [--cursor <cursor>]
+                             Browse public offers (no auth)
+  offer create [--json <json|@file>] [--title ... --description ... --tag ...]
+                             Create a fixed-price offer
+  offer cancel --offer-id <id>
+                             Cancel an offer
+  job create [--json <json|@file>] [--offer-id ... --request-body ...]
+                             Create a job request
+  job reissue-request --job-id <id> [--note "..."] [--requested-expires-at <rfc3339>]
+                             Request a new charge from the seller
+  job reissue-charge --job-id <id> --charge-id <id> --address <addr>
+                     --amount-raw <raw> --charge-expires-at <rfc3339> --charge-sig-ed25519 <sig>
+                             Reissue a charge for an expired job
+  job payment-sent --job-id <id> [--payment-block-hash <hash>]
+                   [--amount-raw-sent <raw>] [--sent-at <rfc3339>] [--note "..."]
+                             Notify seller that payment was sent
+  poll [--since-event-id <id>] [--limit <n>] [--types a,b] [--no-ack]
+                             Poll events and optionally ack
+  watch [--streams a,b] [--stream-path /v0/stream] [--safety-poll-interval <seconds>]
+                             Maintain SSE connection; poll on wake + on safety interval
+  cron enable [--schedule "*/5 * * * *"]
+                             Install cron entry to run poll
+  cron disable               Remove the cron entry
+
+Global flags:
+  --help                     Show this help
+  --version                  Print skill version
+
+Notes:
+  - Defaults to relay: ${DEFAULT_RELAY_URL}
+  - Uses NBR_STATE_PATH for local state (default: ${STATE_DEFAULT})
+  - Job payloads are encrypted with libsodium (install deps in skills/nanobazaar)
+`);
+}
+
+function printConfig(config, compact) {
+  if (compact) {
+    printJson(config, true);
+    return;
+  }
+  console.log(`Base dir: ${config.base_dir}`);
+  console.log(`Relay URL: ${config.relay_url}`);
+  console.log(`State path: ${config.state_path}`);
+  if (config.poll_limit) {
+    console.log(`Poll limit: ${config.poll_limit}`);
+  }
+  if (config.poll_types) {
+    console.log(`Poll types: ${config.poll_types}`);
+  }
+  if (config.berrypay_bin) {
+    console.log(`BerryPay bin: ${config.berrypay_bin}`);
+  }
+  if (config.payment_provider) {
+    console.log(`Payment provider: ${config.payment_provider}`);
+  }
+}
+
+function buildConfig() {
+  const statePath = expandHomePath(getEnvValue('NBR_STATE_PATH') || STATE_DEFAULT);
+  return {
+    base_dir: BASE_DIR,
+    relay_url: getEnvValue('NBR_RELAY_URL') || DEFAULT_RELAY_URL,
+    state_path: statePath,
+    poll_limit: getEnvValue('NBR_POLL_LIMIT'),
+    poll_types: getEnvValue('NBR_POLL_TYPES'),
+    berrypay_bin: getEnvValue('NBR_BERRYPAY_BIN') || 'berrypay',
+    payment_provider: getEnvValue('NBR_PAYMENT_PROVIDER') || 'berrypay',
+  };
+}
+
+async function runStatus() {
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  let identity;
+  try {
+    const resolved = requireKeys(state);
+    identity = deriveIdentity(resolved.keys);
+  } catch (_) {
+    identity = null;
+  }
+
+  console.log(`Relay URL: ${config.relay_url}`);
+  console.log(`State path: ${config.state_path}`);
+  if (identity) {
+    console.log(`Bot ID: ${identity.botId}`);
+    console.log(`Signing kid: ${identity.signingKid}`);
+    console.log(`Encryption kid: ${identity.encryptionKid}`);
+  } else {
+    console.log('Bot ID: (missing keys; run setup)');
+  }
+  console.log(`Last acked event id: ${state.last_acked_event_id ?? 0}`);
+  if (state.stream_cursors && typeof state.stream_cursors === 'object' && !Array.isArray(state.stream_cursors)) {
+    console.log(`Stream cursors: ${Object.keys(state.stream_cursors).length}`);
+  }
+  console.log(`Known offers: ${countRecords(state.known_offers)}`);
+  console.log(`Known jobs: ${countRecords(state.known_jobs)}`);
+  console.log(`Known payloads: ${countRecords(state.known_payloads)}`);
+  console.log(`Event log entries: ${countRecords(state.event_log)}`);
+}
+
+function runSetup(args) {
+  const script = path.resolve(BASE_DIR, 'tools/setup.js');
+  const nodeBin = process.execPath;
+  const result = spawnSync(nodeBin, [script, ...args], {stdio: 'inherit'});
+  process.exit(typeof result.status === 'number' ? result.status : 1);
+}
+
+function runWallet(args) {
+  const script = path.resolve(BASE_DIR, 'tools/wallet.js');
+  const nodeBin = process.execPath;
+  const result = spawnSync(nodeBin, [script, ...args], {stdio: 'inherit'});
+  process.exit(typeof result.status === 'number' ? result.status : 1);
+}
+
+async function runSearch(argv) {
+  const {flags, positionals} = parseArgs(argv);
+  const query = positionals.join(' ');
+  if (!query && !flags.tags && !flags.seller && !flags.mine) {
+    throw new Error('Missing search query. Provide a query or filters.');
+  }
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  const tagsValue = Array.isArray(flags.tags) ? flags.tags.join(',') : flags.tags;
+  const queryParams = {
+    q: query || undefined,
+    tags: tagsValue || undefined,
+    seller_bot_id: flags.seller || undefined,
+    mine: flags.mine ? 'true' : undefined,
+    sort: flags.sort || undefined,
+    limit: flags.limit || undefined,
+    cursor: flags.cursor || undefined,
+  };
+
+  const result = await signedRequest({
+    method: 'GET',
+    path: '/v0/offers',
+    query: queryParams,
+    relayUrl: config.relay_url,
+    keys,
+    identity,
+  });
+
+  if (!result.response.ok) {
+    throw new Error(`Search failed (${result.response.status}): ${result.text || result.response.statusText}`);
+  }
+
+  const offers = result.data && result.data.offers ? result.data.offers : [];
+  state.known_offers = ensureMap(state.known_offers, 'offer_id');
+  for (const offer of offers) {
+    if (offer && offer.offer_id) {
+      state.known_offers[offer.offer_id] = offer;
+    }
+  }
+  state.relay_url = config.relay_url;
+  state.bot_id = identity.botId;
+  state.signing_kid = identity.signingKid;
+  state.encryption_kid = identity.encryptionKid;
+  saveState(config.state_path, state);
+
+  printJson(result.data, !!flags.compact);
+}
+
+async function runMarket(argv) {
+  requireFetch();
+
+  const {flags, positionals} = parseArgs(argv);
+  const config = buildConfig();
+  const queryText = flags.query || positionals.join(' ');
+
+  const tagsValue = Array.isArray(flags.tags) ? flags.tags.join(',') : flags.tags;
+  const queryParams = {
+    q: queryText || undefined,
+    tags: tagsValue || undefined,
+    seller_bot_id: flags.seller || undefined,
+    sort: flags.sort || undefined,
+    limit: flags.limit || undefined,
+    cursor: flags.cursor || undefined,
+  };
+
+  const url = buildURL({path: '/market/offers', query: queryParams, relayUrl: config.relay_url});
+  const response = await fetch(url.toString(), {method: 'GET', headers: {'Accept': 'application/json'}});
+  const text = await response.text();
+  let data = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch (_) {
+      data = text;
+    }
+  }
+  if (!response.ok) {
+    throw new Error(`Market offers failed (${response.status}): ${text || response.statusText}`);
+  }
+
+  printJson(data, !!flags.compact);
+}
+
+function collectTags(flags) {
+  const tags = [];
+  if (flags.tags) {
+    tags.push(flags.tags);
+  }
+  if (flags.tag) {
+    const tagValues = Array.isArray(flags.tag) ? flags.tag : [flags.tag];
+    tags.push(...tagValues);
+  }
+  const finalTags = [];
+  for (const entry of tags) {
+    for (const tag of String(entry).split(',')) {
+      const trimmed = tag.trim();
+      if (trimmed) {
+        finalTags.push(trimmed);
+      }
+    }
+  }
+  return finalTags;
+}
+
+async function runOfferCreate(argv) {
+  const {flags} = parseArgs(argv);
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  let payload;
+  if (flags.json) {
+    payload = readJsonInput(flags.json, '--json');
+  } else {
+    const tags = collectTags(flags);
+    if (!flags.title || !flags.description || !flags.priceRaw || !flags.turnaroundSeconds || tags.length === 0) {
+      throw new Error('Missing required fields. Provide --title, --description, --price-raw, --turnaround-seconds, and at least one --tag.');
+    }
+    payload = {
+      title: String(flags.title),
+      description: String(flags.description),
+      tags,
+      price_raw: String(flags.priceRaw),
+      turnaround_seconds: Number(flags.turnaroundSeconds),
+    };
+    if (flags.expiresAt) {
+      payload.expires_at = String(flags.expiresAt);
+    }
+    if (flags.requestSchemaHint) {
+      payload.request_schema_hint = readTextInput(String(flags.requestSchemaHint), '--request-schema-hint');
+    }
+  }
+
+  const result = await signedRequest({
+    method: 'POST',
+    path: '/v0/offers',
+    body: payload,
+    idempotencyKey: crypto.randomBytes(16).toString('hex'),
+    relayUrl: config.relay_url,
+    keys,
+    identity,
+  });
+
+  if (!result.response.ok) {
+    throw new Error(`Offer create failed (${result.response.status}): ${result.text || result.response.statusText}`);
+  }
+
+  if (result.data && result.data.offer_id) {
+    state.known_offers = ensureMap(state.known_offers, 'offer_id');
+    state.known_offers[result.data.offer_id] = result.data;
+  }
+  state.relay_url = config.relay_url;
+  state.bot_id = identity.botId;
+  state.signing_kid = identity.signingKid;
+  state.encryption_kid = identity.encryptionKid;
+  saveState(config.state_path, state);
+
+  printJson(result.data, !!flags.compact);
+}
+
+async function runOfferCancel(argv) {
+  const {flags, positionals} = parseArgs(argv);
+  const offerId = flags.offerId || flags.offer || positionals[0];
+  if (!offerId) {
+    throw new Error('Missing offer id. Provide --offer-id or a positional offer id.');
+  }
+
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  const result = await signedRequest({
+    method: 'POST',
+    path: `/v0/offers/${offerId}/cancel`,
+    idempotencyKey: crypto.randomBytes(16).toString('hex'),
+    relayUrl: config.relay_url,
+    keys,
+    identity,
+  });
+
+  if (!result.response.ok) {
+    throw new Error(`Offer cancel failed (${result.response.status}): ${result.text || result.response.statusText}`);
+  }
+
+  if (result.data && result.data.offer_id) {
+    state.known_offers = ensureMap(state.known_offers, 'offer_id');
+    state.known_offers[result.data.offer_id] = result.data;
+  }
+  state.relay_url = config.relay_url;
+  state.bot_id = identity.botId;
+  state.signing_kid = identity.signingKid;
+  state.encryption_kid = identity.encryptionKid;
+  saveState(config.state_path, state);
+
+  printJson(result.data, !!flags.compact);
+}
+
+async function resolveRecipient({config, keys, identity, offerId, recipientBotId, recipientKid, recipientKey}) {
+  let resolvedBotId = recipientBotId;
+  let resolvedKid = recipientKid;
+  let resolvedKey = recipientKey;
+
+  if ((!resolvedBotId || !resolvedKid || !resolvedKey) && offerId) {
+    const offerResult = await signedRequest({
+      method: 'GET',
+      path: `/v0/offers/${offerId}`,
+      relayUrl: config.relay_url,
+      keys,
+      identity,
+    });
+    if (!offerResult.response.ok) {
+      throw new Error(`Failed to fetch offer (${offerResult.response.status}): ${offerResult.text || offerResult.response.statusText}`);
+    }
+    if (!resolvedBotId && offerResult.data && offerResult.data.seller_bot_id) {
+      resolvedBotId = offerResult.data.seller_bot_id;
+    }
+  }
+
+  if (!resolvedBotId) {
+    throw new Error('Missing recipient bot id. Provide --recipient-bot-id or an offer id.');
+  }
+
+  if (!resolvedKid || !resolvedKey) {
+    const botResult = await signedRequest({
+      method: 'GET',
+      path: `/v0/bots/${resolvedBotId}`,
+      relayUrl: config.relay_url,
+      keys,
+      identity,
+    });
+    if (!botResult.response.ok) {
+      throw new Error(`Failed to fetch bot keys (${botResult.response.status}): ${botResult.text || botResult.response.statusText}`);
+    }
+    if (!resolvedKid && botResult.data && botResult.data.encryption_kid) {
+      resolvedKid = botResult.data.encryption_kid;
+    }
+    if (!resolvedKey && botResult.data && botResult.data.encryption_pubkey_x25519) {
+      resolvedKey = botResult.data.encryption_pubkey_x25519;
+    }
+  }
+
+  if (!resolvedKid || !resolvedKey) {
+    throw new Error('Recipient encryption key data is missing.');
+  }
+
+  return {botId: resolvedBotId, encryptionKid: resolvedKid, encryptionKey: resolvedKey};
+}
+
+async function buildRequestPayload({keys, senderBotId, recipientBotId, recipientKid, recipientKey, jobId, payloadId, body}) {
+  const sodium = await loadSodium();
+  const createdAt = new Date().toISOString();
+  const bodyHash = sha256Hex(body);
+  const canonical = `NBR1|${payloadId}|${jobId}|request|${senderBotId}|${recipientBotId}|${createdAt}|${bodyHash}`;
+  const senderSig = signCanonical(keys, canonical);
+
+  const inner = {
+    prefix: 'NBR1',
+    payload_id: payloadId,
+    job_id: jobId,
+    payload_kind: 'request',
+    sender_bot_id: senderBotId,
+    recipient_bot_id: recipientBotId,
+    created_at: createdAt,
+    body,
+    sender_sig_ed25519: senderSig,
+  };
+
+  const plaintext = Buffer.from(JSON.stringify(inner), 'utf8');
+  const recipientKeyBytes = Buffer.from(recipientKey, 'base64url');
+  const ciphertext = sodium.crypto_box_seal(plaintext, recipientKeyBytes);
+
+  return {
+    envelope: {
+      payload_id: payloadId,
+      payload_kind: 'request',
+      enc_alg: ENC_ALG,
+      recipient_kid: recipientKid,
+      ciphertext_b64: Buffer.from(ciphertext).toString('base64url'),
+    },
+    created_at: createdAt,
+  };
+}
+
+async function runJobCreate(argv) {
+  const {flags} = parseArgs(argv);
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  let payload;
+  let jobId;
+  let offerId;
+  let jobExpiresAt;
+  let payloadMeta = null;
+
+  if (flags.json) {
+    payload = readJsonInput(flags.json, '--json');
+  } else {
+    offerId = flags.offerId || flags.offer;
+    if (!offerId) {
+      throw new Error('Missing --offer-id.');
+    }
+    jobId = flags.jobId || `job_${crypto.randomUUID()}`;
+    jobExpiresAt = flags.jobExpiresAt || undefined;
+
+    if (flags.payloadJson) {
+      const envelope = readJsonInput(flags.payloadJson, '--payload-json');
+      payload = {
+        job_id: jobId,
+        offer_id: offerId,
+        request_payload: envelope,
+      };
+      if (jobExpiresAt) {
+        payload.job_expires_at = jobExpiresAt;
+      }
+    } else {
+      const bodyValue = flags.requestBody || flags.body || flags.requestBodyFile;
+      if (!bodyValue) {
+        throw new Error('Missing request body. Provide --request-body or --request-body-file.');
+      }
+      let body = '';
+      if (flags.requestBodyFile) {
+        body = readTextInput(`@${String(flags.requestBodyFile)}`, '--request-body-file');
+      } else {
+        body = readTextInput(String(bodyValue), '--request-body');
+      }
+      const payloadId = flags.payloadId || `pay_${crypto.randomUUID()}`;
+      const recipient = await resolveRecipient({
+        config,
+        keys,
+        identity,
+        offerId,
+        recipientBotId: flags.recipientBotId,
+        recipientKid: flags.recipientKid,
+        recipientKey: flags.recipientEncryptionKey,
+      });
+
+      const payloadResult = await buildRequestPayload({
+        keys,
+        senderBotId: identity.botId,
+        recipientBotId: recipient.botId,
+        recipientKid: recipient.encryptionKid,
+        recipientKey: recipient.encryptionKey,
+        jobId,
+        payloadId,
+        body,
+      });
+
+      payload = {
+        job_id: jobId,
+        offer_id: offerId,
+        request_payload: payloadResult.envelope,
+      };
+      if (jobExpiresAt) {
+        payload.job_expires_at = jobExpiresAt;
+      }
+      payloadMeta = {
+        payload_id: payloadId,
+        job_id: jobId,
+        payload_kind: 'request',
+        created_at: payloadResult.created_at,
+      };
+    }
+  }
+
+  const jobIdForIdempotency = payload.job_id || jobId;
+  const result = await signedRequest({
+    method: 'POST',
+    path: '/v0/jobs',
+    body: payload,
+    idempotencyKey: jobIdForIdempotency,
+    relayUrl: config.relay_url,
+    keys,
+    identity,
+  });
+
+  if (!result.response.ok) {
+    throw new Error(`Job create failed (${result.response.status}): ${result.text || result.response.statusText}`);
+  }
+
+  if (result.data && result.data.job_id) {
+    state.known_jobs = ensureMap(state.known_jobs, 'job_id');
+    state.known_jobs[result.data.job_id] = result.data;
+  }
+  if (payloadMeta) {
+    state.known_payloads = ensureMap(state.known_payloads, 'payload_id');
+    state.known_payloads[payloadMeta.payload_id] = payloadMeta;
+  }
+  state.relay_url = config.relay_url;
+  state.bot_id = identity.botId;
+  state.signing_kid = identity.signingKid;
+  state.encryption_kid = identity.encryptionKid;
+  saveState(config.state_path, state);
+
+  printJson(result.data, !!flags.compact);
+}
+
+async function runJobReissueRequest(argv) {
+  const {flags, positionals} = parseArgs(argv);
+  const jobId = flags.jobId || flags.job || positionals[0];
+  if (!jobId) {
+    throw new Error('Missing job id. Provide --job-id or a positional job id.');
+  }
+
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  const body = {};
+  if (flags.note) {
+    body.note = String(flags.note);
+  }
+  if (flags.requestedExpiresAt) {
+    body.requested_expires_at = String(flags.requestedExpiresAt);
+  }
+
+  const result = await signedRequest({
+    method: 'POST',
+    path: `/v0/jobs/${jobId}/charge/reissue_request`,
+    body: Object.keys(body).length > 0 ? body : undefined,
+    idempotencyKey: crypto.randomBytes(16).toString('hex'),
+    relayUrl: config.relay_url,
+    keys,
+    identity,
+  });
+
+  if (!result.response.ok) {
+    throw new Error(`Reissue request failed (${result.response.status}): ${result.text || result.response.statusText}`);
+  }
+
+  printJson(result.data, !!flags.compact);
+}
+
+async function runJobReissueCharge(argv) {
+  const {flags, positionals} = parseArgs(argv);
+  const jobId = flags.jobId || flags.job || positionals[0];
+  if (!jobId) {
+    throw new Error('Missing job id. Provide --job-id or a positional job id.');
+  }
+
+  let payload;
+  if (flags.json) {
+    payload = readJsonInput(flags.json, '--json');
+  } else {
+    if (!flags.chargeId || !flags.address || !flags.amountRaw || !flags.chargeExpiresAt || !flags.chargeSigEd25519) {
+      throw new Error('Missing required fields. Provide --charge-id, --address, --amount-raw, --charge-expires-at, and --charge-sig-ed25519.');
+    }
+    payload = {
+      charge_id: String(flags.chargeId),
+      address: String(flags.address),
+      amount_raw: String(flags.amountRaw),
+      charge_expires_at: String(flags.chargeExpiresAt),
+      charge_sig_ed25519: String(flags.chargeSigEd25519),
+    };
+  }
+
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  const result = await signedRequest({
+    method: 'POST',
+    path: `/v0/jobs/${jobId}/charge/reissue`,
+    body: payload,
+    idempotencyKey: crypto.randomBytes(16).toString('hex'),
+    relayUrl: config.relay_url,
+    keys,
+    identity,
+  });
+
+  if (!result.response.ok) {
+    throw new Error(`Reissue charge failed (${result.response.status}): ${result.text || result.response.statusText}`);
+  }
+
+  printJson(result.data, !!flags.compact);
+}
+
+async function runJobPaymentSent(argv) {
+  const {flags, positionals} = parseArgs(argv);
+  const jobId = flags.jobId || flags.job || positionals[0];
+  if (!jobId) {
+    throw new Error('Missing job id. Provide --job-id or a positional job id.');
+  }
+
+  let payload;
+  if (flags.json) {
+    payload = readJsonInput(flags.json, '--json');
+  } else {
+    payload = {};
+    if (flags.paymentBlockHash) {
+      payload.payment_block_hash = String(flags.paymentBlockHash);
+    }
+    if (flags.amountRawSent) {
+      payload.amount_raw_sent = String(flags.amountRawSent);
+    }
+    if (flags.sentAt) {
+      payload.sent_at = String(flags.sentAt);
+    }
+    if (flags.note) {
+      payload.note = String(flags.note);
+    }
+  }
+
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  const result = await signedRequest({
+    method: 'POST',
+    path: `/v0/jobs/${jobId}/payment_sent`,
+    body: payload,
+    idempotencyKey: crypto.randomBytes(16).toString('hex'),
+    relayUrl: config.relay_url,
+    keys,
+    identity,
+  });
+
+  if (!result.response.ok) {
+    throw new Error(`Payment sent failed (${result.response.status}): ${result.text || result.response.statusText}`);
+  }
+
+  printJson(result.data, !!flags.compact);
+}
+
+async function runPoll(argv, options) {
+  const quiet = options && options.quiet;
+  const {flags} = parseArgs(argv);
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  const since = flags.sinceEventId || state.last_acked_event_id;
+  const limit = flags.limit || config.poll_limit;
+  const types = flags.types || config.poll_types;
+
+  const result = await signedRequest({
+    method: 'GET',
+    path: '/v0/poll',
+    query: {
+      since_event_id: since,
+      limit,
+      types,
+    },
+    relayUrl: config.relay_url,
+    keys,
+    identity,
+  });
+
+  if (result.response.status === 410) {
+    throw new Error(`Poll cursor too old (410). Suggested resync. Response: ${result.text}`);
+  }
+
+  if (!result.response.ok) {
+    throw new Error(`Poll failed (${result.response.status}): ${result.text || result.response.statusText}`);
+  }
+
+  const events = result.data && result.data.events ? result.data.events : [];
+  appendEvents(state, events);
+
+  if (typeof state.last_acked_event_id !== 'number') {
+    state.last_acked_event_id = 0;
+  }
+  state.relay_url = config.relay_url;
+  state.bot_id = identity.botId;
+  state.signing_kid = identity.signingKid;
+  state.encryption_kid = identity.encryptionKid;
+  saveState(config.state_path, state);
+
+  let ackedId = state.last_acked_event_id || 0;
+  let maxEventId = 0;
+  if (events.length > 0 && flags.ack !== false) {
+    maxEventId = events.reduce((max, event) => Math.max(max, event.event_id), 0);
+
+    // Ack only after events are durably persisted to local state.
+    const ackResult = await signedRequest({
+      method: 'POST',
+      path: '/v0/poll/ack',
+      body: {up_to_event_id: maxEventId},
+      idempotencyKey: crypto.randomBytes(16).toString('hex'),
+      relayUrl: config.relay_url,
+      keys,
+      identity,
+    });
+    if (!ackResult.response.ok) {
+      throw new Error(`Ack failed (${ackResult.response.status}): ${ackResult.text || ackResult.response.statusText}`);
+    }
+    if (ackResult.data && typeof ackResult.data.last_acked_event_id === 'number') {
+      ackedId = ackResult.data.last_acked_event_id;
+    } else {
+      ackedId = maxEventId;
+    }
+
+    if (typeof ackedId === 'number' && ackedId !== state.last_acked_event_id) {
+      state.last_acked_event_id = ackedId;
+      saveState(config.state_path, state);
+    }
+  }
+
+  if (flags.output) {
+    fs.writeFileSync(String(flags.output), stringifyJson(result.data, false));
+  } else if (!quiet) {
+    printJson(result.data, !!flags.compact);
+  }
+
+  return {events, ackedId, maxEventId};
+}
+
+function parseCsv(value) {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  const values = Array.isArray(value) ? value : [value];
+  const out = [];
+  for (const entry of values) {
+    for (const part of String(entry).split(',')) {
+      const trimmed = part.trim();
+      if (trimmed) {
+        out.push(trimmed);
+      }
+    }
+  }
+  return out;
+}
+
+function uniqStrings(values) {
+  const seen = new Set();
+  const out = [];
+  for (const value of values) {
+    const key = String(value);
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(key);
+    }
+  }
+  return out;
+}
+
+function parsePositiveInt(value, label) {
+  const raw = String(value);
+  if (!raw.trim()) {
+    throw new Error(`Missing value for ${label}.`);
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`Invalid ${label}: ${raw}`);
+  }
+  return Math.floor(parsed);
+}
+
+function parseOptionalPositiveInt(value, label) {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return undefined;
+  }
+  return parsePositiveInt(value, label);
+}
+
+function ensureStreamCursorMap(state) {
+  if (!state.stream_cursors || typeof state.stream_cursors !== 'object' || Array.isArray(state.stream_cursors)) {
+    state.stream_cursors = {};
+  }
+  return state.stream_cursors;
+}
+
+function getStreamCursor(state, stream) {
+  const cursors = ensureStreamCursorMap(state);
+  const cursor = cursors[stream];
+  return typeof cursor === 'number' && Number.isFinite(cursor) ? cursor : 0;
+}
+
+function setStreamCursor(state, stream, cursor) {
+  if (typeof cursor !== 'number' || !Number.isFinite(cursor)) {
+    return;
+  }
+  const cursors = ensureStreamCursorMap(state);
+  cursors[stream] = cursor;
+}
+
+function eventDedupKey(event) {
+  if (!event) {
+    return null;
+  }
+  const eventId = event.event_id;
+  if (eventId === undefined || eventId === null) {
+    return null;
+  }
+  const stream = typeof event.stream === 'string' ? event.stream.trim() : '';
+  if (stream) {
+    return `${stream}:${eventId}`;
+  }
+  return `poll:${eventId}`;
+}
+
+function appendEvents(state, events) {
+  if (!Array.isArray(events) || events.length === 0) {
+    return 0;
+  }
+  state.event_log = Array.isArray(state.event_log) ? state.event_log : [];
+  const existingIds = new Set(
+    state.event_log
+      .map((event) => eventDedupKey(event))
+      .filter((key) => key),
+  );
+  let added = 0;
+  for (const event of events) {
+    if (!event) {
+      continue;
+    }
+    const key = eventDedupKey(event);
+    if (key) {
+      if (existingIds.has(key)) {
+        continue;
+      }
+      existingIds.add(key);
+    }
+    state.event_log.push(event);
+    added += 1;
+  }
+  if (state.event_log.length > 500) {
+    state.event_log = state.event_log.slice(-500);
+  }
+  return added;
+}
+
+function backoffDelayMs(attempt, opts) {
+  const baseMs = opts && opts.baseMs ? opts.baseMs : 500;
+  const maxMs = opts && opts.maxMs ? opts.maxMs : 30000;
+  const exp = Math.min(maxMs, baseMs * (2 ** Math.max(0, attempt)));
+  const jittered = exp * (0.5 + Math.random());
+  return Math.min(maxMs, Math.max(baseMs, Math.floor(jittered)));
+}
+
+function sleep(ms, signal) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    if (!signal) {
+      return;
+    }
+    if (signal.aborted) {
+      clearTimeout(timer);
+      resolve();
+      return;
+    }
+    signal.addEventListener('abort', () => {
+      clearTimeout(timer);
+      resolve();
+    }, {once: true});
+  });
+}
+
+async function consumeSseStream(body, {signal, onEvent}) {
+  if (!body || typeof body.getReader !== 'function') {
+    throw new Error('SSE response body is not readable (expected a web ReadableStream).');
+  }
+
+  const reader = body.getReader();
+  const decoder = new TextDecoder('utf8');
+  let buffer = '';
+
+  let eventName = '';
+  let eventId = '';
+  let data = '';
+
+  function flush() {
+    if (!data) {
+      eventName = '';
+      eventId = '';
+      return;
+    }
+    const payload = data.endsWith('\n') ? data.slice(0, -1) : data;
+    onEvent({
+      event: eventName || 'message',
+      id: eventId || undefined,
+      data: payload,
+    });
+    eventName = '';
+    eventId = '';
+    data = '';
+  }
+
+  while (!signal.aborted) {
+    const {done, value} = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, {stream: true});
+
+    while (true) {
+      const newlineIndex = buffer.indexOf('\n');
+      if (newlineIndex === -1) {
+        break;
+      }
+      let line = buffer.slice(0, newlineIndex);
+      buffer = buffer.slice(newlineIndex + 1);
+      if (line.endsWith('\r')) {
+        line = line.slice(0, -1);
+      }
+
+      if (line === '') {
+        flush();
+        continue;
+      }
+      if (line.startsWith(':')) {
+        continue;
+      }
+
+      const sep = line.indexOf(':');
+      const field = sep === -1 ? line : line.slice(0, sep);
+      let valuePart = sep === -1 ? '' : line.slice(sep + 1);
+      if (valuePart.startsWith(' ')) {
+        valuePart = valuePart.slice(1);
+      }
+
+      switch (field) {
+        case 'event':
+          eventName = valuePart;
+          break;
+        case 'id':
+          eventId = valuePart;
+          break;
+        case 'data':
+          data += valuePart + '\n';
+          break;
+        default:
+          break;
+      }
+    }
+  }
+
+  flush();
+}
+
+function deriveDefaultStreams({keys, state}) {
+  const streams = [];
+
+  if (keys && keys.signing_public_key_b64url) {
+    // Proposed stream key format: seller:ed25519:<pubkey-b64url>
+    streams.push(`seller:ed25519:${keys.signing_public_key_b64url}`);
+  }
+
+  const knownJobs = state && state.known_jobs ? state.known_jobs : null;
+  if (knownJobs) {
+    if (Array.isArray(knownJobs)) {
+      for (const job of knownJobs) {
+        if (job && job.job_id) {
+          streams.push(`job:${job.job_id}`);
+        }
+      }
+    } else if (typeof knownJobs === 'object') {
+      for (const jobId of Object.keys(knownJobs)) {
+        if (jobId) {
+          streams.push(`job:${jobId}`);
+        }
+      }
+    }
+  }
+
+  return uniqStrings(streams);
+}
+
+async function runWatch(argv) {
+  requireFetch();
+
+  const {flags} = parseArgs(argv);
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  const streamPath = flags.streamPath || flags.ssePath || '/v0/stream';
+  const streams = flags.streams
+    ? uniqStrings(parseCsv(flags.streams))
+    : deriveDefaultStreams({keys, state});
+  if (streams.length === 0) {
+    throw new Error('No streams configured for watch. Provide --streams or ensure state contains keys.');
+  }
+
+  const safetyIntervalSeconds = flags.safetyPollInterval
+    ? parsePositiveInt(flags.safetyPollInterval, '--safety-poll-interval')
+    : 180;
+
+  const printPolls = !!flags.printPolls;
+  const pollLimit = parseOptionalPositiveInt(flags.limit, '--limit')
+    ?? parseOptionalPositiveInt(config.poll_limit, 'NBR_POLL_LIMIT');
+
+  ensureStreamCursorMap(state);
+  const streamSet = new Set(streams);
+
+  let pollInFlight = false;
+  let pollQueued = false;
+  let queuedReason = null;
+  const queuedStreams = new Set();
+
+  function normalizeWakeStreams(candidate) {
+    if (!Array.isArray(candidate) || candidate.length === 0) {
+      return streams;
+    }
+    const filtered = candidate.map((stream) => String(stream)).filter((stream) => streamSet.has(stream));
+    return filtered.length > 0 ? filtered : streams;
+  }
+
+  async function pollBatchStreams(streamList, reason) {
+    const uniqueStreams = uniqStrings(streamList);
+    if (uniqueStreams.length === 0) {
+      return {events: 0, acked: 0, streams: 0};
+    }
+
+    const requestStreams = uniqueStreams.map((stream) => ({
+      stream,
+      since: getStreamCursor(state, stream),
+    }));
+
+    const body = {streams: requestStreams};
+    if (pollLimit !== undefined) {
+      body.limit = pollLimit;
+    }
+
+    const result = await signedRequest({
+      method: 'POST',
+      path: '/v0/poll/batch',
+      body,
+      idempotencyKey: crypto.randomBytes(16).toString('hex'),
+      relayUrl: config.relay_url,
+      keys,
+      identity,
+    });
+
+    if (!result.response.ok) {
+      throw new Error(`Poll batch failed (${result.response.status}): ${result.text || result.response.statusText}`);
+    }
+
+    const results = result.data && Array.isArray(result.data.results) ? result.data.results : [];
+    const allEvents = [];
+    for (const entry of results) {
+      if (!entry || !Array.isArray(entry.events)) {
+        continue;
+      }
+      for (const event of entry.events) {
+        if (!event) {
+          continue;
+        }
+        if (entry.stream) {
+          allEvents.push({...event, stream: entry.stream});
+        } else {
+          allEvents.push(event);
+        }
+      }
+    }
+
+    state.relay_url = config.relay_url;
+    state.bot_id = identity.botId;
+    state.signing_kid = identity.signingKid;
+    state.encryption_kid = identity.encryptionKid;
+
+    const addedEvents = appendEvents(state, allEvents);
+    if (addedEvents > 0) {
+      saveState(config.state_path, state);
+    }
+
+    let ackedStreams = 0;
+    if (flags.ack !== false) {
+      for (const entry of results) {
+        if (!entry || !entry.stream) {
+          continue;
+        }
+        const next = entry.next;
+        const current = getStreamCursor(state, entry.stream);
+        if (typeof next !== 'number' || !Number.isFinite(next) || next === current) {
+          continue;
+        }
+
+        const ackResult = await signedRequest({
+          method: 'POST',
+          path: '/v0/ack',
+          body: {stream: entry.stream, ack: next},
+          idempotencyKey: crypto.randomBytes(16).toString('hex'),
+          relayUrl: config.relay_url,
+          keys,
+          identity,
+        });
+
+        if (!ackResult.response.ok) {
+          throw new Error(`Ack failed (${ackResult.response.status}): ${ackResult.text || ackResult.response.statusText}`);
+        }
+
+        setStreamCursor(state, entry.stream, next);
+        saveState(config.state_path, state);
+        ackedStreams += 1;
+      }
+    }
+
+    if (printPolls && result.data) {
+      printJson(result.data, !!flags.compact);
+    }
+
+    return {events: allEvents.length, acked: ackedStreams, streams: uniqueStreams.length, reason};
+  }
+
+  async function runPollLoop(reason, streamList) {
+    const normalized = normalizeWakeStreams(streamList);
+    for (const stream of normalized) {
+      queuedStreams.add(stream);
+    }
+    queuedReason = reason;
+    pollQueued = true;
+    if (pollInFlight) {
+      return;
+    }
+    pollInFlight = true;
+    try {
+      while (pollQueued) {
+        pollQueued = false;
+        const batch = Array.from(queuedStreams);
+        queuedStreams.clear();
+        const label = queuedReason || reason;
+        queuedReason = null;
+        try {
+          const summary = await pollBatchStreams(batch, label);
+          console.error(`[watch] poll ok (${label}): streams=${summary.streams} events=${summary.events} acked_streams=${flags.ack === false ? 'disabled' : summary.acked}`);
+        } catch (err) {
+          console.error(`[watch] poll error (${label}): ${err && err.message ? err.message : String(err)}`);
+          // Keep running; polling is idempotent and can be retried on the next wake/safety interval.
+        }
+      }
+    } finally {
+      pollInFlight = false;
+    }
+  }
+
+  const controller = new AbortController();
+  const {signal} = controller;
+  const stop = () => {
+    if (!signal.aborted) {
+      controller.abort();
+    }
+  };
+
+  process.on('SIGINT', stop);
+  process.on('SIGTERM', stop);
+
+  console.error(`[watch] relay=${config.relay_url}`);
+  console.error(`[watch] state_path=${config.state_path}`);
+  console.error(`[watch] stream_path=${streamPath}`);
+  console.error(`[watch] streams=${streams.join(',')}`);
+  console.error(`[watch] safety_poll_interval_seconds=${safetyIntervalSeconds}`);
+
+  const safetyTimer = setInterval(() => {
+    if (signal.aborted) {
+      return;
+    }
+    void runPollLoop('safety');
+  }, safetyIntervalSeconds * 1000);
+
+  // Kick off an initial poll so the watcher is useful even if wakeups are missed.
+  void runPollLoop('startup');
+
+  let attempt = 0;
+  function extractWakeStreams(evt) {
+    if (!evt) {
+      return null;
+    }
+    if (evt.event === 'wake') {
+      if (!evt.data) {
+        return [];
+      }
+      try {
+        const parsed = JSON.parse(evt.data);
+        return parsed && Array.isArray(parsed.streams) ? parsed.streams : [];
+      } catch (_) {
+        return [];
+      }
+    }
+    if (evt.data) {
+      try {
+        const parsed = JSON.parse(evt.data);
+        if (parsed && (parsed.event === 'wake' || parsed.type === 'wake' || parsed.hint === 'poll')) {
+          return Array.isArray(parsed.streams) ? parsed.streams : [];
+        }
+      } catch (_) {
+        // ignore non-JSON payloads
+      }
+    }
+    return null;
+  }
+
+  while (!signal.aborted) {
+    try {
+      const {url, init} = buildSignedFetch({
+        method: 'GET',
+        path: streamPath,
+        query: {streams: streams.join(',')},
+        relayUrl: config.relay_url,
+        keys,
+        identity,
+        extraHeaders: {
+          'Accept': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+        },
+        signal,
+      });
+      const response = await fetch(url, init);
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`SSE connect failed (${response.status}): ${text || response.statusText}`);
+      }
+
+      attempt = 0;
+      console.error('[watch] connected');
+
+      await consumeSseStream(response.body, {
+        signal,
+        onEvent: (evt) => {
+          const wakeStreams = extractWakeStreams(evt);
+          if (wakeStreams !== null) {
+            void runPollLoop('wake', wakeStreams);
+          }
+        },
+      });
+
+      if (signal.aborted) {
+        break;
+      }
+
+      console.error('[watch] disconnected');
+    } catch (err) {
+      if (signal.aborted) {
+        break;
+      }
+      const message = err && err.message ? err.message : String(err);
+      const delayMs = backoffDelayMs(attempt);
+      attempt += 1;
+      console.error(`[watch] sse error: ${message}`);
+      console.error(`[watch] reconnecting in ${Math.round(delayMs / 1000)}s`);
+      await sleep(delayMs, signal);
+    }
+  }
+
+  clearInterval(safetyTimer);
+}
+
+function runCronEnable(argv) {
+  const {flags} = parseArgs(argv);
+  const config = buildConfig();
+  const schedule = flags.schedule || '*/5 * * * *';
+  const nodeBin = process.execPath;
+  const cliPath = path.resolve(__filename);
+
+  const envPairs = [];
+  if (getEnvValue('NBR_RELAY_URL')) {
+    envPairs.push(`NBR_RELAY_URL=${shellEscape(getEnvValue('NBR_RELAY_URL'))}`);
+  }
+  if (getEnvValue('NBR_STATE_PATH')) {
+    envPairs.push(`NBR_STATE_PATH=${shellEscape(expandHomePath(getEnvValue('NBR_STATE_PATH')))}`);
+  }
+  if (getEnvValue('NBR_POLL_LIMIT')) {
+    envPairs.push(`NBR_POLL_LIMIT=${shellEscape(getEnvValue('NBR_POLL_LIMIT'))}`);
+  }
+  if (getEnvValue('NBR_POLL_TYPES')) {
+    envPairs.push(`NBR_POLL_TYPES=${shellEscape(getEnvValue('NBR_POLL_TYPES'))}`);
+  }
+
+  const envPrefix = envPairs.length > 0 ? `${envPairs.join(' ')} ` : '';
+  const command = `${shellEscape(nodeBin)} ${shellEscape(cliPath)} poll`;
+  const cronLine = `${schedule} ${envPrefix}${command} # nanobazaar-cli`;
+
+  const listResult = spawnSync('crontab', ['-l'], {encoding: 'utf8'});
+  const current = listResult.status === 0 ? listResult.stdout : '';
+  const filtered = current
+    .split(/\r?\n/)
+    .filter((line) => line.trim() && !line.includes('# nanobazaar-cli'))
+    .join('\n');
+
+  const next = [filtered, cronLine].filter(Boolean).join('\n') + '\n';
+  const installResult = spawnSync('crontab', ['-'], {input: next, encoding: 'utf8'});
+  if (installResult.status !== 0) {
+    throw new Error(`Failed to install cron entry: ${installResult.stderr || 'unknown error'}`);
+  }
+
+  console.log('Cron enabled.');
+  console.log(`Schedule: ${schedule}`);
+  console.log(`Command: ${envPrefix}${command}`);
+  console.log(`State path: ${config.state_path}`);
+}
+
+function runCronDisable() {
+  const listResult = spawnSync('crontab', ['-l'], {encoding: 'utf8'});
+  if (listResult.status !== 0) {
+    console.log('No crontab entries found.');
+    return;
+  }
+  const filtered = listResult.stdout
+    .split(/\r?\n/)
+    .filter((line) => line.trim() && !line.includes('# nanobazaar-cli'))
+    .join('\n');
+
+  const next = filtered ? `${filtered}\n` : '';
+  const installResult = spawnSync('crontab', ['-'], {input: next, encoding: 'utf8'});
+  if (installResult.status !== 0) {
+    throw new Error(`Failed to remove cron entry: ${installResult.stderr || 'unknown error'}`);
+  }
+  console.log('Cron disabled.');
+}
+
+function loadVersion() {
+  try {
+    for (const name of ['package.json', 'skill.json']) {
+      try {
+        const raw = fs.readFileSync(path.resolve(BASE_DIR, name), 'utf8');
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.version) {
+          return parsed.version;
+        }
+      } catch (_) {
+        // ignore
+      }
+    }
+    return 'unknown';
+  } catch (_) {
+    return 'unknown';
+  }
+}
+
+async function main() {
+  const argv = process.argv.slice(2);
+  if (argv.length === 0) {
+    printHelp();
+    return;
+  }
+
+  if (argv.includes('--help') || argv[0] === 'help') {
+    printHelp();
+    return;
+  }
+
+  if (argv.includes('--version') || argv[0] === 'version') {
+    console.log(loadVersion());
+    return;
+  }
+
+  const command = argv[0];
+  const rest = argv.slice(1);
+
+  switch (command) {
+    case 'status':
+      await runStatus();
+      return;
+    case 'config': {
+      const {flags} = parseArgs(rest);
+      const config = buildConfig();
+      printConfig(config, flags.json || flags.compact);
+      return;
+    }
+    case 'setup':
+      runSetup(rest);
+      return;
+    case 'wallet':
+      runWallet(rest);
+      return;
+    case 'search':
+      await runSearch(rest);
+      return;
+    case 'market':
+      await runMarket(rest);
+      return;
+    case 'offer': {
+      const sub = rest[0];
+      if (sub === 'create') {
+        await runOfferCreate(rest.slice(1));
+        return;
+      }
+      if (sub === 'cancel') {
+        await runOfferCancel(rest.slice(1));
+        return;
+      }
+      throw new Error('Unknown offer command. Use: offer create|cancel');
+    }
+    case 'job': {
+      const sub = rest[0];
+      if (sub === 'create') {
+        await runJobCreate(rest.slice(1));
+        return;
+      }
+      if (sub === 'reissue-request') {
+        await runJobReissueRequest(rest.slice(1));
+        return;
+      }
+      if (sub === 'reissue-charge') {
+        await runJobReissueCharge(rest.slice(1));
+        return;
+      }
+      if (sub === 'payment-sent') {
+        await runJobPaymentSent(rest.slice(1));
+        return;
+      }
+      throw new Error('Unknown job command. Use: job create|reissue-request|reissue-charge|payment-sent');
+    }
+    case 'poll':
+      await runPoll(rest);
+      return;
+    case 'watch':
+      await runWatch(rest);
+      return;
+    case 'cron': {
+      const sub = rest[0];
+      if (sub === 'enable') {
+        runCronEnable(rest.slice(1));
+        return;
+      }
+      if (sub === 'disable') {
+        runCronDisable();
+        return;
+      }
+      throw new Error('Unknown cron command. Use: cron enable|disable');
+    }
+    default:
+      throw new Error(`Unknown command: ${command}`);
+  }
+}
+
+main().catch((err) => {
+  console.error(err.message || err);
+  process.exit(1);
+});

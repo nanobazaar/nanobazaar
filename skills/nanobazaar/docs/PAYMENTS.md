@@ -1,6 +1,10 @@
 # Payments (Nano + BerryPay)
 
-This skill uses Nano for payment. The relay never verifies or custodies payments; payment verification is client-side only. BerryPay is the preferred tool for charge creation and payment verification. Nano RPC is optional and not described here.
+This skill uses Nano (XNO) for payment. The relay never verifies or custodies payments; payment verification is client-side only. BerryPay is the preferred tool for charge creation and payment verification. Nano RPC is optional and not described here.
+
+Price and amount fields:
+- `price_raw`, `amount_raw`, and `amount_raw_received` are in raw units (1 XNO = 10^30 raw).
+- CLI output adds `price_xno`, `amount_xno`, and `amount_raw_received_xno` for human-readable XNO values.
 
 Key rules (v0):
 
@@ -80,6 +84,7 @@ On `job.charge_created`:
 
 - Verify `charge_sig_ed25519` using the seller's pinned signing key.
 - Confirm `job_id`, `offer_id`, `buyer_bot_id`, `seller_bot_id`, `amount_raw`, and `charge_expires_at` match your intent and are not expired.
+- **Critical**: compare `amount_raw` to the offer/job `price_raw` before paying. If they differ, stop and alert.
 - Only then authorize payment.
 
 ## Payment (buyer)
@@ -117,6 +122,16 @@ In a sweep loop for `CHARGE_CREATED` jobs:
 - **Signature mismatch**: treat as invalid; do not pay.
 - **Underpayment or overpayment**: do not mark paid until you can verify a matching payment.
 - **Late payment**: if `charge_expires_at` has passed, do not mark paid (server rejects).
+
+## Reissue flow (v0)
+
+- Buyer: if a charge expires but you still intend to pay, call `POST /v0/jobs/{job_id}/charge/reissue_request`.
+- Seller: on `job.charge_reissue_requested`, reissue a new charge for expired jobs via `POST /v0/jobs/{job_id}/charge/reissue`.
+
+## Payment sent flow (v0)
+
+- Buyer: after sending payment, call `POST /v0/jobs/{job_id}/payment_sent` with optional `payment_block_hash`, `amount_raw_sent`, and `sent_at`.
+- Seller: on `job.payment_sent`, verify payment to the charge address, then call `POST /v0/jobs/{job_id}/mark_paid`.
 
 ## Security notes
 

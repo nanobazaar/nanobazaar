@@ -417,6 +417,19 @@ WHERE job_id = sqlc.arg(job_id)
 	AND status = 'REQUESTED'
 	AND charge_id IS NULL;
 
+-- name: UpdateJobChargeReissue :one
+UPDATE jobs
+SET status = 'CHARGE_CREATED',
+	charge_id = sqlc.arg(charge_id),
+	charge_address = sqlc.arg(charge_address),
+	charge_amount_raw = sqlc.arg(charge_amount_raw),
+	charge_expires_at = sqlc.arg(charge_expires_at),
+	charge_sig_ed25519 = sqlc.arg(charge_sig_ed25519),
+	expired_at = NULL
+WHERE job_id = sqlc.arg(job_id)
+	AND status = 'EXPIRED'
+RETURNING *;
+
 -- name: UpdateJobMarkPaid :exec
 UPDATE jobs
 SET status = 'PAID',
@@ -675,6 +688,59 @@ WHERE recipient_bot_id = sqlc.arg(recipient_bot_id);
 -- name: DeleteEventsBefore :exec
 DELETE FROM events
 WHERE created_at < sqlc.arg(cutoff);
+
+-- Stream events
+-- name: CreateStreamEvent :one
+INSERT INTO stream_events (
+	stream_key,
+	cursor,
+	event_type,
+	created_at,
+	payload_json
+) VALUES (
+	sqlc.arg(stream_key),
+	(SELECT COALESCE(MAX(cursor), 0) + 1 FROM stream_events WHERE stream_key = sqlc.arg(stream_key)),
+	sqlc.arg(event_type),
+	sqlc.arg(created_at),
+	sqlc.arg(payload_json)
+)
+RETURNING cursor;
+
+-- name: ListStreamEventsAfterCursor :many
+SELECT stream_key,
+	cursor,
+	event_type,
+	payload_json,
+	created_at
+FROM stream_events
+WHERE stream_key = sqlc.arg(stream_key)
+	AND cursor > sqlc.arg(since_cursor)
+ORDER BY cursor ASC
+LIMIT sqlc.arg(limit);
+
+-- name: DeleteStreamEventsAckedBefore :exec
+DELETE FROM stream_events
+WHERE created_at < sqlc.arg(cutoff)
+	AND cursor <= COALESCE((SELECT ack_cursor FROM stream_acks WHERE stream_key = stream_events.stream_key), -1);
+
+-- Stream acks
+-- name: GetStreamAck :one
+SELECT * FROM stream_acks
+WHERE stream_key = sqlc.arg(stream_key);
+
+-- name: UpsertStreamAck :exec
+INSERT INTO stream_acks (
+	stream_key,
+	ack_cursor,
+	updated_at
+) VALUES (
+	sqlc.arg(stream_key),
+	sqlc.arg(ack_cursor),
+	sqlc.arg(updated_at)
+)
+ON CONFLICT(stream_key) DO UPDATE SET
+	ack_cursor = excluded.ack_cursor,
+	updated_at = excluded.updated_at;
 
 -- Poll acks
 -- name: GetPollAck :one

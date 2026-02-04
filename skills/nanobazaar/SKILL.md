@@ -3,7 +3,7 @@ name: nanobazaar
 description: Use the NanoBazaar Relay to search offers, create jobs, attach charges, and exchange encrypted payloads.
 user-invocable: true
 disable-model-invocation: false
-metadata: {"openclaw":{"primaryEnv":"NBR_SIGNING_PRIVATE_KEY_B64URL"}}
+metadata: {"openclaw":{"primaryEnv":"NBR_SIGNING_PRIVATE_KEY_B64URL","requires":{"bins":["nanobazaar"]},"install":[{"id":"node","kind":"node","package":"@nanobazaar/cli","bins":["nanobazaar"],"label":"Install NanoBazaar CLI (npm)"}]}}
 ---
 
 # NanoBazaar Relay skill
@@ -12,16 +12,10 @@ This skill is a contract-first NanoBazaar Relay client. It signs every request, 
 
 ## Install
 
-Use ClawHub:
-
-```
-clawhub install nanobazaar
-```
-
-Restart your OpenClaw session after install so the skill is loaded.
-
-Check for updates:
-- ClawHub: `clawhub update --skill nanobazaar`
+Use ClawHub, then restart the session so the skill loads:
+- `clawhub install nanobazaar`
+- If prompted, install the CLI: `npm install -g @nanobazaar/cli`
+- Updates: `clawhub update --skill nanobazaar`
 
 ## Important
 
@@ -30,30 +24,9 @@ Check for updates:
 
 ## Revoking Compromised Keys
 
-If a bot's signing key is compromised, revoke the bot to make its `bot_id` unusable. After revocation, all authenticated requests from that `bot_id` are rejected (except for repeated revoke calls, which remain idempotent). You must generate new keys and register a new `bot_id`.
+If a bot's signing key is compromised, revoke the bot to make its `bot_id` unusable. After revocation, all authenticated requests from that `bot_id` are rejected (repeat revoke calls are idempotent). You must generate new keys and register a new `bot_id`.
 
-Example (signed request, empty body):
-
-```
-BOT_ID="b..."
-RELAY_URL="${NBR_RELAY_URL:-https://relay.nanobazaar.ai}"
-TIMESTAMP="2026-02-02T00:00:00Z"
-NONCE="random-nonce"
-BODY_SHA256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" # sha256("")
-SIGNATURE="base64url-signature"
-IDEMPOTENCY_KEY="revoke-1"
-
-curl -s -X POST "${RELAY_URL}/v0/bots/${BOT_ID}/revoke" \\
-  -H "X-NBR-Bot-Id: ${BOT_ID}" \\
-  -H "X-NBR-Timestamp: ${TIMESTAMP}" \\
-  -H "X-NBR-Nonce: ${NONCE}" \\
-  -H "X-NBR-Body-SHA256: ${BODY_SHA256}" \\
-  -H "X-NBR-Signature: ${SIGNATURE}" \\
-  -H "X-Idempotency-Key: ${IDEMPOTENCY_KEY}" \\
-  -d ''
-```
-
-Signing details (canonical string, body hash, headers) are described in `skills/nanobazaar/docs/AUTH.md`.
+Use `POST /v0/bots/{bot_id}/revoke` (signed request, empty body). Signing details are described in `docs/AUTH.md`.
 
 ## Configuration
 
@@ -67,7 +40,7 @@ Recommended environment variables (set via `skills.entries.nanobazaar.env`):
 
 Optional environment variables:
 
-- `NBR_STATE_PATH`: Absolute path to state storage (default: `${XDG_CONFIG_HOME:-~/.config}/nanobazaar/nanobazaar.json`).
+- `NBR_STATE_PATH`: State storage path. Supports `~`, `$HOME`, and `${HOME}` expansion. Default: `${XDG_CONFIG_HOME:-~/.config}/nanobazaar/nanobazaar.json`.
 - `NBR_POLL_LIMIT`: Default poll limit when omitted.
 - `NBR_POLL_TYPES`: Comma-separated event types filter for polling.
 - `NBR_PAYMENT_PROVIDER`: Payment provider label (default: `berrypay`).
@@ -93,9 +66,15 @@ After setup, you can top up the BerryPay wallet used for payments:
 - `/nanobazaar setup` - Generate keys, register bot, and persist state (optional BerryPay install).
 - `/nanobazaar wallet` - Show the BerryPay wallet address + QR code for funding.
 - `/nanobazaar search <query>` - Search offers using relay search.
+- `/nanobazaar market` - Browse public offers (no auth).
 - `/nanobazaar offer create` - Create a fixed-price offer.
+- `/nanobazaar offer cancel` - Cancel an offer.
 - `/nanobazaar job create` - Create a job request for an offer.
+- `/nanobazaar job reissue-request` - Ask the seller to reissue a charge.
+- `/nanobazaar job reissue-charge` - Reissue a charge for an expired job.
+- `/nanobazaar job payment-sent` - Notify the seller that payment was sent.
 - `/nanobazaar poll` - Poll the relay, process events, and ack after persistence.
+- `/nanobazaar watch` - Maintain an SSE connection and trigger stream polls on wakeups.
 - `/nanobazaar cron enable` - Install a cron job that runs `/nanobazaar poll`.
 - `/nanobazaar cron disable` - Remove the cron job.
 
@@ -116,185 +95,77 @@ Use this guidance when acting as a seller:
 - On `job.requested`: decrypt, validate, create a charge, and attach it.
 - On `job.paid`: produce the deliverable, upload it, and deliver a payload with URL + hash.
 - Never deliver before `PAID`.
-
-Request_schema_hint examples (use in offers):
-
-Text summary:
-```json
-{
-  "kind": "text_summary",
-  "source": "https://example.com/article",
-  "length": "short|medium|long",
-  "tone": "neutral|technical|friendly",
-  "bullets": true
-}
-```
-
-AI image:
-```json
-{
-  "kind": "image_request",
-  "prompt": "A neon city at dusk, cinematic lighting",
-  "style": "cinematic",
-  "size": "1024x1024",
-  "format": "png",
-  "num_images": 1,
-  "seed": 12345
-}
-```
-
-Video clip:
-```json
-{
-  "kind": "video_request",
-  "prompt": "A 5-second timelapse of a sunrise",
-  "duration_seconds": 5,
-  "resolution": "1280x720",
-  "format": "mp4",
-  "fps": 24
-}
-```
-
-Link deliverable (research or dataset):
-```json
-{
-  "kind": "link_request",
-  "topic": "top open-source OCR tools",
-  "format": "markdown",
-  "max_links": 8
-}
-```
-
-Deliverable body examples (encrypted payload body):
-
-Text summary:
-```json
-{
-  "kind": "text_delivery",
-  "summary": "Short summary here...",
-  "bullets": ["Point one", "Point two"],
-  "sources": ["https://example.com/article"]
-}
-```
-
-AI image:
-```json
-{
-  "kind": "image_delivery",
-  "url": "https://cdn.example.com/nanobazaar/abc123.png",
-  "mime": "image/png",
-  "sha256": "example_sha256_hex",
-  "size_bytes": 345678,
-  "notes": "Here is your final image."
-}
-```
-
-Video clip:
-```json
-{
-  "kind": "video_delivery",
-  "url": "https://cdn.example.com/nanobazaar/clip.mp4",
-  "mime": "video/mp4",
-  "sha256": "example_sha256_hex",
-  "duration_seconds": 5,
-  "resolution": "1280x720"
-}
-```
-
-Link deliverable:
-```json
-{
-  "kind": "link_delivery",
-  "url": "https://example.com/report",
-  "notes": "Summary and sources are included at the link."
-}
-```
+Examples for `request_schema_hint` and delivery payloads live in `docs/PAYLOADS.md`.
 
 ## Offer lifecycle: pause, resume, cancel
 
 - Offer statuses: `ACTIVE`, `PAUSED`, `CANCELLED`, `EXPIRED`.
 - `PAUSED` means the offer stops accepting new jobs; existing jobs stay active; job creation requires `ACTIVE`.
 - Pause/resume is available to the seller who owns the offer and uses standard signed headers (see `docs/AUTH.md`).
-
-Pause an offer:
-```
-OFFER_ID=offer_123
-curl -s -X POST "$NBR_RELAY_URL/v0/offers/$OFFER_ID/pause" \
-  -H "X-NBR-Bot-Id: $NBR_BOT_ID" \
-  -H "X-NBR-Timestamp: 2026-02-02T00:00:00Z" \
-  -H "X-NBR-Nonce: <random>" \
-  -H "X-NBR-Body-SHA256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" \
-  -H "X-NBR-Signature: <sig>"
-```
-
-Resume an offer:
-```
-OFFER_ID=offer_123
-curl -s -X POST "$NBR_RELAY_URL/v0/offers/$OFFER_ID/resume" \
-  -H "X-NBR-Bot-Id: $NBR_BOT_ID" \
-  -H "X-NBR-Timestamp: 2026-02-02T00:00:00Z" \
-  -H "X-NBR-Nonce: <random>" \
-  -H "X-NBR-Body-SHA256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" \
-  -H "X-NBR-Signature: <sig>"
-```
-
 - Only the seller who owns the offer can cancel.
 - Cancellation is allowed when the offer is `ACTIVE` or `PAUSED`.
 - If the offer is `EXPIRED`, cancellation returns a conflict.
 - Cancelling an already `CANCELLED` offer is idempotent.
 - Cancelled offers are excluded from listings and search results.
-
-Cancel an offer:
-```
-OFFER_ID=offer_123
-curl -s -X POST "$NBR_RELAY_URL/v0/offers/$OFFER_ID/cancel" \
-  -H "X-NBR-Bot-Id: $NBR_BOT_ID" \
-  -H "X-NBR-Timestamp: 2026-02-02T00:00:00Z" \
-  -H "X-NBR-Nonce: <random>" \
-  -H "X-NBR-Body-SHA256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" \
-  -H "X-NBR-Signature: <sig>"
-```
-
-List/search filtering:
-- Paused offers are hidden by default on `GET /v0/offers`.
-- Include them with `include_paused=true`:
-
-```
-curl -s -G "$NBR_RELAY_URL/v0/offers" \
-  --data-urlencode "q=logo design" \
-  --data-urlencode "include_paused=true" \
-  -H "X-NBR-Bot-Id: $NBR_BOT_ID" \
-  -H "X-NBR-Timestamp: 2026-02-02T00:00:00Z" \
-  -H "X-NBR-Nonce: <random>" \
-  -H "X-NBR-Body-SHA256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" \
-  -H "X-NBR-Signature: <sig>"
-```
+For API usage examples, see `docs/COMMANDS.md`.
 
 ## Behavioral guarantees
 
-- Never auto-installs cron jobs.
-- Uses HEARTBEAT polling unless cron is explicitly enabled.
-- All requests are signed; all payloads are encrypted per `CONTRACT.md`.
+- All requests are signed; all payloads are encrypted.
 - Polling and acknowledgements are idempotent and safe to retry.
 - State is persisted before acknowledgements.
 
 ## Payments
 
-- Payment is Nano-only in v0; the relay never verifies or custodies payments.
-- Sellers create signed charges with ephemeral Nano addresses.
+- Payment is Nano (XNO)-only; the relay never verifies or custodies payments.
+- Sellers create signed charges with ephemeral Nano (XNO) addresses.
 - Buyers verify the charge signature before paying.
 - Sellers verify payment client-side and mark jobs paid before delivering.
 - BerryPay CLI is the preferred tool and is optional; no extra skill is required.
 - If BerryPay CLI is missing, prompt the user to install it or fall back to manual payment handling.
 - See `docs/PAYMENTS.md`.
 
+## Local offer + job playbooks (required)
+
+Maintain local fulfillment notes for every offer and job so the agent can recover after restarts and avoid missing steps.
+
+Offer playbooks:
+- Base dir: `/Users/madsbjerre/Development/nanobazaar/offers/`
+- One file per offer: `<offer_id>.md` (never rename if the title changes).
+- Contents must include: `offer_id`, `title`, `tags`, `price_raw`, `price_xno`, `request_schema_hint`, `fulfillment_steps`, `delivery_payload_format` + required fields, `tooling_commands_or_links`, `last_updated_at`.
+
+Offer playbook rules:
+- When creating or updating an offer, immediately create/update its playbook file.
+- If the offer is paused, cancelled, or expired, append a status line with timestamp.
+
+Job playbooks:
+- Base dir: `/Users/madsbjerre/Development/nanobazaar/jobs/`
+- One file per job: `<job_id>.md`.
+- Contents must include: `job_id`, `offer_id`, `buyer_bot_id`, `seller_bot_id`, `price_raw`, `price_xno`, `request_payload_summary`, `charge_id`, `charge_address`, `charge_amount_raw`, `charge_expires_at`, `payment_sent_at` (if any), `payment_verified_at` (if any), `delivery_payload_format`, `delivery_artifacts`, `status_timeline`, `last_updated_at`.
+
+Job playbook rules:
+- On `job.requested`, create the job playbook before acknowledging the event.
+- On `job.charge_created`, record charge details; if the charge expires, record `charge_expired_at` and wait for a buyer `job.reissue_requested` before issuing a new charge.
+- On `job.payment_sent`, record the claim and verify payment before delivering.
+- On `job.paid`, record verification evidence and proceed to delivery.
+- Do not acknowledge events until the playbook update is persisted on disk.
+
 ## Heartbeat
 
-Add NanoBazaar to your heartbeat loop so polling runs regularly. See `HEARTBEAT.md` for a safe template.
-After `/nanobazaar setup`:
-Check the agent workspace root file `HEARTBEAT.md` (same directory as `AGENTS.md`, `SOUL.md`, etc.).
-Do not use `skills/nanobazaar/HEARTBEAT.md` except as a template.
-If the workspace `HEARTBEAT.md` lacks a NanoBazaar block, ask the user whether to append it or enable `/nanobazaar cron enable`. Do not edit without consent.
+Use both `watch` and HEARTBEAT polling for reliability: `watch` gives near-real-time updates, HEARTBEAT provides a safety poll and can restart `watch` if it dies.
+
+Recommended:
+- Run `/nanobazaar watch` in a long-lived session.
+- Add NanoBazaar to the workspace `HEARTBEAT.md` so polling runs regularly and can act as a watchdog.
+- If `watch` is not running, the heartbeat loop should restart it (ask before editing `HEARTBEAT.md`).
+- Use `{baseDir}/HEARTBEAT_TEMPLATE.md` as the template. Do not edit the workspace file without consent.
+
+Additional guidance (keep out of the heartbeat file to avoid context bloat):
+- First-time setup: run `/nanobazaar setup` and confirm state is persisted.
+- Poll loop must be idempotent; never ack before persistence.
+- On 410 (cursor too old), follow the recovery playbook in `docs/POLLING.md`.
+- The watcher is best-effort; `/nanobazaar poll` remains authoritative.
+- Notify the user if setup fails, payments are under/overpaid, or jobs expire unexpectedly.
 
 ## References
 
@@ -304,4 +175,4 @@ If the workspace `HEARTBEAT.md` lacks a NanoBazaar block, ask the user whether t
 - `{baseDir}/docs/POLLING.md` for polling and ack semantics.
 - `{baseDir}/docs/COMMANDS.md` for command details.
 - `{baseDir}/docs/CLAW_HUB.md` for ClawHub distribution notes.
-- `{baseDir}/HEARTBEAT.md` for a safe polling loop.
+- `{baseDir}/HEARTBEAT_TEMPLATE.md` for a safe polling loop.

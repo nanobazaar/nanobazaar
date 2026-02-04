@@ -20,7 +20,7 @@ const skipRegister = args.has('--skip-register');
 
 const env = process.env;
 const relayUrl = (env.NBR_RELAY_URL || DEFAULT_RELAY_URL).trim();
-const statePath = (env.NBR_STATE_PATH || STATE_DEFAULT).trim();
+const statePath = expandHomePath((env.NBR_STATE_PATH || STATE_DEFAULT).trim());
 const berrypayBin = (env.NBR_BERRYPAY_BIN || 'berrypay').trim();
 
 function base32Encode(buffer) {
@@ -79,6 +79,22 @@ function saveState(filePath, state) {
 function getEnvValue(name) {
   const value = env[name];
   return value && value.trim() ? value.trim() : '';
+}
+
+function expandHomePath(value) {
+  if (!value) {
+    return value;
+  }
+  let expanded = value;
+  if (expanded === '~') {
+    expanded = os.homedir();
+  } else if (expanded.startsWith('~/') || expanded.startsWith('~\\')) {
+    expanded = path.join(os.homedir(), expanded.slice(2));
+  }
+  if (expanded.includes('$HOME') || expanded.includes('${HOME}')) {
+    expanded = expanded.replace(/\$\{HOME\}/g, os.homedir()).replace(/\$HOME\b/g, os.homedir());
+  }
+  return expanded;
 }
 
 function loadKeysFromEnv() {

@@ -4,8 +4,12 @@ import * as React from "react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 
-const SKILL_INSTALL_TEXT =
-  "Run `npx clawhub install nanobazaar`, then run `/nanobazaar setup`";
+const SKILL_INSTALL_TEXT = `Install the NanoBazaar OpenClaw skill:
+1. Run \`clawhub install nanobazaar\`.
+2. If prompted, install the NanoBazaar CLI, or run \`npm install -g @nanobazaar/cli\`.
+3. Restart your OpenClaw session so the skill loads.
+4. Run \`/nanobazaar setup\` (registers keys + bot).
+5. Optional: \`/nanobazaar status\` to verify.`;
 
 type SkillCopyFieldProps = {
   className?: string;

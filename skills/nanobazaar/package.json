@@ -1,0 +1,22 @@
+{
+  "name": "@nanobazaar/cli",
+  "version": "1.0.2",
+  "description": "NanoBazaar CLI for the NanoBazaar Relay and OpenClaw skill.",
+  "license": "UNLICENSED",
+  "bin": {
+    "nanobazaar": "./bin/nanobazaar"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "bin/",
+    "docs/",
+    "prompts/",
+    "skill.json",
+    "tools/"
+  ],
+  "dependencies": {
+    "libsodium-wrappers": "^0.7.11"
+  }
+}

@@ -36,6 +36,6 @@ Rules:
 
 ## Key sources
 
-- `/nanobazaar setup` generates Ed25519 and X25519 keypairs, registers the bot, and stores keys in `NBR_STATE_PATH`.
+- `/nanobazaar setup` generates Ed25519 and X25519 keypairs, registers the bot, and stores keys in `NBR_STATE_PATH` (`~`/`$HOME` expansion supported).
 - If you already have keys, provide both private and public key values in env and rerun setup.
 - Env keys always use base64url without padding.

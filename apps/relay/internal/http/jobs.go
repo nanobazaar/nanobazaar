@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -23,11 +24,14 @@ import (
 
 const (
 	encAlgSealBox                = "libsodium.crypto_box_seal.x25519.xsalsa20poly1305"
-	jobDefaultExpiry             = 48 * time.Hour
-	jobMaxExpiry                 = 7 * 24 * time.Hour
-	chargeMaxExpiry              = 24 * time.Hour
+	jobDefaultExpiry             = 7 * 24 * time.Hour
+	jobMaxExpiry                 = 30 * 24 * time.Hour
+	chargeMaxExpiry              = 30 * 24 * time.Hour
 	jobRequestedEventType        = "job.requested"
 	jobChargeCreatedEventType    = "job.charge_created"
+	jobPaymentSentEventType      = "job.payment_sent"
+	jobChargeReissuedEventType   = "job.charge_reissued"
+	jobChargeReissueReqEventType = "job.charge_reissue_requested"
 	jobPaidEventType             = "job.paid"
 	jobPayloadAvailableEventType = "job.payload_available"
 	jobCancelledEventType        = "job.cancelled"
@@ -50,9 +54,10 @@ var jobStatusSet = map[string]struct{}{
 
 // JobHandler handles job lifecycle endpoints.
 type JobHandler struct {
-	Store   *store.Store
-	Metrics *metrics.Registry
-	Clock   func() time.Time
+	Store     *store.Store
+	Metrics   *metrics.Registry
+	Clock     func() time.Time
+	StreamHub StreamNotifier
 }
 
 func NewJobHandler(store *store.Store, metrics *metrics.Registry) *JobHandler {
@@ -72,6 +77,18 @@ type chargeCreateRequest struct {
 	AmountRaw       string `json:"amount_raw"`
 	ChargeExpiresAt string `json:"charge_expires_at"`
 	ChargeSig       string `json:"charge_sig_ed25519"`
+}
+
+type chargeReissueRequest struct {
+	Note               string `json:"note"`
+	RequestedExpiresAt string `json:"requested_expires_at"`
+}
+
+type paymentSentRequest struct {
+	PaymentBlockHash string `json:"payment_block_hash"`
+	SentAt           string `json:"sent_at"`
+	AmountRawSent    string `json:"amount_raw_sent"`
+	Note             string `json:"note"`
 }
 
 type markPaidRequest struct {
@@ -253,7 +270,7 @@ func (h *JobHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := emitEventTx(r.Context(), qtx, offer.SellerBotID, jobRequestedEventType, map[string]any{
+	if err := emitEventTx(r.Context(), qtx, h.StreamHub, offer.SellerBotID, jobRequestedEventType, map[string]any{
 		"job_id":             payload.JobID,
 		"offer_id":           payload.OfferID,
 		"buyer_bot_id":       botID,
@@ -262,7 +279,7 @@ func (h *JobHandler) Create(w http.ResponseWriter, r *http.Request) {
 		"turnaround_seconds": offer.TurnaroundSeconds,
 		"request_payload_id": payload.RequestPayload.PayloadID,
 		"job_expires_at":     jobExpiresAt.UTC().Format(time.RFC3339Nano),
-	}); err != nil {
+	}, true); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "event create failed")
 		return
 	}
@@ -282,6 +299,7 @@ func (h *JobHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "job lookup failed")
 		return
 	}
+	log.Printf("job_create job_id=%s offer_id=%s buyer_bot_id=%s seller_bot_id=%s", job.JobID, job.OfferID, job.BuyerBotID, job.SellerBotID)
 	writeJSON(w, http.StatusOK, jobToResponse(job))
 }
 
@@ -487,13 +505,14 @@ func (h *JobHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "job lookup failed")
 		return
 	}
-	if err := emitEvent(r.Context(), h.Store, updated.SellerBotID, jobCancelledEventType, map[string]any{
+	if err := emitEvent(r.Context(), h.Store, h.StreamHub, updated.SellerBotID, jobCancelledEventType, map[string]any{
 		"job_id":       updated.JobID,
 		"cancelled_at": updated.CancelledAt.Time.UTC().Format(time.RFC3339Nano),
-	}); err != nil {
+	}, true); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "event create failed")
 		return
 	}
+	log.Printf("job_cancel job_id=%s buyer_bot_id=%s", updated.JobID, updated.BuyerBotID)
 	writeJSON(w, http.StatusOK, jobToResponse(updated))
 }
 
@@ -600,18 +619,315 @@ func (h *JobHandler) Charge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := emitEvent(r.Context(), h.Store, updated.BuyerBotID, jobChargeCreatedEventType, map[string]any{
+	if err := emitEvent(r.Context(), h.Store, h.StreamHub, updated.BuyerBotID, jobChargeCreatedEventType, map[string]any{
 		"job_id":             updated.JobID,
 		"charge_id":          payload.ChargeID,
 		"address":            payload.Address,
 		"amount_raw":         payload.AmountRaw,
 		"charge_expires_at":  chargeExpiresAt.UTC().Format(time.RFC3339Nano),
 		"charge_sig_ed25519": payload.ChargeSig,
-	}); err != nil {
+	}, true); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "event create failed")
 		return
 	}
 
+	log.Printf("job_charge job_id=%s seller_bot_id=%s amount_raw=%s", updated.JobID, updated.SellerBotID, payload.AmountRaw)
+	writeJSON(w, http.StatusOK, jobToResponse(updated))
+}
+
+func (h *JobHandler) PaymentSent(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.Store == nil {
+		writeJSONError(w, http.StatusInternalServerError, "store unavailable")
+		return
+	}
+	jobID := chi.URLParam(r, "job_id")
+	if jobID == "" {
+		writeJSONError(w, http.StatusBadRequest, "missing job_id")
+		return
+	}
+	job, err := h.Store.GetJob(r.Context(), jobID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSONError(w, http.StatusNotFound, "job not found")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "job lookup failed")
+		return
+	}
+	job, err = h.applyExpiry(r.Context(), job)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "job expiry failed")
+		return
+	}
+
+	caller := r.Header.Get(headerBotID)
+	if caller == "" {
+		writeJSONError(w, http.StatusUnauthorized, "missing bot_id")
+		return
+	}
+	if caller != job.BuyerBotID {
+		writeJSONError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	if job.Status != string(domain.JobChargeCreated) {
+		writeJSONError(w, http.StatusConflict, "job not payable")
+		return
+	}
+	if !job.ChargeID.Valid {
+		writeJSONError(w, http.StatusConflict, "charge missing")
+		return
+	}
+	if job.ChargeExpiresAt.Valid && h.now().After(job.ChargeExpiresAt.Time) {
+		writeJSONError(w, http.StatusConflict, "charge expired")
+		return
+	}
+
+	var payload paymentSentRequest
+	body, _ := readAll(r)
+	if len(bytes.TrimSpace(body)) > 0 {
+		if err := json.Unmarshal(body, &payload); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+	}
+
+	now := h.now()
+	sentAt := now
+	if payload.SentAt != "" {
+		parsed, err := parseTime(payload.SentAt)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid sent_at")
+			return
+		}
+		if parsed.After(now.Add(5 * time.Minute)) {
+			writeJSONError(w, http.StatusBadRequest, "sent_at in future")
+			return
+		}
+		sentAt = parsed
+	}
+
+	eventPayload := map[string]any{
+		"job_id":       job.JobID,
+		"buyer_bot_id": job.BuyerBotID,
+		"sent_at":      sentAt.UTC().Format(time.RFC3339Nano),
+	}
+	if payload.PaymentBlockHash != "" {
+		eventPayload["payment_block_hash"] = payload.PaymentBlockHash
+	}
+	if payload.AmountRawSent != "" {
+		eventPayload["amount_raw_sent"] = payload.AmountRawSent
+	}
+	if payload.Note != "" {
+		eventPayload["note"] = payload.Note
+	}
+
+	if err := emitEvent(r.Context(), h.Store, h.StreamHub, job.SellerBotID, jobPaymentSentEventType, eventPayload, true); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "event create failed")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"job_id":  job.JobID,
+		"sent_at": eventPayload["sent_at"],
+	})
+}
+
+func (h *JobHandler) ReissueChargeRequest(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.Store == nil {
+		writeJSONError(w, http.StatusInternalServerError, "store unavailable")
+		return
+	}
+	jobID := chi.URLParam(r, "job_id")
+	if jobID == "" {
+		writeJSONError(w, http.StatusBadRequest, "missing job_id")
+		return
+	}
+	job, err := h.Store.GetJob(r.Context(), jobID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSONError(w, http.StatusNotFound, "job not found")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "job lookup failed")
+		return
+	}
+	job, err = h.applyExpiry(r.Context(), job)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "job expiry failed")
+		return
+	}
+
+	caller := r.Header.Get(headerBotID)
+	if caller == "" {
+		writeJSONError(w, http.StatusUnauthorized, "missing bot_id")
+		return
+	}
+	if caller != job.BuyerBotID {
+		writeJSONError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	if job.Status != string(domain.JobChargeCreated) && job.Status != string(domain.JobExpired) {
+		writeJSONError(w, http.StatusConflict, "job not reissuable")
+		return
+	}
+
+	var payload chargeReissueRequest
+	body, _ := readAll(r)
+	if len(bytes.TrimSpace(body)) > 0 {
+		if err := json.Unmarshal(body, &payload); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+	}
+
+	now := h.now()
+	eventPayload := map[string]any{
+		"job_id":       job.JobID,
+		"buyer_bot_id": job.BuyerBotID,
+		"requested_at": now.UTC().Format(time.RFC3339Nano),
+	}
+	if payload.Note != "" {
+		eventPayload["note"] = payload.Note
+	}
+	if payload.RequestedExpiresAt != "" {
+		parsed, err := parseTime(payload.RequestedExpiresAt)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid requested_expires_at")
+			return
+		}
+		if parsed.Before(now) {
+			writeJSONError(w, http.StatusBadRequest, "requested_expires_at in past")
+			return
+		}
+		if parsed.After(now.Add(chargeMaxExpiry)) {
+			writeJSONError(w, http.StatusBadRequest, "requested_expires_at too far")
+			return
+		}
+		eventPayload["requested_expires_at"] = parsed.UTC().Format(time.RFC3339Nano)
+	}
+
+	if err := emitEvent(r.Context(), h.Store, h.StreamHub, job.SellerBotID, jobChargeReissueReqEventType, eventPayload, true); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "event create failed")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"job_id":       job.JobID,
+		"requested_at": eventPayload["requested_at"],
+	})
+}
+
+func (h *JobHandler) ReissueCharge(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.Store == nil {
+		writeJSONError(w, http.StatusInternalServerError, "store unavailable")
+		return
+	}
+	jobID := chi.URLParam(r, "job_id")
+	if jobID == "" {
+		writeJSONError(w, http.StatusBadRequest, "missing job_id")
+		return
+	}
+	job, err := h.Store.GetJob(r.Context(), jobID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSONError(w, http.StatusNotFound, "job not found")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "job lookup failed")
+		return
+	}
+	job, err = h.applyExpiry(r.Context(), job)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "job expiry failed")
+		return
+	}
+
+	caller := r.Header.Get(headerBotID)
+	if caller == "" {
+		writeJSONError(w, http.StatusUnauthorized, "missing bot_id")
+		return
+	}
+	if caller != job.SellerBotID {
+		writeJSONError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	if job.Status != string(domain.JobExpired) {
+		writeJSONError(w, http.StatusConflict, "job not expired")
+		return
+	}
+	if job.PaidAt.Valid {
+		writeJSONError(w, http.StatusConflict, "job already paid")
+		return
+	}
+
+	var payload chargeCreateRequest
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if payload.ChargeID == "" || payload.Address == "" || payload.AmountRaw == "" || payload.ChargeExpiresAt == "" || payload.ChargeSig == "" {
+		writeJSONError(w, http.StatusBadRequest, "missing fields")
+		return
+	}
+
+	chargeExpiresAt, err := parseTime(payload.ChargeExpiresAt)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid charge_expires_at")
+		return
+	}
+	now := h.now()
+	if chargeExpiresAt.Before(now) {
+		writeJSONError(w, http.StatusBadRequest, "charge_expires_at in past")
+		return
+	}
+	if chargeExpiresAt.After(now.Add(chargeMaxExpiry)) {
+		writeJSONError(w, http.StatusBadRequest, "charge_expires_at too far")
+		return
+	}
+
+	count, err := h.Store.CountActiveJobsByChargeAddress(r.Context(), sqlc.CountActiveJobsByChargeAddressParams{
+		SellerBotID:   job.SellerBotID,
+		ChargeAddress: sql.NullString{String: payload.Address, Valid: true},
+	})
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "charge validation failed")
+		return
+	}
+	if count > 0 {
+		writeJSONError(w, http.StatusConflict, "charge address already in use")
+		return
+	}
+
+	updated, err := h.Store.UpdateJobChargeReissue(r.Context(), sqlc.UpdateJobChargeReissueParams{
+		JobID:            jobID,
+		ChargeID:         sql.NullString{String: payload.ChargeID, Valid: true},
+		ChargeAddress:    sql.NullString{String: payload.Address, Valid: true},
+		ChargeAmountRaw:  sql.NullString{String: payload.AmountRaw, Valid: true},
+		ChargeExpiresAt:  sql.NullTime{Time: chargeExpiresAt, Valid: true},
+		ChargeSigEd25519: sql.NullString{String: payload.ChargeSig, Valid: true},
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSONError(w, http.StatusConflict, "job not expired")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "charge reissue failed")
+		return
+	}
+
+	if err := emitEvent(r.Context(), h.Store, h.StreamHub, updated.BuyerBotID, jobChargeReissuedEventType, map[string]any{
+		"job_id":             updated.JobID,
+		"charge_id":          payload.ChargeID,
+		"address":            payload.Address,
+		"amount_raw":         payload.AmountRaw,
+		"charge_expires_at":  chargeExpiresAt.UTC().Format(time.RFC3339Nano),
+		"charge_sig_ed25519": payload.ChargeSig,
+	}, true); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "event create failed")
+		return
+	}
+
+	log.Printf("job_charge_reissued job_id=%s seller_bot_id=%s amount_raw=%s", updated.JobID, updated.SellerBotID, payload.AmountRaw)
 	writeJSON(w, http.StatusOK, jobToResponse(updated))
 }
 
@@ -715,11 +1031,12 @@ func (h *JobHandler) MarkPaid(w http.ResponseWriter, r *http.Request) {
 	if payload.AmountRawReceived != "" {
 		eventPayload["amount_raw_received"] = payload.AmountRawReceived
 	}
-	if err := emitEvent(r.Context(), h.Store, updated.BuyerBotID, jobPaidEventType, eventPayload); err != nil {
+	if err := emitEvent(r.Context(), h.Store, h.StreamHub, updated.BuyerBotID, jobPaidEventType, eventPayload, true); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "event create failed")
 		return
 	}
 
+	log.Printf("job_mark_paid job_id=%s seller_bot_id=%s", updated.JobID, updated.SellerBotID)
 	writeJSON(w, http.StatusOK, jobToResponse(updated))
 }
 
@@ -793,6 +1110,7 @@ func (h *JobHandler) Deliver(w http.ResponseWriter, r *http.Request) {
 			h.Metrics.AddPayloadBytes(int64(payloadBytes))
 			h.Metrics.AddPendingPayloads(1)
 		}
+		log.Printf("job_deliver job_id=%s seller_bot_id=%s payload_id=%s payload_kind=%s status=%s", job.JobID, job.SellerBotID, payload.Payload.PayloadID, payload.Payload.PayloadKind, resp.JobStatus)
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
@@ -815,6 +1133,7 @@ func (h *JobHandler) Deliver(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "job lookup failed")
 		return
 	}
+	log.Printf("job_payload job_id=%s seller_bot_id=%s payload_id=%s payload_kind=%s status=%s", updated.JobID, updated.SellerBotID, payload.Payload.PayloadID, payload.Payload.PayloadKind, updated.Status)
 	writeJSON(w, http.StatusOK, deliverResponse{
 		PayloadID:   payload.Payload.PayloadID,
 		JobStatus:   updated.Status,
@@ -855,11 +1174,11 @@ func (h *JobHandler) deliverAndUpdate(ctx context.Context, job sqlc.Job, payload
 		return deliverResponse{}, err
 	}
 
-	if err := emitEventTx(ctx, qtx, job.BuyerBotID, jobPayloadAvailableEventType, map[string]any{
+	if err := emitEventTx(ctx, qtx, h.StreamHub, job.BuyerBotID, jobPayloadAvailableEventType, map[string]any{
 		"job_id":       job.JobID,
 		"payload_id":   payload.PayloadID,
 		"payload_kind": payload.PayloadKind,
-	}); err != nil {
+	}, true); err != nil {
 		return deliverResponse{}, err
 	}
 
@@ -901,11 +1220,11 @@ func (h *JobHandler) insertPayload(ctx context.Context, job sqlc.Job, payload pa
 		}
 		return err
 	}
-	if err := emitEvent(ctx, h.Store, job.BuyerBotID, jobPayloadAvailableEventType, map[string]any{
+	if err := emitEvent(ctx, h.Store, h.StreamHub, job.BuyerBotID, jobPayloadAvailableEventType, map[string]any{
 		"job_id":       job.JobID,
 		"payload_id":   payload.PayloadID,
 		"payload_kind": payload.PayloadKind,
-	}); err != nil {
+	}, true); err != nil {
 		return err
 	}
 	return nil
@@ -1096,7 +1415,7 @@ func (h *JobHandler) emitJobExpired(ctx context.Context, job sqlc.Job, now time.
 	if job.BuyerBotID == job.SellerBotID {
 		recipients = []string{job.BuyerBotID}
 	}
-	for _, recipient := range recipients {
+	for i, recipient := range recipients {
 		if err := h.Store.CreateEvent(ctx, sqlc.CreateEventParams{
 			RecipientBotID: recipient,
 			EventType:      jobExpiredEventType,
@@ -1104,6 +1423,13 @@ func (h *JobHandler) emitJobExpired(ctx context.Context, job sqlc.Job, now time.
 			CreatedAt:      now,
 		}); err != nil {
 			return err
+		}
+		emitJobStream := i == 0
+		if err := emitStreamEvents(ctx, h.Store, recipient, jobExpiredEventType, string(payload), data, now, emitJobStream); err != nil {
+			return err
+		}
+		if h.StreamHub != nil {
+			h.StreamHub.NotifyEvent(ctx, recipient, jobExpiredEventType, data)
 		}
 	}
 	return nil
@@ -1280,28 +1606,48 @@ func readAll(r *http.Request) ([]byte, error) {
 	return io.ReadAll(r.Body)
 }
 
-func emitEvent(ctx context.Context, st *store.Store, recipient, eventType string, data map[string]any) error {
+func emitEvent(ctx context.Context, st *store.Store, notifier StreamNotifier, recipient, eventType string, data map[string]any, emitJobStream bool) error {
 	payload, err := json.Marshal(data)
 	if err != nil {
 		return err
 	}
-	return st.CreateEvent(ctx, sqlc.CreateEventParams{
+	now := time.Now().UTC()
+	if err := st.CreateEvent(ctx, sqlc.CreateEventParams{
 		RecipientBotID: recipient,
 		EventType:      eventType,
 		DataJson:       string(payload),
-		CreatedAt:      time.Now().UTC(),
-	})
+		CreatedAt:      now,
+	}); err != nil {
+		return err
+	}
+	if err := emitStreamEvents(ctx, st, recipient, eventType, string(payload), data, now, emitJobStream); err != nil {
+		return err
+	}
+	if notifier != nil {
+		notifier.NotifyEvent(ctx, recipient, eventType, data)
+	}
+	return nil
 }
 
-func emitEventTx(ctx context.Context, qtx *sqlc.Queries, recipient, eventType string, data map[string]any) error {
+func emitEventTx(ctx context.Context, qtx *sqlc.Queries, notifier StreamNotifier, recipient, eventType string, data map[string]any, emitJobStream bool) error {
 	payload, err := json.Marshal(data)
 	if err != nil {
 		return err
 	}
-	return qtx.CreateEvent(ctx, sqlc.CreateEventParams{
+	now := time.Now().UTC()
+	if err := qtx.CreateEvent(ctx, sqlc.CreateEventParams{
 		RecipientBotID: recipient,
 		EventType:      eventType,
 		DataJson:       string(payload),
-		CreatedAt:      time.Now().UTC(),
-	})
+		CreatedAt:      now,
+	}); err != nil {
+		return err
+	}
+	if err := emitStreamEvents(ctx, qtx, recipient, eventType, string(payload), data, now, emitJobStream); err != nil {
+		return err
+	}
+	if notifier != nil {
+		notifier.NotifyEvent(ctx, recipient, eventType, data)
+	}
+	return nil
 }

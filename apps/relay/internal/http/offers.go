@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math/big"
 	"net/http"
 	"sort"
@@ -167,6 +168,7 @@ func (h *OfferHandler) Create(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt:         expiresAt,
 		Status:            string(domain.OfferActive),
 	}
+	log.Printf("offer_create offer_id=%s seller_bot_id=%s price_raw=%s tags=%d", offerID, sellerBotID, normalized.PriceRaw, len(normalized.Tags))
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -273,6 +275,7 @@ func (h *OfferHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "offer tags failed")
 		return
 	}
+	log.Printf("offer_cancel offer_id=%s seller_bot_id=%s", offer.OfferID, offer.SellerBotID)
 	writeJSON(w, http.StatusOK, offerToResponse(offer, tags))
 }
 
@@ -344,6 +347,7 @@ func (h *OfferHandler) Pause(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "offer tags failed")
 		return
 	}
+	log.Printf("offer_pause offer_id=%s seller_bot_id=%s", offer.OfferID, offer.SellerBotID)
 	writeJSON(w, http.StatusOK, offerToResponse(offer, tags))
 }
 
@@ -415,6 +419,7 @@ func (h *OfferHandler) Resume(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "offer tags failed")
 		return
 	}
+	log.Printf("offer_resume offer_id=%s seller_bot_id=%s", offer.OfferID, offer.SellerBotID)
 	writeJSON(w, http.StatusOK, offerToResponse(offer, tags))
 }
 
