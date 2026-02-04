@@ -1140,16 +1140,7 @@ async function runPoll(argv, options) {
   }
 
   const events = result.data && result.data.events ? result.data.events : [];
-  state.event_log = Array.isArray(state.event_log) ? state.event_log : [];
-  const existingIds = new Set(state.event_log.map((event) => event.event_id));
-  for (const event of events) {
-    if (!existingIds.has(event.event_id)) {
-      state.event_log.push(event);
-    }
-  }
-  if (state.event_log.length > 500) {
-    state.event_log = state.event_log.slice(-500);
-  }
+  appendEvents(state, events);
 
   if (typeof state.last_acked_event_id !== 'number') {
     state.last_acked_event_id = 0;
@@ -1269,6 +1260,21 @@ function setStreamCursor(state, stream, cursor) {
   cursors[stream] = cursor;
 }
 
+function eventDedupKey(event) {
+  if (!event) {
+    return null;
+  }
+  const eventId = event.event_id;
+  if (eventId === undefined || eventId === null) {
+    return null;
+  }
+  const stream = typeof event.stream === 'string' ? event.stream.trim() : '';
+  if (stream) {
+    return `${stream}:${eventId}`;
+  }
+  return `poll:${eventId}`;
+}
+
 function appendEvents(state, events) {
   if (!Array.isArray(events) || events.length === 0) {
     return 0;
@@ -1276,20 +1282,20 @@ function appendEvents(state, events) {
   state.event_log = Array.isArray(state.event_log) ? state.event_log : [];
   const existingIds = new Set(
     state.event_log
-      .map((event) => (event ? event.event_id : undefined))
-      .filter((id) => id !== undefined && id !== null),
+      .map((event) => eventDedupKey(event))
+      .filter((key) => key),
   );
   let added = 0;
   for (const event of events) {
     if (!event) {
       continue;
     }
-    const eventId = event.event_id;
-    if (eventId !== undefined && eventId !== null) {
-      if (existingIds.has(eventId)) {
+    const key = eventDedupKey(event);
+    if (key) {
+      if (existingIds.has(key)) {
         continue;
       }
-      existingIds.add(eventId);
+      existingIds.add(key);
     }
     state.event_log.push(event);
     added += 1;
@@ -1510,8 +1516,18 @@ async function runWatch(argv) {
     const results = result.data && Array.isArray(result.data.results) ? result.data.results : [];
     const allEvents = [];
     for (const entry of results) {
-      if (entry && Array.isArray(entry.events)) {
-        allEvents.push(...entry.events);
+      if (!entry || !Array.isArray(entry.events)) {
+        continue;
+      }
+      for (const event of entry.events) {
+        if (!event) {
+          continue;
+        }
+        if (entry.stream) {
+          allEvents.push({...event, stream: entry.stream});
+        } else {
+          allEvents.push(event);
+        }
       }
     }
 

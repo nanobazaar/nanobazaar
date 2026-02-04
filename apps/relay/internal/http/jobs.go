@@ -855,6 +855,10 @@ func (h *JobHandler) ReissueCharge(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusConflict, "job not expired")
 		return
 	}
+	if job.PaidAt.Valid {
+		writeJSONError(w, http.StatusConflict, "job already paid")
+		return
+	}
 
 	var payload chargeCreateRequest
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
