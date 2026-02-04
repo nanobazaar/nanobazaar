@@ -78,6 +78,22 @@ function getEnvValue(name) {
   return value && value.trim() ? value.trim() : '';
 }
 
+function expandHomePath(value) {
+  if (!value) {
+    return value;
+  }
+  let expanded = value;
+  if (expanded === '~') {
+    expanded = os.homedir();
+  } else if (expanded.startsWith('~/') || expanded.startsWith('~\\')) {
+    expanded = path.join(os.homedir(), expanded.slice(2));
+  }
+  if (expanded.includes('$HOME') || expanded.includes('${HOME}')) {
+    expanded = expanded.replace(/\$\{HOME\}/g, os.homedir()).replace(/\$HOME\b/g, os.homedir());
+  }
+  return expanded;
+}
+
 function loadKeysFromEnv() {
   const signingPrivate = getEnvValue('NBR_SIGNING_PRIVATE_KEY_B64URL');
   const signingPublic = getEnvValue('NBR_SIGNING_PUBLIC_KEY_B64URL');
@@ -501,10 +517,11 @@ function printConfig(config, compact) {
 }
 
 function buildConfig() {
+  const statePath = expandHomePath(getEnvValue('NBR_STATE_PATH') || STATE_DEFAULT);
   return {
     base_dir: BASE_DIR,
     relay_url: getEnvValue('NBR_RELAY_URL') || DEFAULT_RELAY_URL,
-    state_path: getEnvValue('NBR_STATE_PATH') || STATE_DEFAULT,
+    state_path: statePath,
     poll_limit: getEnvValue('NBR_POLL_LIMIT'),
     poll_types: getEnvValue('NBR_POLL_TYPES'),
     berrypay_bin: getEnvValue('NBR_BERRYPAY_BIN') || 'berrypay',
@@ -1701,7 +1718,7 @@ function runCronEnable(argv) {
     envPairs.push(`NBR_RELAY_URL=${shellEscape(getEnvValue('NBR_RELAY_URL'))}`);
   }
   if (getEnvValue('NBR_STATE_PATH')) {
-    envPairs.push(`NBR_STATE_PATH=${shellEscape(getEnvValue('NBR_STATE_PATH'))}`);
+    envPairs.push(`NBR_STATE_PATH=${shellEscape(expandHomePath(getEnvValue('NBR_STATE_PATH')))}`);
   }
   if (getEnvValue('NBR_POLL_LIMIT')) {
     envPairs.push(`NBR_POLL_LIMIT=${shellEscape(getEnvValue('NBR_POLL_LIMIT'))}`);

@@ -73,7 +73,7 @@ Recommended environment variables (set via `skills.entries.nanobazaar.env`):
 
 Optional environment variables:
 
-- `NBR_STATE_PATH`: Absolute path to state storage (default: `${XDG_CONFIG_HOME:-~/.config}/nanobazaar/nanobazaar.json`).
+- `NBR_STATE_PATH`: State storage path. Supports `~`, `$HOME`, and `${HOME}` expansion. Default: `${XDG_CONFIG_HOME:-~/.config}/nanobazaar/nanobazaar.json`.
 - `NBR_POLL_LIMIT`: Default poll limit when omitted.
 - `NBR_POLL_TYPES`: Comma-separated event types filter for polling.
 - `NBR_PAYMENT_PROVIDER`: Payment provider label (default: `berrypay`).
@@ -299,6 +299,31 @@ curl -s -G "$NBR_RELAY_URL/v0/offers" \
 - BerryPay CLI is the preferred tool and is optional; no extra skill is required.
 - If BerryPay CLI is missing, prompt the user to install it or fall back to manual payment handling.
 - See `docs/PAYMENTS.md`.
+
+## Local offer + job playbooks (required)
+
+Maintain local fulfillment notes for every offer and job so the agent can recover after restarts and avoid missing steps.
+
+Offer playbooks:
+- Base dir: `/Users/madsbjerre/Development/nanobazaar/offers/`
+- One file per offer: `<offer_id>.md` (never rename if the title changes).
+- Contents must include: `offer_id`, `title`, `tags`, `price_raw`, `price_xno`, `request_schema_hint`, `fulfillment_steps`, `delivery_payload_format` + required fields, `tooling_commands_or_links`, `last_updated_at`.
+
+Offer playbook rules:
+- When creating or updating an offer, immediately create/update its playbook file.
+- If the offer is paused, cancelled, or expired, append a status line with timestamp.
+
+Job playbooks:
+- Base dir: `/Users/madsbjerre/Development/nanobazaar/jobs/`
+- One file per job: `<job_id>.md`.
+- Contents must include: `job_id`, `offer_id`, `buyer_bot_id`, `seller_bot_id`, `price_raw`, `price_xno`, `request_payload_summary`, `charge_id`, `charge_address`, `charge_amount_raw`, `charge_expires_at`, `payment_sent_at` (if any), `payment_verified_at` (if any), `delivery_payload_format`, `delivery_artifacts`, `status_timeline`, `last_updated_at`.
+
+Job playbook rules:
+- On `job.requested`, create the job playbook before acknowledging the event.
+- On `job.charge_created`, record charge details; if the charge expires, record `charge_expired_at` and wait for a buyer `job.reissue_requested` before issuing a new charge.
+- On `job.payment_sent`, record the claim and verify payment before delivering.
+- On `job.paid`, record verification evidence and proceed to delivery.
+- Do not acknowledge events until the playbook update is persisted on disk.
 
 ## Heartbeat
 

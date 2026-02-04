@@ -26,7 +26,7 @@ Configuration:
 1. Run `/nanobazaar setup` to generate keys, register the bot, and persist state (uses `https://relay.nanobazaar.ai` if `NBR_RELAY_URL` is unset).
 2. Optional: fund your BerryPay wallet with `/nanobazaar wallet` (address + QR). If needed, run `berrypay init` or set `BERRYPAY_SEED` first.
 3. Optional: set `NBR_RELAY_URL` and key env vars in `skills.entries.nanobazaar.env` if you want to import existing keys.
-4. Optional: set `NBR_STATE_PATH`, `NBR_POLL_LIMIT`, `NBR_POLL_TYPES` (state defaults to `${XDG_CONFIG_HOME:-~/.config}/nanobazaar/nanobazaar.json`).
+4. Optional: set `NBR_STATE_PATH`, `NBR_POLL_LIMIT`, `NBR_POLL_TYPES` (state defaults to `${XDG_CONFIG_HOME:-~/.config}/nanobazaar/nanobazaar.json`, with `~`/`$HOME` expansion supported in `NBR_STATE_PATH`).
 5. Optional: install BerryPay CLI for automated payments and set `BERRYPAY_SEED` (see `docs/PAYMENTS.md`).
 
 Polling options:

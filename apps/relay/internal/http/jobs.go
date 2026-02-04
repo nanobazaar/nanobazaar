@@ -894,21 +894,20 @@ func (h *JobHandler) ReissueCharge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.Store.UpdateJobChargeReissue(r.Context(), sqlc.UpdateJobChargeReissueParams{
+	updated, err := h.Store.UpdateJobChargeReissue(r.Context(), sqlc.UpdateJobChargeReissueParams{
 		JobID:            jobID,
 		ChargeID:         sql.NullString{String: payload.ChargeID, Valid: true},
 		ChargeAddress:    sql.NullString{String: payload.Address, Valid: true},
 		ChargeAmountRaw:  sql.NullString{String: payload.AmountRaw, Valid: true},
 		ChargeExpiresAt:  sql.NullTime{Time: chargeExpiresAt, Valid: true},
 		ChargeSigEd25519: sql.NullString{String: payload.ChargeSig, Valid: true},
-	}); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "charge reissue failed")
-		return
-	}
-
-	updated, err := h.Store.GetJob(r.Context(), jobID)
+	})
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "job lookup failed")
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSONError(w, http.StatusConflict, "job not expired")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "charge reissue failed")
 		return
 	}
 

@@ -2950,7 +2950,7 @@ func (q *Queries) UpdateJobCharge(ctx context.Context, arg UpdateJobChargeParams
 	return err
 }
 
-const updateJobChargeReissue = `-- name: UpdateJobChargeReissue :exec
+const updateJobChargeReissue = `-- name: UpdateJobChargeReissue :one
 UPDATE jobs
 SET status = 'CHARGE_CREATED',
 	charge_id = ?1,
@@ -2961,6 +2961,7 @@ SET status = 'CHARGE_CREATED',
 	expired_at = NULL
 WHERE job_id = ?6
 	AND status = 'EXPIRED'
+RETURNING job_id, offer_id, buyer_bot_id, seller_bot_id, status, price_raw, turnaround_seconds, created_at, job_expires_at, request_payload_id, charge_id, charge_address, charge_amount_raw, charge_expires_at, charge_sig_ed25519, paid_at, delivered_at, cancelled_at, expired_at, payment_verifier, payment_block_hash, payment_observed_at, amount_raw_received
 `
 
 type UpdateJobChargeReissueParams struct {
@@ -2972,8 +2973,8 @@ type UpdateJobChargeReissueParams struct {
 	JobID            string         `json:"job_id"`
 }
 
-func (q *Queries) UpdateJobChargeReissue(ctx context.Context, arg UpdateJobChargeReissueParams) error {
-	_, err := q.exec(ctx, q.updateJobChargeReissueStmt, updateJobChargeReissue,
+func (q *Queries) UpdateJobChargeReissue(ctx context.Context, arg UpdateJobChargeReissueParams) (Job, error) {
+	row := q.queryRow(ctx, q.updateJobChargeReissueStmt, updateJobChargeReissue,
 		arg.ChargeID,
 		arg.ChargeAddress,
 		arg.ChargeAmountRaw,
@@ -2981,7 +2982,33 @@ func (q *Queries) UpdateJobChargeReissue(ctx context.Context, arg UpdateJobCharg
 		arg.ChargeSigEd25519,
 		arg.JobID,
 	)
-	return err
+	var i Job
+	err := row.Scan(
+		&i.JobID,
+		&i.OfferID,
+		&i.BuyerBotID,
+		&i.SellerBotID,
+		&i.Status,
+		&i.PriceRaw,
+		&i.TurnaroundSeconds,
+		&i.CreatedAt,
+		&i.JobExpiresAt,
+		&i.RequestPayloadID,
+		&i.ChargeID,
+		&i.ChargeAddress,
+		&i.ChargeAmountRaw,
+		&i.ChargeExpiresAt,
+		&i.ChargeSigEd25519,
+		&i.PaidAt,
+		&i.DeliveredAt,
+		&i.CancelledAt,
+		&i.ExpiredAt,
+		&i.PaymentVerifier,
+		&i.PaymentBlockHash,
+		&i.PaymentObservedAt,
+		&i.AmountRawReceived,
+	)
+	return i, err
 }
 
 const updateJobDeliver = `-- name: UpdateJobDeliver :exec

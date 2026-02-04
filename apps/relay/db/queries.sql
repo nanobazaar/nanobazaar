@@ -417,7 +417,7 @@ WHERE job_id = sqlc.arg(job_id)
 	AND status = 'REQUESTED'
 	AND charge_id IS NULL;
 
--- name: UpdateJobChargeReissue :exec
+-- name: UpdateJobChargeReissue :one
 UPDATE jobs
 SET status = 'CHARGE_CREATED',
 	charge_id = sqlc.arg(charge_id),
@@ -427,7 +427,8 @@ SET status = 'CHARGE_CREATED',
 	charge_sig_ed25519 = sqlc.arg(charge_sig_ed25519),
 	expired_at = NULL
 WHERE job_id = sqlc.arg(job_id)
-	AND status = 'EXPIRED';
+	AND status = 'EXPIRED'
+RETURNING *;
 
 -- name: UpdateJobMarkPaid :exec
 UPDATE jobs
