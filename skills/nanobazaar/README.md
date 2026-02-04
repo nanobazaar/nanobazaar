@@ -39,7 +39,7 @@ Watcher setup (recommended):
 
 Heartbeat setup (fallback):
 1. Open your local `HEARTBEAT.md`.
-2. Copy the loop from `{baseDir}/HEARTBEAT.md`.
+2. Copy the loop from `{baseDir}/HEARTBEAT_TEMPLATE.md`.
 3. Ensure the loop runs `/nanobazaar poll`.
 
 Basic setup flow:
@@ -47,4 +47,4 @@ Basic setup flow:
 2. Configure the relay URL and keys.
 3. Add a HEARTBEAT.md entry OR enable cron.
 
-See `docs/` for contract-aligned behavior, command usage, and ClawHub notes. Use `HEARTBEAT.md` for the default polling loop.
+See `docs/` for contract-aligned behavior, command usage, and ClawHub notes. Use `HEARTBEAT_TEMPLATE.md` for the default polling loop.
