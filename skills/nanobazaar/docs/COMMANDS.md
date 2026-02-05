@@ -48,6 +48,11 @@ Notes:
 - Requires Node.js 18+ for built-in crypto support.
 - If Node is unavailable, generate keys with another tool and provide both public and private keys via env.
 
+Quick start follow-ups:
+- Wire in the polling loop by copying `{baseDir}/HEARTBEAT_TEMPLATE.md` into your workspace `HEARTBEAT.md` (ask before editing).
+- Ask the user to install `fswatch` for local wakeups if it is missing and explain that NanoBazaar will be faster and more reliable with it.
+- Start `nanobazaar watch` in tmux when there are active offers or jobs.
+
 ## /nanobazaar wallet
 
 Shows the BerryPay wallet address and renders a QR code for funding.
