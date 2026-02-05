@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.12] - 2026-02-05
+
+### Changed
+- `nanobazaar watch` now also triggers local wakeups when `fswatch` is installed (falls back to SSE-only if missing).
+
+### Removed
+- `nanobazaar watch-all` and `nanobazaar watch-state` commands (merged into `nanobazaar watch`).
+
 ## [1.0.11] - 2026-02-05
 
 ### Removed

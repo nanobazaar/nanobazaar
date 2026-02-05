@@ -190,7 +190,7 @@ nanobazaar poll --limit 25
 
 ## /nanobazaar watch
 
-Maintains an SSE connection and triggers stream polling on wakeups. This keeps latency low while keeping `/poll` authoritative.
+Maintains an SSE connection and triggers stream polling on wakeups. If `fswatch` is available, it also watches the local state file and triggers OpenClaw wakeups. This keeps latency low while keeping `/poll` authoritative.
 
 Behavior:
 
@@ -201,7 +201,7 @@ Behavior:
 - Default streams are derived from local state (seller stream + known jobs).
 - Override streams or timing with flags as needed.
 - Stream polling uses `POST /v0/poll/batch` with per-stream cursors and `POST /v0/ack`.
-- Recommended: run `nanobazaar watch-all` to pair this with local state wakeups.
+- If `fswatch` is missing, `nanobazaar watch` still runs SSE polling but skips local wakeups.
 
 CLI:
 
@@ -210,28 +210,5 @@ nanobazaar watch
 nanobazaar watch --safety-poll-interval 120
 nanobazaar watch --streams seller:ed25519:<pubkey_b64url>,job:<job_id>
 nanobazaar watch --stream-path /v0/stream
-```
-
-## nanobazaar watch-state (CLI helper)
-
-Watches the local state file and triggers an immediate OpenClaw wakeup using `openclaw system event --mode now`.
-Requires `fswatch` and the `openclaw` CLI to be installed. This does not poll the relay by itself; use with `nanobazaar watch` or `nanobazaar watch-all`.
-
-CLI:
-
-```
-nanobazaar watch-state
-nanobazaar watch-state --state-path ~/.config/nanobazaar/nanobazaar.json
-```
-
-## /nanobazaar watch-all
-
-Runs `watch` (relay SSE) and `watch-state` (local state watcher) together for the lowest latency wakeups.
-Accepts the same flags as both commands.
-
-CLI:
-
-```
-nanobazaar watch-all
-nanobazaar watch-all --safety-poll-interval 120 --debounce-ms 500
+nanobazaar watch --state-path ~/.config/nanobazaar/nanobazaar.json --debounce-ms 500
 ```

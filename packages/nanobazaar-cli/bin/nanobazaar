@@ -667,14 +667,10 @@ Commands:
   poll [--since-event-id <id>] [--limit <n>] [--types a,b] [--no-ack]
                              Poll events and optionally ack
   watch [--streams a,b] [--stream-path /v0/stream] [--safety-poll-interval <seconds>]
-                             Maintain SSE connection; poll on wake + on safety interval
-  watch-state [--state-path <path>] [--openclaw-bin <bin>] [--fswatch-bin <bin>]
-              [--event-text <text>] [--mode now|next] [--debounce-ms <ms>]
-                             Watch state file and trigger OpenClaw wakeups
-  watch-all [--streams a,b] [--stream-path /v0/stream] [--safety-poll-interval <seconds>]
-            [--state-path <path>] [--openclaw-bin <bin>] [--fswatch-bin <bin>]
-            [--event-text <text>] [--mode now|next] [--debounce-ms <ms>]
-                             Run relay watch + state watcher together (recommended)
+        [--state-path <path>] [--openclaw-bin <bin>] [--fswatch-bin <bin>]
+        [--event-text <text>] [--mode now|next] [--debounce-ms <ms>]
+                             Maintain SSE connection; poll on wake + on safety interval.
+                             If fswatch is available, also watch local state and trigger OpenClaw wakeups.
 
 Global flags:
   --help                     Show this help
@@ -1635,12 +1631,116 @@ function deriveDefaultStreams({keys, state}) {
   return uniqStrings(streams);
 }
 
+function startStateWatcher(options) {
+  const opts = options || {};
+  const statePath = String(opts.statePath || '');
+  const fswatchBin = String(opts.fswatchBin || 'fswatch');
+  const openclawBin = String(opts.openclawBin || 'openclaw');
+  const mode = String(opts.mode || 'now');
+  const eventText = String(opts.eventText || 'NanoBazaar state changed');
+  const debounceMs = typeof opts.debounceMs === 'number' ? opts.debounceMs : 250;
+  const signal = opts.signal;
+
+  if (!statePath) {
+    return {stop: () => {}};
+  }
+
+  if (!fs.existsSync(statePath)) {
+    console.error(`[watch] state file not found at ${statePath}. Waiting for it to appear...`);
+  }
+
+  let watcher = null;
+  let buffer = '';
+  let lastWake = 0;
+  let openclawMissing = false;
+  let disabled = false;
+
+  function disable(message) {
+    if (disabled) {
+      return;
+    }
+    disabled = true;
+    if (message) {
+      console.error(`[watch] ${message}`);
+    }
+    if (watcher && !watcher.killed) {
+      watcher.kill('SIGTERM');
+    }
+  }
+
+  function triggerWake() {
+    if (openclawMissing) {
+      return;
+    }
+    const now = Date.now();
+    if (debounceMs && now - lastWake < debounceMs) {
+      return;
+    }
+    lastWake = now;
+    const result = spawnSync(openclawBin, ['system', 'event', '--text', eventText, '--mode', mode], {stdio: 'inherit'});
+    if (result.error) {
+      openclawMissing = true;
+      console.error(`[watch] Failed to run ${openclawBin}: ${result.error.message}. Local wakeups disabled.`);
+    }
+  }
+
+  try {
+    watcher = spawn(fswatchBin, ['-0', '-o', statePath], {stdio: ['ignore', 'pipe', 'inherit']});
+  } catch (err) {
+    disable(`Failed to start fswatch: ${err && err.message ? err.message : String(err)}. Running SSE polling only.`);
+    return {stop: () => {}};
+  }
+
+  watcher.on('error', (err) => {
+    if (disabled) {
+      return;
+    }
+    if (err && err.code === 'ENOENT') {
+      disable('fswatch not found. Install it to enable local wakeups (macOS: brew install fswatch, Ubuntu: apt install fswatch).');
+      return;
+    }
+    disable(`Failed to start fswatch: ${err && err.message ? err.message : String(err)}. Running SSE polling only.`);
+  });
+
+  watcher.stdout.on('data', (chunk) => {
+    buffer += chunk.toString('utf8');
+    const parts = buffer.split('\0');
+    buffer = parts.pop();
+    if (parts.length === 0) {
+      return;
+    }
+    triggerWake();
+  });
+
+  watcher.on('close', (code) => {
+    if (disabled || (signal && signal.aborted)) {
+      return;
+    }
+    if (code === 0) {
+      disable();
+      return;
+    }
+    disable(`fswatch exited with code ${code}. Running SSE polling only.`);
+  });
+
+  if (signal) {
+    if (signal.aborted) {
+      disable();
+    } else {
+      signal.addEventListener('abort', () => disable());
+    }
+  }
+
+  return {stop: () => disable()};
+}
+
 async function runWatch(argv) {
   requireFetch();
 
   const {flags} = parseArgs(argv);
   const config = buildConfig();
-  const state = loadState(config.state_path);
+  const statePath = expandHomePath(String(flags.statePath || config.state_path));
+  const state = loadState(statePath);
   const {keys} = requireKeys(state);
   const identity = deriveIdentity(keys);
 
@@ -1659,6 +1759,14 @@ async function runWatch(argv) {
   const printPolls = !!flags.printPolls;
   const pollLimit = parseOptionalPositiveInt(flags.limit, '--limit')
     ?? parseOptionalPositiveInt(config.poll_limit, 'NBR_POLL_LIMIT');
+
+  const fswatchBin = String(flags.fswatchBin || 'fswatch');
+  const openclawBin = String(flags.openclawBin || 'openclaw');
+  const mode = String(flags.mode || 'now');
+  const eventText = String(flags.eventText || 'NanoBazaar state changed');
+  const debounceMs = flags.debounceMs
+    ? parsePositiveInt(flags.debounceMs, '--debounce-ms')
+    : 250;
 
   ensureStreamCursorMap(state);
   const streamSet = new Set(streams);
@@ -1731,7 +1839,7 @@ async function runWatch(argv) {
 
     const addedEvents = appendEvents(state, allEvents);
     if (addedEvents > 0) {
-      saveStateMerged(config.state_path, state);
+      saveStateMerged(statePath, state);
     }
 
     let ackedStreams = 0;
@@ -1761,7 +1869,7 @@ async function runWatch(argv) {
         }
 
         setStreamCursor(state, entry.stream, next);
-        saveStateMerged(config.state_path, state);
+        saveStateMerged(statePath, state);
         ackedStreams += 1;
       }
     }
@@ -1816,10 +1924,20 @@ async function runWatch(argv) {
   process.on('SIGTERM', stop);
 
   console.error(`[watch] relay=${config.relay_url}`);
-  console.error(`[watch] state_path=${config.state_path}`);
+  console.error(`[watch] state_path=${statePath}`);
   console.error(`[watch] stream_path=${streamPath}`);
   console.error(`[watch] streams=${streams.join(',')}`);
   console.error(`[watch] safety_poll_interval_seconds=${safetyIntervalSeconds}`);
+
+  const stateWatcher = startStateWatcher({
+    statePath,
+    fswatchBin,
+    openclawBin,
+    mode,
+    eventText,
+    debounceMs,
+    signal,
+  });
 
   const safetyTimer = setInterval(() => {
     if (signal.aborted) {
@@ -1913,85 +2031,7 @@ async function runWatch(argv) {
   }
 
   clearInterval(safetyTimer);
-}
-
-async function runWatchState(argv) {
-  const {flags} = parseArgs(argv);
-  const config = buildConfig();
-  const statePath = expandHomePath(String(flags.statePath || config.state_path));
-  const fswatchBin = String(flags.fswatchBin || 'fswatch');
-  const openclawBin = String(flags.openclawBin || 'openclaw');
-  const mode = String(flags.mode || 'now');
-  const eventText = String(flags.eventText || 'NanoBazaar state changed');
-  const debounceMs = flags.debounceMs
-    ? parsePositiveInt(flags.debounceMs, '--debounce-ms')
-    : 250;
-
-  if (!fs.existsSync(statePath)) {
-    console.error(`State file not found at ${statePath}. Waiting for it to appear...`);
-  }
-
-  let buffer = '';
-  let lastWake = 0;
-  let openclawMissing = false;
-
-  function triggerWake() {
-    if (openclawMissing) {
-      return;
-    }
-    const now = Date.now();
-    if (debounceMs && now - lastWake < debounceMs) {
-      return;
-    }
-    lastWake = now;
-    const result = spawnSync(openclawBin, ['system', 'event', '--text', eventText, '--mode', mode], {stdio: 'inherit'});
-    if (result.error) {
-      openclawMissing = true;
-      console.error(`Failed to run ${openclawBin}: ${result.error.message}`);
-    }
-  }
-
-  return new Promise((resolve, reject) => {
-    const watcher = spawn(fswatchBin, ['-0', '-o', statePath], {stdio: ['ignore', 'pipe', 'inherit']});
-
-    watcher.on('error', (err) => {
-      if (err && err.code === 'ENOENT') {
-        reject(new Error(`fswatch not found. Install it (macOS: brew install fswatch).`));
-        return;
-      }
-      reject(new Error(`Failed to start fswatch: ${err && err.message ? err.message : String(err)}`));
-    });
-
-    watcher.stdout.on('data', (chunk) => {
-      buffer += chunk.toString('utf8');
-      const parts = buffer.split('\0');
-      buffer = parts.pop();
-      if (parts.length === 0) {
-        return;
-      }
-      triggerWake();
-    });
-
-    const forwardSignal = (signal) => {
-      if (!watcher.killed) {
-        watcher.kill(signal);
-      }
-    };
-    process.on('SIGINT', () => forwardSignal('SIGINT'));
-    process.on('SIGTERM', () => forwardSignal('SIGTERM'));
-
-    watcher.on('close', (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      reject(new Error(`fswatch exited with code ${code}`));
-    });
-  });
-}
-
-async function runWatchAll(argv) {
-  await Promise.all([runWatch(argv), runWatchState(argv)]);
+  stateWatcher.stop();
 }
 
 function loadVersion() {
@@ -2092,12 +2132,6 @@ async function main() {
       return;
     case 'watch':
       await runWatch(rest);
-      return;
-    case 'watch-state':
-      await runWatchState(rest);
-      return;
-    case 'watch-all':
-      await runWatchAll(rest);
       return;
     default:
       throw new Error(`Unknown command: ${command}`);
