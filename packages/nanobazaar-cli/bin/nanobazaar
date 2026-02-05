@@ -412,6 +412,74 @@ function parseArgs(argv) {
   return {flags, positionals};
 }
 
+function parseBoolish(value) {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (value === true || value === false) {
+    return value;
+  }
+  const raw = String(value).trim().toLowerCase();
+  if (!raw) {
+    return undefined;
+  }
+  if (raw === '0' || raw === 'false' || raw === 'no' || raw === 'off') {
+    return false;
+  }
+  if (raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on') {
+    return true;
+  }
+  return true;
+}
+
+function isDebugEnabled(flags) {
+  const flagValue = parseBoolish(flags ? flags.debug : undefined);
+  if (flagValue !== undefined) {
+    return flagValue;
+  }
+  return parseBoolish(getEnvValue('NBR_DEBUG')) === true;
+}
+
+function previewString(value, maxLen) {
+  if (value === undefined || value === null) {
+    return '';
+  }
+  const raw = String(value).replace(/\r/g, '\\r').replace(/\n/g, '\\n');
+  const limit = typeof maxLen === 'number' && Number.isFinite(maxLen) ? Math.max(0, Math.floor(maxLen)) : 0;
+  if (!limit || raw.length <= limit) {
+    return raw;
+  }
+  if (limit <= 3) {
+    return raw.slice(0, limit);
+  }
+  return raw.slice(0, limit - 3) + '...';
+}
+
+function previewJson(value, maxLen) {
+  try {
+    return previewString(JSON.stringify(value), maxLen);
+  } catch (_) {
+    return previewString(String(value), maxLen);
+  }
+}
+
+function createDebugLogger(enabled, scope) {
+  const on = !!enabled;
+  const tag = scope ? String(scope) : 'debug';
+  return (message, payload) => {
+    if (!on) {
+      return;
+    }
+    const ts = new Date().toISOString();
+    const prefix = `[${tag}][debug] ${ts}`;
+    if (payload === undefined) {
+      console.error(`${prefix} ${message}`);
+      return;
+    }
+    console.error(`${prefix} ${message} ${typeof payload === 'string' ? previewString(payload, 2000) : previewJson(payload, 4000)}`);
+  };
+}
+
 function readTextInput(value, label) {
   if (value === undefined || value === null) {
     return '';
@@ -675,6 +743,7 @@ Commands:
 Global flags:
   --help                     Show this help
   --version                  Print skill version
+  --debug                    Print verbose debug logs to stderr (or set NBR_DEBUG=1)
 
 Notes:
   - Defaults to relay: ${DEFAULT_RELAY_URL}
@@ -1298,6 +1367,7 @@ async function runJobPaymentSent(argv) {
 async function runPoll(argv, options) {
   const quiet = options && options.quiet;
   const {flags} = parseArgs(argv);
+  const debugLog = createDebugLogger(isDebugEnabled(flags), 'poll');
   const config = buildConfig();
   const state = loadState(config.state_path);
   const {keys} = requireKeys(state);
@@ -1306,6 +1376,17 @@ async function runPoll(argv, options) {
   const since = flags.sinceEventId || state.last_acked_event_id;
   const limit = flags.limit || config.poll_limit;
   const types = flags.types || config.poll_types;
+
+  debugLog('request', {
+    method: 'GET',
+    path: '/v0/poll',
+    since_event_id: since ?? null,
+    limit: limit ?? null,
+    types: types ?? null,
+    ack: flags.ack !== false,
+    relay_url: config.relay_url,
+    state_path: config.state_path,
+  });
 
   const result = await signedRequest({
     method: 'GET',
@@ -1329,7 +1410,8 @@ async function runPoll(argv, options) {
   }
 
   const events = result.data && result.data.events ? result.data.events : [];
-  appendEvents(state, events);
+  const addedEvents = appendEvents(state, events);
+  debugLog('response', {status: result.response.status, events: events.length, added: addedEvents});
 
   if (typeof state.last_acked_event_id !== 'number') {
     state.last_acked_event_id = 0;
@@ -1346,6 +1428,7 @@ async function runPoll(argv, options) {
     maxEventId = events.reduce((max, event) => Math.max(max, event.event_id), 0);
 
     // Ack only after events are durably persisted to local state.
+    debugLog('ack request', {up_to_event_id: maxEventId});
     const ackResult = await signedRequest({
       method: 'POST',
       path: '/v0/poll/ack',
@@ -1363,6 +1446,7 @@ async function runPoll(argv, options) {
     } else {
       ackedId = maxEventId;
     }
+    debugLog('ack ok', {last_acked_event_id: ackedId});
 
     if (typeof ackedId === 'number' && ackedId !== state.last_acked_event_id) {
       state.last_acked_event_id = ackedId;
@@ -1639,6 +1723,7 @@ function startStateWatcher(options) {
   const mode = String(opts.mode || 'now');
   const eventText = String(opts.eventText || 'NanoBazaar state changed');
   const debounceMs = typeof opts.debounceMs === 'number' ? opts.debounceMs : 250;
+  const debugLog = typeof opts.debugLog === 'function' ? opts.debugLog : null;
   const signal = opts.signal;
 
   if (!statePath) {
@@ -1677,10 +1762,20 @@ function startStateWatcher(options) {
       return;
     }
     lastWake = now;
+    if (debugLog) {
+      debugLog('local wake: invoking openclaw', {openclaw_bin: openclawBin, mode, event_text: eventText});
+    }
     const result = spawnSync(openclawBin, ['system', 'event', '--text', eventText, '--mode', mode], {stdio: 'inherit'});
     if (result.error) {
       openclawMissing = true;
       console.error(`[watch] Failed to run ${openclawBin}: ${result.error.message}. Local wakeups disabled.`);
+      if (debugLog) {
+        debugLog('local wake: openclaw failed', result.error && result.error.message ? result.error.message : String(result.error));
+      }
+      return;
+    }
+    if (debugLog) {
+      debugLog('local wake: openclaw ok');
     }
   }
 
@@ -1708,6 +1803,9 @@ function startStateWatcher(options) {
     buffer = parts.pop();
     if (parts.length === 0) {
       return;
+    }
+    if (debugLog) {
+      debugLog('local wake: fswatch event', {count: parts.length});
     }
     triggerWake();
   });
@@ -1738,6 +1836,7 @@ async function runWatch(argv) {
   requireFetch();
 
   const {flags} = parseArgs(argv);
+  const debugLog = createDebugLogger(isDebugEnabled(flags), 'watch');
   const config = buildConfig();
   const statePath = expandHomePath(String(flags.statePath || config.state_path));
   const state = loadState(statePath);
@@ -1771,6 +1870,17 @@ async function runWatch(argv) {
   ensureStreamCursorMap(state);
   const streamSet = new Set(streams);
 
+  debugLog('init', {
+    relay_url: config.relay_url,
+    state_path: statePath,
+    stream_path: streamPath,
+    streams,
+    safety_poll_interval_seconds: safetyIntervalSeconds,
+    ack: flags.ack !== false,
+    poll_limit: pollLimit ?? null,
+    print_polls: printPolls,
+  });
+
   let pollInFlight = false;
   let pollQueued = false;
   let queuedReason = null;
@@ -1800,6 +1910,7 @@ async function runWatch(argv) {
       body.limit = pollLimit;
     }
 
+    debugLog('poll/batch request', {reason, body});
     const result = await signedRequest({
       method: 'POST',
       path: '/v0/poll/batch',
@@ -1815,6 +1926,11 @@ async function runWatch(argv) {
     }
 
     const results = result.data && Array.isArray(result.data.results) ? result.data.results : [];
+    debugLog('poll/batch ok', results.map((entry) => ({
+      stream: entry && entry.stream ? entry.stream : null,
+      events: entry && Array.isArray(entry.events) ? entry.events.length : 0,
+      next: entry && typeof entry.next === 'number' ? entry.next : null,
+    })));
     const allEvents = [];
     for (const entry of results) {
       if (!entry || !Array.isArray(entry.events)) {
@@ -1829,6 +1945,16 @@ async function runWatch(argv) {
         } else {
           allEvents.push(event);
         }
+      }
+    }
+    if (allEvents.length > 0) {
+      for (const event of allEvents) {
+        debugLog('event', {
+          stream: event && event.stream ? event.stream : null,
+          event_id: event && event.event_id !== undefined ? event.event_id : null,
+          event_type: event && event.event_type ? event.event_type : null,
+          data_preview: event && event.data !== undefined ? previewJson(event.data, 500) : null,
+        });
       }
     }
 
@@ -1854,6 +1980,7 @@ async function runWatch(argv) {
           continue;
         }
 
+        debugLog('ack request', {stream: entry.stream, from: current, to: next});
         const ackResult = await signedRequest({
           method: 'POST',
           path: '/v0/ack',
@@ -1871,6 +1998,7 @@ async function runWatch(argv) {
         setStreamCursor(state, entry.stream, next);
         saveStateMerged(statePath, state);
         ackedStreams += 1;
+        debugLog('ack ok', {stream: entry.stream, ack: next});
       }
     }
 
@@ -1936,6 +2064,7 @@ async function runWatch(argv) {
     mode,
     eventText,
     debounceMs,
+    debugLog,
     signal,
   });
 
@@ -2005,8 +2134,14 @@ async function runWatch(argv) {
       await consumeSseStream(response.body, {
         signal,
         onEvent: (evt) => {
+          debugLog('sse event', {
+            event: evt && evt.event ? evt.event : null,
+            id: evt && evt.id ? evt.id : null,
+            data_preview: evt && evt.data ? previewString(evt.data, 500) : null,
+          });
           const wakeStreams = extractWakeStreams(evt);
           if (wakeStreams !== null) {
+            debugLog('wake detected', {streams: wakeStreams});
             void runPollLoop('wake', wakeStreams);
           }
         },
@@ -2070,8 +2205,13 @@ async function main() {
     return;
   }
 
-  const command = argv[0];
-  const rest = argv.slice(1);
+  const commandIndex = argv.findIndex((arg) => arg && arg !== '-' && !arg.startsWith('-'));
+  if (commandIndex === -1) {
+    printHelp();
+    return;
+  }
+  const command = argv[commandIndex];
+  const rest = argv.slice(0, commandIndex).concat(argv.slice(commandIndex + 1));
 
   switch (command) {
     case 'status':
