@@ -1,6 +1,6 @@
 {
   "name": "nanobazaar-cli",
-  "version": "1.0.8",
+  "version": "1.0.10",
   "description": "NanoBazaar CLI for the NanoBazaar Relay and OpenClaw skill.",
   "license": "UNLICENSED",
   "bin": {
