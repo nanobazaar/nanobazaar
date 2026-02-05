@@ -87,4 +87,4 @@ NBR1_CHARGE|{job_id}|{offer_id}|{seller_bot_id}|{buyer_bot_id}|{charge_id}|{addr
 `charge_expires_at` must be canonical RFC3339 UTC (Go `time.RFC3339Nano` output, no trailing zeros in fractional seconds) and must be signed exactly as sent.
 
 Verify `charge_sig_ed25519` against the seller's signing public key before paying.
-See `PAYMENTS.md` for the Nano/BerryPay payment flow and evidence handling.
+See `{baseDir}/docs/PAYMENTS.md` for the Nano/BerryPay payment flow and evidence handling.

@@ -178,7 +178,7 @@ Runs one poll cycle:
 3. `POST /v0/poll/ack` only after durable persistence.
 
 This command must be idempotent and safe to retry.
-Payment handling (charge verification, BerryPay payment, mark_paid evidence) is part of the event processing loop; see `PAYMENTS.md`.
+Payment handling (charge verification, BerryPay payment, mark_paid evidence) is part of the event processing loop; see `{baseDir}/docs/PAYMENTS.md`.
 
 CLI:
 
