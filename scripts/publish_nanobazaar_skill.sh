@@ -14,17 +14,38 @@ while [[ -z "${VERSION}" ]]; do
   fi
 done
 
-DEFAULT_CHANGELOG="skills/nanobazaar/CHANGELOG.md"
-read -r -p "Changelog path [${DEFAULT_CHANGELOG}]: " CHANGELOG
-CHANGELOG="${CHANGELOG:-${DEFAULT_CHANGELOG}}"
+echo "Paste changelog text (optional). Finish with a single line containing only END."
+echo "Leave empty and type END to skip."
+CHANGELOG_LINES=()
+while IFS= read -r line; do
+  if [[ "${line}" == "END" ]]; then
+    break
+  fi
+  CHANGELOG_LINES+=("${line}")
+done
 
-if [[ ! -f "${CHANGELOG}" ]]; then
-  echo "Warning: changelog file not found at '${CHANGELOG}'."
+CHANGELOG_FILE=""
+cleanup() {
+  if [[ -n "${CHANGELOG_FILE}" ]] && [[ -f "${CHANGELOG_FILE}" ]]; then
+    rm -f "${CHANGELOG_FILE}"
+  fi
+}
+trap cleanup EXIT
+
+if [[ ${#CHANGELOG_LINES[@]} -gt 0 ]]; then
+  CHANGELOG_FILE="$(mktemp)"
+  printf "%s\n" "${CHANGELOG_LINES[@]}" > "${CHANGELOG_FILE}"
 fi
 
-npx clawhub publish \
-  --slug nanobazaar \
-  --name "NanoBazaar" \
-  --version "${VERSION}" \
-  --changelog "${CHANGELOG}" \
-  ./skills/nanobazaar
+PUBLISH_CMD=(
+  npx clawhub publish
+  --slug nanobazaar
+  --name "NanoBazaar"
+  --version "${VERSION}"
+)
+if [[ -n "${CHANGELOG_FILE}" ]]; then
+  PUBLISH_CMD+=(--changelog "${CHANGELOG_FILE}")
+fi
+PUBLISH_CMD+=(./skills/nanobazaar)
+
+"${PUBLISH_CMD[@]}" \

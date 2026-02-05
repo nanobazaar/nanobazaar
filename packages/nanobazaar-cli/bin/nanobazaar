@@ -5,7 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
-const {spawnSync} = require('child_process');
+const {spawnSync, spawn} = require('child_process');
 
 const DEFAULT_RELAY_URL = 'https://relay.nanobazaar.ai';
 const ENC_ALG = 'libsodium.crypto_box_seal.x25519.xsalsa20poly1305';
@@ -30,6 +30,9 @@ const HOME_DIR = resolveHomeDir();
 const XDG_CONFIG_HOME = (process.env.XDG_CONFIG_HOME || '').trim();
 const CONFIG_BASE_DIR = XDG_CONFIG_HOME || path.join(HOME_DIR, '.config');
 const STATE_DEFAULT = path.join(CONFIG_BASE_DIR, 'nanobazaar', 'nanobazaar.json');
+const STATE_LOCK_RETRY_MS = 50;
+const STATE_LOCK_TIMEOUT_MS = 5000;
+let STATE_LOCK_SLEEP = null;
 
 function requireFetch() {
   if (typeof fetch !== 'function') {
@@ -80,6 +83,74 @@ function loadState(filePath) {
   }
 }
 
+function sleepSync(ms) {
+  if (!ms || ms <= 0) {
+    return;
+  }
+  if (typeof Atomics === 'object' && typeof SharedArrayBuffer === 'function') {
+    if (!STATE_LOCK_SLEEP) {
+      STATE_LOCK_SLEEP = new Int32Array(new SharedArrayBuffer(4));
+    }
+    Atomics.wait(STATE_LOCK_SLEEP, 0, 0, ms);
+    return;
+  }
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    // busy wait fallback
+  }
+}
+
+function acquireStateLock(filePath, options) {
+  const opts = options || {};
+  const timeoutMs = typeof opts.timeoutMs === 'number' ? opts.timeoutMs : STATE_LOCK_TIMEOUT_MS;
+  const retryMs = typeof opts.retryMs === 'number' ? opts.retryMs : STATE_LOCK_RETRY_MS;
+  const lockPath = `${filePath}.lock`;
+  const start = Date.now();
+  fs.mkdirSync(path.dirname(filePath), {recursive: true});
+  while (true) {
+    try {
+      const fd = fs.openSync(lockPath, 'wx');
+      fs.writeFileSync(fd, `${process.pid}\n${new Date().toISOString()}\n`);
+      return {fd, lockPath};
+    } catch (err) {
+      if (!err || err.code !== 'EEXIST') {
+        throw err;
+      }
+      if (Date.now() - start > timeoutMs) {
+        throw new Error(`Timed out waiting for state lock (${lockPath}). Remove it if no process is running.`);
+      }
+      sleepSync(retryMs);
+    }
+  }
+}
+
+function releaseStateLock(lock) {
+  if (!lock) {
+    return;
+  }
+  try {
+    if (typeof lock.fd === 'number') {
+      fs.closeSync(lock.fd);
+    }
+  } catch (_) {
+    // ignore close errors
+  }
+  try {
+    fs.unlinkSync(lock.lockPath);
+  } catch (_) {
+    // ignore unlink errors
+  }
+}
+
+function withStateLock(filePath, fn) {
+  const lock = acquireStateLock(filePath);
+  try {
+    return fn();
+  } finally {
+    releaseStateLock(lock);
+  }
+}
+
 function saveState(filePath, state) {
   fs.mkdirSync(path.dirname(filePath), {recursive: true});
   fs.writeFileSync(filePath, JSON.stringify(state, null, 2));
@@ -89,6 +160,13 @@ function saveState(filePath, state) {
     // ignore chmod errors on unsupported platforms
   }
 }
+
+const DEFAULT_STATE_MERGE = Object.freeze({
+  mergeLastAcked: true,
+  mergeStreamCursors: true,
+  mergeKnownMaps: true,
+  mergeEventLog: true,
+});
 
 function mergeMapField(state, disk, field, keyField) {
   if (!disk || !disk[field]) {
@@ -177,8 +255,11 @@ function mergeStateFromDisk(filePath, state, options) {
 }
 
 function saveStateMerged(filePath, state, options) {
-  mergeStateFromDisk(filePath, state, options);
-  saveState(filePath, state);
+  const opts = options || DEFAULT_STATE_MERGE;
+  withStateLock(filePath, () => {
+    mergeStateFromDisk(filePath, state, opts);
+    saveState(filePath, state);
+  });
 }
 
 function getEnvValue(name) {
@@ -587,6 +668,13 @@ Commands:
                              Poll events and optionally ack
   watch [--streams a,b] [--stream-path /v0/stream] [--safety-poll-interval <seconds>]
                              Maintain SSE connection; poll on wake + on safety interval
+  watch-state [--state-path <path>] [--openclaw-bin <bin>] [--fswatch-bin <bin>]
+              [--event-text <text>] [--mode now|next] [--debounce-ms <ms>]
+                             Watch state file and trigger OpenClaw wakeups
+  watch-all [--streams a,b] [--stream-path /v0/stream] [--safety-poll-interval <seconds>]
+            [--state-path <path>] [--openclaw-bin <bin>] [--fswatch-bin <bin>]
+            [--event-text <text>] [--mode now|next] [--debounce-ms <ms>]
+                             Run relay watch + state watcher together (recommended)
   cron enable [--schedule "*/5 * * * *"]
                              Install cron entry to run poll
   cron disable               Remove the cron entry
@@ -727,12 +815,7 @@ async function runSearch(argv) {
   state.bot_id = identity.botId;
   state.signing_kid = identity.signingKid;
   state.encryption_kid = identity.encryptionKid;
-  saveStateMerged(config.state_path, state, {
-    mergeLastAcked: true,
-    mergeStreamCursors: true,
-    mergeKnownMaps: true,
-    mergeEventLog: true,
-  });
+  saveStateMerged(config.state_path, state);
 
   printJson(result.data, !!flags.compact);
 }
@@ -845,7 +928,7 @@ async function runOfferCreate(argv) {
   state.bot_id = identity.botId;
   state.signing_kid = identity.signingKid;
   state.encryption_kid = identity.encryptionKid;
-  saveState(config.state_path, state);
+  saveStateMerged(config.state_path, state);
 
   printJson(result.data, !!flags.compact);
 }
@@ -883,7 +966,7 @@ async function runOfferCancel(argv) {
   state.bot_id = identity.botId;
   state.signing_kid = identity.signingKid;
   state.encryption_kid = identity.encryptionKid;
-  saveState(config.state_path, state);
+  saveStateMerged(config.state_path, state);
 
   printJson(result.data, !!flags.compact);
 }
@@ -1084,7 +1167,7 @@ async function runJobCreate(argv) {
   state.bot_id = identity.botId;
   state.signing_kid = identity.signingKid;
   state.encryption_kid = identity.encryptionKid;
-  saveState(config.state_path, state);
+  saveStateMerged(config.state_path, state);
 
   printJson(result.data, !!flags.compact);
 }
@@ -1262,7 +1345,7 @@ async function runPoll(argv, options) {
   state.bot_id = identity.botId;
   state.signing_kid = identity.signingKid;
   state.encryption_kid = identity.encryptionKid;
-  saveState(config.state_path, state);
+  saveStateMerged(config.state_path, state);
 
   let ackedId = state.last_acked_event_id || 0;
   let maxEventId = 0;
@@ -1290,12 +1373,7 @@ async function runPoll(argv, options) {
 
     if (typeof ackedId === 'number' && ackedId !== state.last_acked_event_id) {
       state.last_acked_event_id = ackedId;
-      saveStateMerged(config.state_path, state, {
-        mergeLastAcked: true,
-        mergeStreamCursors: true,
-        mergeKnownMaps: true,
-        mergeEventLog: true,
-      });
+      saveStateMerged(config.state_path, state);
     }
   }
 
@@ -1656,12 +1734,7 @@ async function runWatch(argv) {
 
     const addedEvents = appendEvents(state, allEvents);
     if (addedEvents > 0) {
-      saveStateMerged(config.state_path, state, {
-        mergeLastAcked: true,
-        mergeStreamCursors: true,
-        mergeKnownMaps: true,
-        mergeEventLog: true,
-      });
+      saveStateMerged(config.state_path, state);
     }
 
     let ackedStreams = 0;
@@ -1691,12 +1764,7 @@ async function runWatch(argv) {
         }
 
         setStreamCursor(state, entry.stream, next);
-        saveStateMerged(config.state_path, state, {
-          mergeLastAcked: true,
-          mergeStreamCursors: true,
-          mergeKnownMaps: true,
-          mergeEventLog: true,
-        });
+        saveStateMerged(config.state_path, state);
         ackedStreams += 1;
       }
     }
@@ -1848,6 +1916,85 @@ async function runWatch(argv) {
   }
 
   clearInterval(safetyTimer);
+}
+
+async function runWatchState(argv) {
+  const {flags} = parseArgs(argv);
+  const config = buildConfig();
+  const statePath = expandHomePath(String(flags.statePath || config.state_path));
+  const fswatchBin = String(flags.fswatchBin || 'fswatch');
+  const openclawBin = String(flags.openclawBin || 'openclaw');
+  const mode = String(flags.mode || 'now');
+  const eventText = String(flags.eventText || 'NanoBazaar state changed');
+  const debounceMs = flags.debounceMs
+    ? parsePositiveInt(flags.debounceMs, '--debounce-ms')
+    : 250;
+
+  if (!fs.existsSync(statePath)) {
+    console.error(`State file not found at ${statePath}. Waiting for it to appear...`);
+  }
+
+  let buffer = '';
+  let lastWake = 0;
+  let openclawMissing = false;
+
+  function triggerWake() {
+    if (openclawMissing) {
+      return;
+    }
+    const now = Date.now();
+    if (debounceMs && now - lastWake < debounceMs) {
+      return;
+    }
+    lastWake = now;
+    const result = spawnSync(openclawBin, ['system', 'event', '--text', eventText, '--mode', mode], {stdio: 'inherit'});
+    if (result.error) {
+      openclawMissing = true;
+      console.error(`Failed to run ${openclawBin}: ${result.error.message}`);
+    }
+  }
+
+  return new Promise((resolve, reject) => {
+    const watcher = spawn(fswatchBin, ['-0', '-o', statePath], {stdio: ['ignore', 'pipe', 'inherit']});
+
+    watcher.on('error', (err) => {
+      if (err && err.code === 'ENOENT') {
+        reject(new Error(`fswatch not found. Install it (macOS: brew install fswatch).`));
+        return;
+      }
+      reject(new Error(`Failed to start fswatch: ${err && err.message ? err.message : String(err)}`));
+    });
+
+    watcher.stdout.on('data', (chunk) => {
+      buffer += chunk.toString('utf8');
+      const parts = buffer.split('\0');
+      buffer = parts.pop();
+      if (parts.length === 0) {
+        return;
+      }
+      triggerWake();
+    });
+
+    const forwardSignal = (signal) => {
+      if (!watcher.killed) {
+        watcher.kill(signal);
+      }
+    };
+    process.on('SIGINT', () => forwardSignal('SIGINT'));
+    process.on('SIGTERM', () => forwardSignal('SIGTERM'));
+
+    watcher.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`fswatch exited with code ${code}`));
+    });
+  });
+}
+
+async function runWatchAll(argv) {
+  await Promise.all([runWatch(argv), runWatchState(argv)]);
 }
 
 function runCronEnable(argv) {
@@ -2011,6 +2158,12 @@ async function main() {
       return;
     case 'watch':
       await runWatch(rest);
+      return;
+    case 'watch-state':
+      await runWatchState(rest);
+      return;
+    case 'watch-all':
+      await runWatchAll(rest);
       return;
     case 'cron': {
       const sub = rest[0];

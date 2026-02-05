@@ -30,6 +30,9 @@ const HOME_DIR = resolveHomeDir();
 const XDG_CONFIG_HOME = (process.env.XDG_CONFIG_HOME || '').trim();
 const CONFIG_BASE_DIR = XDG_CONFIG_HOME || path.join(HOME_DIR, '.config');
 const STATE_DEFAULT = path.join(CONFIG_BASE_DIR, 'nanobazaar', 'nanobazaar.json');
+const STATE_LOCK_RETRY_MS = 50;
+const STATE_LOCK_TIMEOUT_MS = 5000;
+let STATE_LOCK_SLEEP = null;
 
 const args = new Set(process.argv.slice(2));
 const installBerryPay = !args.has('--no-install-berrypay');
@@ -83,6 +86,74 @@ function loadState(filePath) {
   }
 }
 
+function sleepSync(ms) {
+  if (!ms || ms <= 0) {
+    return;
+  }
+  if (typeof Atomics === 'object' && typeof SharedArrayBuffer === 'function') {
+    if (!STATE_LOCK_SLEEP) {
+      STATE_LOCK_SLEEP = new Int32Array(new SharedArrayBuffer(4));
+    }
+    Atomics.wait(STATE_LOCK_SLEEP, 0, 0, ms);
+    return;
+  }
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    // busy wait fallback
+  }
+}
+
+function acquireStateLock(filePath, options) {
+  const opts = options || {};
+  const timeoutMs = typeof opts.timeoutMs === 'number' ? opts.timeoutMs : STATE_LOCK_TIMEOUT_MS;
+  const retryMs = typeof opts.retryMs === 'number' ? opts.retryMs : STATE_LOCK_RETRY_MS;
+  const lockPath = `${filePath}.lock`;
+  const start = Date.now();
+  fs.mkdirSync(path.dirname(filePath), {recursive: true});
+  while (true) {
+    try {
+      const fd = fs.openSync(lockPath, 'wx');
+      fs.writeFileSync(fd, `${process.pid}\n${new Date().toISOString()}\n`);
+      return {fd, lockPath};
+    } catch (err) {
+      if (!err || err.code !== 'EEXIST') {
+        throw err;
+      }
+      if (Date.now() - start > timeoutMs) {
+        throw new Error(`Timed out waiting for state lock (${lockPath}). Remove it if no process is running.`);
+      }
+      sleepSync(retryMs);
+    }
+  }
+}
+
+function releaseStateLock(lock) {
+  if (!lock) {
+    return;
+  }
+  try {
+    if (typeof lock.fd === 'number') {
+      fs.closeSync(lock.fd);
+    }
+  } catch (_) {
+    // ignore close errors
+  }
+  try {
+    fs.unlinkSync(lock.lockPath);
+  } catch (_) {
+    // ignore unlink errors
+  }
+}
+
+function withStateLock(filePath, fn) {
+  const lock = acquireStateLock(filePath);
+  try {
+    return fn();
+  } finally {
+    releaseStateLock(lock);
+  }
+}
+
 function saveState(filePath, state) {
   fs.mkdirSync(path.dirname(filePath), {recursive: true});
   fs.writeFileSync(filePath, JSON.stringify(state, null, 2));
@@ -91,6 +162,14 @@ function saveState(filePath, state) {
   } catch (_) {
     // ignore chmod errors on unsupported platforms
   }
+}
+
+function writeStateLocked(filePath, updateFn) {
+  withStateLock(filePath, () => {
+    const disk = loadState(filePath);
+    const next = updateFn(disk && typeof disk === 'object' ? disk : {});
+    saveState(filePath, next);
+  });
 }
 
 function getEnvValue(name) {
@@ -274,16 +353,18 @@ async function main() {
     }
   }
 
-  state.relay_url = relayUrl;
-  state.bot_id = botId;
-  state.signing_kid = signingKid;
-  state.encryption_kid = encryptionKid;
-  state.keys = keys;
-  if (typeof state.last_acked_event_id !== 'number') {
-    state.last_acked_event_id = 0;
-  }
-
-  saveState(statePath, state);
+  writeStateLocked(statePath, (disk) => {
+    const next = disk && typeof disk === 'object' ? disk : {};
+    next.relay_url = relayUrl;
+    next.bot_id = botId;
+    next.signing_kid = signingKid;
+    next.encryption_kid = encryptionKid;
+    next.keys = keys;
+    if (typeof next.last_acked_event_id !== 'number') {
+      next.last_acked_event_id = 0;
+    }
+    return next;
+  });
 
   const berrypayInstalled = ensureBerryPay();
 

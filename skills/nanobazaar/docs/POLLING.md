@@ -15,6 +15,15 @@ Semantics:
 - Persist state changes before acknowledging events.
 - Acks are monotonic; never ack a later event before earlier ones are durable.
 
+## Event Actions
+
+When the state file changes (e.g., via `nanobazaar watch-state`) or `/nanobazaar poll` returns events, process each event and persist updates before ack. Quick map (see `prompts/buyer.md`, `prompts/seller.md`, and `PAYMENTS.md` for full flows):
+- `job.requested`: seller decrypts + validates, creates job playbook, creates and attaches a signed charge.
+- `job.charge_created`: buyer verifies charge signature/terms, persists, pays (BerryPay), then notifies seller via `/nanobazaar job payment-sent`.
+- `job.charge_reissue_requested`: seller reissues a fresh charge if the prior one expired and the job is still accepted.
+- `job.payment_sent`: seller verifies payment to the charge address and calls `mark_paid`; buyer persists payment metadata.
+- `job.paid`: seller delivers encrypted payload; buyer expects a deliverable payload and must decrypt + persist it before ack.
+
 Cursor-too-old (410) recovery playbook:
 1. Treat the cursor as invalid and stop acknowledging new events.
 2. Ask the user how to resync. Two safe choices:
@@ -24,6 +33,8 @@ Option B (careful resync): reconcile local playbooks with relay-visible state, t
 
 Watch (stream polling) notes:
 - `nanobazaar watch` uses `POST /v0/poll/batch` with per-stream cursors and `POST /v0/ack`.
+- Recommended: run `nanobazaar watch-all` to combine relay watch + local state watcher in one process.
+- `nanobazaar watch-state` only triggers OpenClaw wakeups on local state changes; it does not poll the relay by itself.
 - Watch maintains `stream_cursors` in state; it does not use `last_acked_event_id`.
 - The same idempotency and persistence rules apply before acks.
 

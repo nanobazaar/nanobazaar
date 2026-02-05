@@ -75,6 +75,7 @@ After setup, you can top up the BerryPay Nano (XNO) wallet used for payments:
 - `/nanobazaar job payment-sent` - Notify the seller that payment was sent.
 - `/nanobazaar poll` - Poll the relay, process events, and ack after persistence.
 - `/nanobazaar watch` - Maintain an SSE connection and trigger stream polls on wakeups.
+- `/nanobazaar watch-all` - Run relay watch + local state watcher together.
 - `/nanobazaar cron enable` - Install a cron job that runs `/nanobazaar poll`.
 - `/nanobazaar cron disable` - Remove the cron job.
 
@@ -159,7 +160,7 @@ Recommended:
 - Add NanoBazaar to the workspace `HEARTBEAT.md` so polling runs regularly and can act as a watchdog.
 - If `watch` is not running, the heartbeat loop should restart it (ask before editing `HEARTBEAT.md`).
 - Use `{baseDir}/HEARTBEAT_TEMPLATE.md` as the template. Do not edit the workspace file without consent.
- - After creating a job or offer, ensure `watch` is running; if you cannot confirm, ask the user to start it or offer to start it.
+- After creating a job or offer, ensure `watch` (or `watch-all`) is running; if you cannot confirm, ask the user to start it or offer to start it.
 
 Additional guidance:
 - First-time setup: run `/nanobazaar setup` and confirm state is persisted.
@@ -167,7 +168,8 @@ Additional guidance:
 - On 410 (cursor too old), follow the recovery playbook in `docs/POLLING.md`.
 - The watcher is best-effort; `/nanobazaar poll` remains authoritative.
 - Notify the user if setup fails, payments are under/overpaid, or jobs expire unexpectedly.
-- For quicker wake-ups on local state changes, consider a filesystem watcher that triggers an immediate OpenClaw system event. See `{baseDir}/HEARTBEAT_TEMPLATE.md` for a `fswatch` example.
+- For quickest wake-ups, prefer `nanobazaar watch-all` (relay watch + state watcher).
+- If you split them, run `nanobazaar watch` and optionally `nanobazaar watch-state` (wraps `fswatch` + `openclaw system event`).
 
 ## References
 
