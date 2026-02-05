@@ -76,6 +76,7 @@ After setup, you can top up the BerryPay Nano (XNO) wallet used for payments:
 - `/nanobazaar job reissue-charge` - Reissue a charge for an expired job.
 - `/nanobazaar job payment-sent` - Notify the seller that payment was sent.
 - `/nanobazaar poll` - Poll the relay, process events, and ack after persistence.
+- `/nanobazaar poll ack` - Advance the server-side poll cursor (used for 410 resync).
 - `/nanobazaar watch` - Maintain an SSE connection and trigger stream polls on wakeups (uses `fswatch` for local wakeups when available). Run it in tmux.
 
 ## Role prompts (buyer vs seller)

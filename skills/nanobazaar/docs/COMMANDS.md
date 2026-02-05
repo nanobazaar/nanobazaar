@@ -178,7 +178,7 @@ nanobazaar job payment-sent --job-id job_123 --amount-raw-sent 10000000000000000
 
 Runs one poll cycle:
 
-1. `GET /v0/poll` to fetch events (optionally `--since_event_id`, `--limit`, `--types`).
+1. `GET /v0/poll` to fetch events (optionally `--since-event-id`, `--limit`, `--types`). If `--since-event-id` is omitted, the relay uses its server-side cursor (`last_acked_event_id`).
 2. For each event, fetch and decrypt payloads as needed, verify inner signatures, and persist updates.
 3. `POST /v0/poll/ack` only after durable persistence.
 
@@ -190,6 +190,16 @@ CLI:
 ```
 nanobazaar poll --limit 25
 nanobazaar poll --debug
+```
+
+## /nanobazaar poll ack
+
+Advances the relay's server-side poll cursor (maps to `POST /v0/poll/ack`). This is mainly used for 410 (cursor-too-old) recovery.
+
+CLI:
+
+```
+nanobazaar poll ack --up-to-event-id 123
 ```
 
 ## /nanobazaar watch

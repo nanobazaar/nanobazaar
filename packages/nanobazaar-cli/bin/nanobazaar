@@ -734,6 +734,8 @@ Commands:
                              Notify seller that payment was sent
   poll [--since-event-id <id>] [--limit <n>] [--types a,b] [--no-ack]
                              Poll events and optionally ack
+  poll ack --up-to-event-id <id>
+                             Advance the server-side poll cursor (used for 410 resync)
   watch [--streams a,b] [--stream-path /v0/stream] [--safety-poll-interval <seconds>]
         [--state-path <path>] [--openclaw-bin <bin>] [--fswatch-bin <bin>]
         [--event-text <text>] [--mode now|next] [--debounce-ms <ms>]
@@ -749,6 +751,7 @@ Notes:
   - Defaults to relay: ${DEFAULT_RELAY_URL}
   - Uses NBR_STATE_PATH for local state (default: ${STATE_DEFAULT})
   - Job payloads are encrypted with libsodium (install deps in skills/nanobazaar)
+  - If --since-event-id is omitted, /v0/poll uses the relay's server-side cursor (last_acked_event_id)
 `);
 }
 
@@ -1373,7 +1376,10 @@ async function runPoll(argv, options) {
   const {keys} = requireKeys(state);
   const identity = deriveIdentity(keys);
 
-  const since = flags.sinceEventId || state.last_acked_event_id;
+  // NOTE: By default, rely on the relay's server-side cursor (last_acked_event_id).
+  // Passing a local cursor can silently skip events if the state file is reused
+  // across relays/bots. Use --since-event-id explicitly to override.
+  const since = flags.sinceEventId;
   const limit = flags.limit || config.poll_limit;
   const types = flags.types || config.poll_types;
 
@@ -1413,7 +1419,7 @@ async function runPoll(argv, options) {
   const addedEvents = appendEvents(state, events);
   debugLog('response', {status: result.response.status, events: events.length, added: addedEvents});
 
-  if (typeof state.last_acked_event_id !== 'number') {
+  if (typeof state.last_acked_event_id !== 'number' || !Number.isFinite(state.last_acked_event_id)) {
     state.last_acked_event_id = 0;
   }
   state.relay_url = config.relay_url;
@@ -1448,9 +1454,16 @@ async function runPoll(argv, options) {
     }
     debugLog('ack ok', {last_acked_event_id: ackedId});
 
-    if (typeof ackedId === 'number' && ackedId !== state.last_acked_event_id) {
+    if (typeof ackedId === 'number' && Number.isFinite(ackedId) && ackedId !== state.last_acked_event_id) {
       state.last_acked_event_id = ackedId;
-      saveStateMerged(config.state_path, state);
+      // Write the authoritative server-side cursor as-is (even if it moves "backwards"
+      // compared to a stale local file).
+      saveStateMerged(config.state_path, state, {
+        mergeLastAcked: false,
+        mergeStreamCursors: true,
+        mergeKnownMaps: true,
+        mergeEventLog: true,
+      });
     }
   }
 
@@ -1461,6 +1474,56 @@ async function runPoll(argv, options) {
   }
 
   return {events, ackedId, maxEventId};
+}
+
+async function runPollAck(argv) {
+  const {flags, positionals} = parseArgs(argv);
+  const value = flags.upToEventId ?? flags.upTo ?? flags.eventId ?? flags.id ?? positionals[0];
+  if (value === undefined || value === null || String(value).trim() === '') {
+    throw new Error('Missing up_to_event_id. Provide --up-to-event-id or a positional id.');
+  }
+  const parsed = Number(String(value));
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`Invalid up_to_event_id: ${value}`);
+  }
+  const upToEventId = Math.floor(parsed);
+
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  const result = await signedRequest({
+    method: 'POST',
+    path: '/v0/poll/ack',
+    body: {up_to_event_id: upToEventId},
+    idempotencyKey: crypto.randomBytes(16).toString('hex'),
+    relayUrl: config.relay_url,
+    keys,
+    identity,
+  });
+
+  if (!result.response.ok) {
+    throw new Error(`Ack failed (${result.response.status}): ${result.text || result.response.statusText}`);
+  }
+
+  const ackedId = result.data && typeof result.data.last_acked_event_id === 'number'
+    ? result.data.last_acked_event_id
+    : upToEventId;
+
+  state.last_acked_event_id = ackedId;
+  state.relay_url = config.relay_url;
+  state.bot_id = identity.botId;
+  state.signing_kid = identity.signingKid;
+  state.encryption_kid = identity.encryptionKid;
+  saveStateMerged(config.state_path, state, {
+    mergeLastAcked: false,
+    mergeStreamCursors: true,
+    mergeKnownMaps: true,
+    mergeEventLog: true,
+  });
+
+  printJson(result.data, !!flags.compact);
 }
 
 function parseCsv(value) {
@@ -2268,6 +2331,10 @@ async function main() {
       throw new Error('Unknown job command. Use: job create|reissue-request|reissue-charge|payment-sent');
     }
     case 'poll':
+      if (rest[0] === 'ack') {
+        await runPollAck(rest.slice(1));
+        return;
+      }
       await runPoll(rest);
       return;
     case 'watch':
