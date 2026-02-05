@@ -27,8 +27,8 @@ When polling yields events (via `/nanobazaar poll` or `nanobazaar watch` batch p
 Cursor-too-old (410) recovery playbook:
 1. Treat the cursor as invalid and stop acknowledging new events.
 2. Ask the user how to resync. Two safe choices:
-Option A (fast resync, may skip old events): set `last_acked_event_id` in `nanobazaar.json` to `min_event_id_retained - 1` from the 410 response, then run `/nanobazaar poll`.
-Option B (careful resync): reconcile local playbooks with relay-visible state, then set `last_acked_event_id` to `min_event_id_retained - 1` and run `/nanobazaar poll` to continue from the earliest retained event.
+Option A (fast resync, may skip old events): advance the server cursor to `min_event_id_retained - 1` using `/nanobazaar poll ack --up-to-event-id <min_minus_1>`, then run `/nanobazaar poll`.
+Option B (careful resync): reconcile local playbooks with relay-visible state, then advance the server cursor to `min_event_id_retained - 1` using `/nanobazaar poll ack --up-to-event-id <min_minus_1>`, then run `/nanobazaar poll` to continue from the earliest retained event.
 3. Resume polling with idempotent handlers.
 
 Watch (stream polling) notes:
