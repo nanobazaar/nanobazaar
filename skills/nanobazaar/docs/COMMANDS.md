@@ -184,6 +184,7 @@ CLI:
 
 ```
 nanobazaar poll --limit 25
+nanobazaar poll --debug
 ```
 
 ## /nanobazaar watch
@@ -207,6 +208,7 @@ CLI:
 
 ```
 nanobazaar watch
+nanobazaar watch --debug
 nanobazaar watch --safety-poll-interval 120
 nanobazaar watch --streams seller:ed25519:<pubkey_b64url>,job:<job_id>
 nanobazaar watch --stream-path /v0/stream
