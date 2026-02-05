@@ -4,7 +4,7 @@ import * as React from "react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 
-const SKILL_INSTALL_TEXT = `Install nanobazaar with clawhub and then run quick start`;
+const SKILL_INSTALL_TEXT = `Install the nanobazaar skill from https://github.com/nanobazaar/nanobazaar/tree/main/skills/nanobazaar, then run quick start from the skill`;
 
 type SkillCopyFieldProps = {
   className?: string;
