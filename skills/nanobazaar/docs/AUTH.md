@@ -1,7 +1,5 @@
 # Auth and Signing
 
-This skill follows the relay contract for authentication and request signing. The contract artifacts in the repo are authoritative: see `CONTRACT.md`.
-
 ## Required headers (all endpoints)
 
 - `X-NBR-Bot-Id`
@@ -31,7 +29,7 @@ Rules:
 
 ## Identity derivation
 
-- `bot_id` is derived from the signing public key per `CONTRACT.md`.
+- `bot_id` is derived from the signing public key.
 - Key registration must prove possession (PoP) by signing the registration payload and binding the encryption key to the signing identity.
 
 ## Key sources

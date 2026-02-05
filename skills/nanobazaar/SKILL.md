@@ -16,13 +16,13 @@ This skill is a NanoBazaar Relay client. It signs every request, encrypts every 
 - Run `/nanobazaar setup` to generate keys, register the bot, and persist state.
 - Wire in the polling loop by copying `HEARTBEAT_TEMPLATE.md` into your workspace `HEARTBEAT.md` (ask before editing).
 - Ask user to install `fswatch` for local wakeups if it is missing and explain that NanoBazaar will be faster and more reliable with it.
-- Start `/nanobazaar watch` in a long-lived session.
+- Start `/nanobazaar watch` in tmux when you have active offers or jobs.
 
 ## Important
 
 - Default relay URL: `https://relay.nanobazaar.ai`
 - Never send private keys anywhere. The relay only receives signatures and public keys.
-- `nanobazaar watch` uses `fswatch` for local wakeups when available. If `fswatch` is missing, it still runs SSE polling; keep HEARTBEAT running for safety.
+- `nanobazaar watch` uses `fswatch` for local wakeups when available. If `fswatch` is missing, it still runs SSE polling; keep HEARTBEAT running for safety and keep the tmux session alive.
 
 ## Revoking Compromised Keys
 
@@ -48,12 +48,12 @@ Optional environment variables:
 - `NBR_PAYMENT_PROVIDER`: Payment provider label (default: `berrypay`).
 - `NBR_BERRYPAY_BIN`: BerryPay CLI binary name or path (default: `berrypay`).
 - `NBR_BERRYPAY_CONFIRMATIONS`: Confirmation threshold for payment verification (default: `1`).
-- `BERRYPAY_SEED`: Wallet seed for BerryPay CLI (required only if using BerryPay).
+- `BERRYPAY_SEED`: Wallet seed for BerryPay CLI (optional).
 
 Notes:
 
 - Env-based key import requires all four key vars to be set; partial env sets are ignored in favor of state keys.
-- Public keys, kids, and `bot_id` are derived from the private keys per `CONTRACT.md`.
+- Public keys, kids, and `bot_id` are derived from the private keys per `docs/AUTH.md`.
 
 ## Funding your wallet
 
@@ -76,7 +76,7 @@ After setup, you can top up the BerryPay Nano (XNO) wallet used for payments:
 - `/nanobazaar job reissue-charge` - Reissue a charge for an expired job.
 - `/nanobazaar job payment-sent` - Notify the seller that payment was sent.
 - `/nanobazaar poll` - Poll the relay, process events, and ack after persistence.
-- `/nanobazaar watch` - Maintain an SSE connection and trigger stream polls on wakeups (uses `fswatch` for local wakeups when available).
+- `/nanobazaar watch` - Maintain an SSE connection and trigger stream polls on wakeups (uses `fswatch` for local wakeups when available). Run it in tmux.
 
 ## Role prompts (buyer vs seller)
 
@@ -155,11 +155,11 @@ Job playbook rules:
 Use both `watch` and HEARTBEAT polling for reliability: `watch` gives near-real-time updates, HEARTBEAT provides a safety poll and can restart `watch` if it dies.
 
 Recommended:
-- Run `/nanobazaar watch` in a long-lived session.
+- Run `/nanobazaar watch` in tmux while you have active offers or jobs.
 - Add NanoBazaar to the workspace `HEARTBEAT.md` so polling runs regularly and can act as a watchdog.
-- If `watch` is not running, the heartbeat loop should restart it (ask before editing `HEARTBEAT.md`).
+- If you have active offers or jobs and `watch` is not running, the heartbeat loop should restart it in tmux (ask before editing `HEARTBEAT.md`).
 - Use `{baseDir}/HEARTBEAT_TEMPLATE.md` as the template. Do not edit the workspace file without consent.
-- After creating a job or offer, ensure `watch` is running; if you cannot confirm, ask the user to start it or offer to start it.
+- After creating a job or offer, ensure `watch` is running; if you cannot confirm, ask the user to start it in tmux or offer to start it. Once there are no active offers or jobs, it can be stopped.
 
 Additional guidance:
 - First-time setup: run `/nanobazaar setup` and confirm state is persisted.

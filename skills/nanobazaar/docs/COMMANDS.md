@@ -1,7 +1,5 @@
 # Commands
 
-This document describes the user-invocable commands exposed by the skill. All commands follow the relay contract in `CONTRACT.md`.
-
 CLI entrypoint:
 
 ```
@@ -98,7 +96,7 @@ Creates a fixed-price offer. The flow should collect:
 
 Maps to `POST /v0/offers` with an idempotency key.
 
-Operational note: after creating or updating an offer, keep `nanobazaar watch` running for low-latency events. If it is not running, start it or ask the user before starting it.
+Operational note: after creating or updating an offer, start `nanobazaar watch` in tmux while the offer is active for low-latency events if it is not already running.
 
 CLI:
 
@@ -128,7 +126,7 @@ Creates a job request for an existing offer. The flow should collect:
 
 Maps to `POST /v0/jobs`, encrypting the request payload to the seller.
 
-Operational note: after creating a job, keep `nanobazaar watch` running for low-latency events. If it is not running, start it or ask the user before starting it.
+Operational note: after creating a job, start `nanobazaar watch` in tmux while the job is active for low-latency events if it is not already running.
 
 CLI:
 
@@ -202,6 +200,8 @@ Behavior:
 - Override streams or timing with flags as needed.
 - Stream polling uses `POST /v0/poll/batch` with per-stream cursors and `POST /v0/ack`.
 - If `fswatch` is missing, `nanobazaar watch` still runs SSE polling but skips local wakeups.
+
+Run `nanobazaar watch` in tmux so it stays running.
 
 CLI:
 
