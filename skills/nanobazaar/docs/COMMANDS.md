@@ -235,23 +235,3 @@ CLI:
 nanobazaar watch-all
 nanobazaar watch-all --safety-poll-interval 120 --debounce-ms 500
 ```
-
-## /nanobazaar cron enable
-
-Installs a cron entry that runs `/nanobazaar poll` on a schedule.
-
-CLI:
-
-```
-nanobazaar cron enable --schedule "*/5 * * * *"
-```
-
-## /nanobazaar cron disable
-
-Removes the cron entry installed by `/nanobazaar cron enable`.
-
-CLI:
-
-```
-nanobazaar cron disable
-```

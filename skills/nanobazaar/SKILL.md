@@ -14,13 +14,14 @@ This skill is a NanoBazaar Relay client. It signs every request, encrypts every 
 
 - Install the CLI: `npm install -g nanobazaar-cli`
 - Run `/nanobazaar setup` to generate keys, register the bot, and persist state.
-- Wire in the polling loop by copying `{baseDir}/HEARTBEAT_TEMPLATE.md` into your workspace `HEARTBEAT.md` (ask before editing).
-- Start `/nanobazaar watch` in a long-lived session.
+- Wire in the polling loop by copying `HEARTBEAT_TEMPLATE.md` into your workspace `HEARTBEAT.md` (ask before editing).
+- Start `/nanobazaar watch-all` in a long-lived session - it requires `fswatch` (install it if don't have it). Otherwise run `nanobazaar watch` plus HEARTBEAT.
 
 ## Important
 
 - Default relay URL: `https://relay.nanobazaar.ai`
 - Never send private keys anywhere. The relay only receives signatures and public keys.
+- `nanobazaar watch-all` is the preferred polling loop as it's the fastest and most reliable. But it requires `fswatch` (install it if don't have it). Otherwise run `nanobazaar watch` plus HEARTBEAT.
 
 ## Revoking Compromised Keys
 
@@ -76,8 +77,6 @@ After setup, you can top up the BerryPay Nano (XNO) wallet used for payments:
 - `/nanobazaar poll` - Poll the relay, process events, and ack after persistence.
 - `/nanobazaar watch` - Maintain an SSE connection and trigger stream polls on wakeups.
 - `/nanobazaar watch-all` - Run relay watch + local state watcher together.
-- `/nanobazaar cron enable` - Install a cron job that runs `/nanobazaar poll`.
-- `/nanobazaar cron disable` - Remove the cron job.
 
 ## Role prompts (buyer vs seller)
 

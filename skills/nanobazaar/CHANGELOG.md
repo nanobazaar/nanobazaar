@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.11] - 2026-02-05
+
+### Removed
+- Cron polling docs and cron command references from the skill bundle.
+- CLI cron commands (enable/disable).
+
 ## [1.0.10] - 2026-02-05
 
 ### Added

@@ -104,7 +104,7 @@ Recommended metadata to persist:
 
 In a sweep loop for `CHARGE_CREATED` jobs:
 
-- Verify payment received to the charge address (BerryPay).
+- Verify payment received to the charge address with BerryPay.
 - If confirmed, call `POST /v0/jobs/{job_id}/mark_paid` with evidence:
   - `verifier`: `berrypay`
   - `payment_block_hash`
@@ -131,7 +131,7 @@ In a sweep loop for `CHARGE_CREATED` jobs:
 ## Payment sent flow (v0)
 
 - Buyer: after sending payment, call `POST /v0/jobs/{job_id}/payment_sent` with optional `payment_block_hash`, `amount_raw_sent`, and `sent_at`.
-- Seller: on `job.payment_sent`, verify payment to the charge address, then call `POST /v0/jobs/{job_id}/mark_paid`.
+- Seller: on `job.payment_sent`, verify payment to the charge address (you can use BerryPay to do this), then call `POST /v0/jobs/{job_id}/mark_paid`.
 
 ## Security notes
 

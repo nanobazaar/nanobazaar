@@ -675,9 +675,6 @@ Commands:
             [--state-path <path>] [--openclaw-bin <bin>] [--fswatch-bin <bin>]
             [--event-text <text>] [--mode now|next] [--debounce-ms <ms>]
                              Run relay watch + state watcher together (recommended)
-  cron enable [--schedule "*/5 * * * *"]
-                             Install cron entry to run poll
-  cron disable               Remove the cron entry
 
 Global flags:
   --help                     Show this help
@@ -1997,69 +1994,6 @@ async function runWatchAll(argv) {
   await Promise.all([runWatch(argv), runWatchState(argv)]);
 }
 
-function runCronEnable(argv) {
-  const {flags} = parseArgs(argv);
-  const config = buildConfig();
-  const schedule = flags.schedule || '*/5 * * * *';
-  const nodeBin = process.execPath;
-  const cliPath = path.resolve(__filename);
-
-  const envPairs = [];
-  if (getEnvValue('NBR_RELAY_URL')) {
-    envPairs.push(`NBR_RELAY_URL=${shellEscape(getEnvValue('NBR_RELAY_URL'))}`);
-  }
-  if (getEnvValue('NBR_STATE_PATH')) {
-    envPairs.push(`NBR_STATE_PATH=${shellEscape(expandHomePath(getEnvValue('NBR_STATE_PATH')))}`);
-  }
-  if (getEnvValue('NBR_POLL_LIMIT')) {
-    envPairs.push(`NBR_POLL_LIMIT=${shellEscape(getEnvValue('NBR_POLL_LIMIT'))}`);
-  }
-  if (getEnvValue('NBR_POLL_TYPES')) {
-    envPairs.push(`NBR_POLL_TYPES=${shellEscape(getEnvValue('NBR_POLL_TYPES'))}`);
-  }
-
-  const envPrefix = envPairs.length > 0 ? `${envPairs.join(' ')} ` : '';
-  const command = `${shellEscape(nodeBin)} ${shellEscape(cliPath)} poll`;
-  const cronLine = `${schedule} ${envPrefix}${command} # nanobazaar-cli`;
-
-  const listResult = spawnSync('crontab', ['-l'], {encoding: 'utf8'});
-  const current = listResult.status === 0 ? listResult.stdout : '';
-  const filtered = current
-    .split(/\r?\n/)
-    .filter((line) => line.trim() && !line.includes('# nanobazaar-cli'))
-    .join('\n');
-
-  const next = [filtered, cronLine].filter(Boolean).join('\n') + '\n';
-  const installResult = spawnSync('crontab', ['-'], {input: next, encoding: 'utf8'});
-  if (installResult.status !== 0) {
-    throw new Error(`Failed to install cron entry: ${installResult.stderr || 'unknown error'}`);
-  }
-
-  console.log('Cron enabled.');
-  console.log(`Schedule: ${schedule}`);
-  console.log(`Command: ${envPrefix}${command}`);
-  console.log(`State path: ${config.state_path}`);
-}
-
-function runCronDisable() {
-  const listResult = spawnSync('crontab', ['-l'], {encoding: 'utf8'});
-  if (listResult.status !== 0) {
-    console.log('No crontab entries found.');
-    return;
-  }
-  const filtered = listResult.stdout
-    .split(/\r?\n/)
-    .filter((line) => line.trim() && !line.includes('# nanobazaar-cli'))
-    .join('\n');
-
-  const next = filtered ? `${filtered}\n` : '';
-  const installResult = spawnSync('crontab', ['-'], {input: next, encoding: 'utf8'});
-  if (installResult.status !== 0) {
-    throw new Error(`Failed to remove cron entry: ${installResult.stderr || 'unknown error'}`);
-  }
-  console.log('Cron disabled.');
-}
-
 function loadVersion() {
   try {
     for (const name of ['package.json', 'skill.json']) {
@@ -2165,18 +2099,6 @@ async function main() {
     case 'watch-all':
       await runWatchAll(rest);
       return;
-    case 'cron': {
-      const sub = rest[0];
-      if (sub === 'enable') {
-        runCronEnable(rest.slice(1));
-        return;
-      }
-      if (sub === 'disable') {
-        runCronDisable();
-        return;
-      }
-      throw new Error('Unknown cron command. Use: cron enable|disable');
-    }
     default:
       throw new Error(`Unknown command: ${command}`);
   }
