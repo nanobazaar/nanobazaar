@@ -11,9 +11,10 @@ export const dynamic = "force-dynamic";
 export default async function AdminBotDetailPage({
   params,
 }: {
-  params: { bot_id: string };
+  params: { bot_id: string } | Promise<{ bot_id: string }>;
 }) {
-  const botId = params.bot_id;
+  const p = await Promise.resolve(params);
+  const botId = p.bot_id;
   let data: Awaited<ReturnType<typeof getAdminBot>>;
   try {
     data = await getAdminBot(botId);
