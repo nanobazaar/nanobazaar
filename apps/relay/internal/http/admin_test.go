@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -8,7 +9,9 @@ import (
 	"time"
 
 	"github.com/nanobazaar/relay/internal/auth"
+	"github.com/nanobazaar/relay/internal/domain"
 	"github.com/nanobazaar/relay/internal/store"
+	"github.com/nanobazaar/relay/internal/store/sqlc"
 )
 
 func TestAdminAuth(t *testing.T) {
@@ -148,5 +151,73 @@ func TestAdminPublicMountOnMainRouter(t *testing.T) {
 	}
 	if meta.Mode != "public_mount" {
 		t.Fatalf("expected public_mount, got %q", meta.Mode)
+	}
+}
+
+func TestAdminListJobsRechecksStatusAfterExpiry(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	st := store.New(db)
+	now := time.Now().UTC()
+	seedJobBot(t, st, "buyer_test", now)
+	seedJobBot(t, st, "seller_test", now)
+	seedJobOffer(t, st, "offer_test", "seller_test", now)
+
+	// Create a REQUESTED job that is already past job_expires_at.
+	if err := st.CreateJob(context.Background(), sqlc.CreateJobParams{
+		JobID:             "job_expiring",
+		OfferID:           "offer_test",
+		BuyerBotID:        "buyer_test",
+		SellerBotID:       "seller_test",
+		Status:            string(domain.JobRequested),
+		PriceRaw:          "1000",
+		TurnaroundSeconds: 3600,
+		CreatedAt:         now.Add(-10 * time.Minute),
+		JobExpiresAt:      now.Add(-1 * time.Minute),
+		RequestPayloadID:  "payload_req",
+		ChargeID:          sql.NullString{},
+		ChargeAddress:     sql.NullString{},
+		ChargeAmountRaw:   sql.NullString{},
+		ChargeExpiresAt:   sql.NullTime{},
+		ChargeSigEd25519:  sql.NullString{},
+		PaidAt:            sql.NullTime{},
+		DeliveredAt:       sql.NullTime{},
+		CancelledAt:       sql.NullTime{},
+		ExpiredAt:         sql.NullTime{},
+		PaymentVerifier:   sql.NullString{},
+		PaymentBlockHash:  sql.NullString{},
+		PaymentObservedAt: sql.NullTime{},
+		AmountRawReceived: sql.NullString{},
+	}); err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	router := NewAdminRouter(AdminRouterConfig{
+		Store:      st,
+		AdminToken: "secret-token",
+		StreamHub:  NewStreamHub(st),
+	})
+
+	req := newJSONRequest(t, http.MethodGet, "/admin/jobs?status=REQUESTED", nil)
+	req.Header.Set("Authorization", "Bearer secret-token")
+	rec := httptestRequest(t, router, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		Jobs []struct {
+			JobID  string `json:"job_id"`
+			Status string `json:"status"`
+		} `json:"jobs"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	for _, j := range resp.Jobs {
+		if j.JobID == "job_expiring" {
+			t.Fatalf("unexpected job in response (status=%q)", j.Status)
+		}
 	}
 }

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -944,7 +945,7 @@ func (h *AdminHandler) ListJobs(w http.ResponseWriter, r *http.Request) {
 	sellerBotID := strings.TrimSpace(r.URL.Query().Get("seller_bot_id"))
 	jobIDQuery := strings.TrimSpace(r.URL.Query().Get("q"))
 
-	statuses, _, err := parseStatusFilter(r.URL.Query()["status"])
+	statuses, statusFilter, err := parseStatusFilter(r.URL.Query()["status"])
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
@@ -1001,13 +1002,19 @@ func (h *AdminHandler) ListJobs(w http.ResponseWriter, r *http.Request) {
 			args = append(args, status)
 		}
 	}
-	if cursorCreatedAt != nil && cursorJobID != nil {
-		where += " AND (created_at < ? OR (created_at = ? AND job_id < ?))"
-		args = append(args, cursorCreatedAt.UTC(), cursorCreatedAt.UTC(), *cursorJobID)
-	}
-	args = append(args, limit+1)
+	baseWhere := where
+	baseArgs := args
 
-	rows, err := h.Store.DB.QueryContext(r.Context(), `
+	fetchBatch := func(ctx context.Context, batchCursorCreatedAt *time.Time, batchCursorJobID *string) ([]sqlc.Job, error) {
+		where := baseWhere
+		args := append([]any{}, baseArgs...)
+		if batchCursorCreatedAt != nil && batchCursorJobID != nil {
+			where += " AND (created_at < ? OR (created_at = ? AND job_id < ?))"
+			args = append(args, batchCursorCreatedAt.UTC(), batchCursorCreatedAt.UTC(), *batchCursorJobID)
+		}
+		args = append(args, limit)
+
+		rows, err := h.Store.DB.QueryContext(ctx, `
 SELECT job_id, offer_id, buyer_bot_id, seller_bot_id, status, price_raw, turnaround_seconds, created_at, job_expires_at,
 	request_payload_id,
 	charge_id, charge_address, charge_amount_raw, charge_expires_at, charge_sig_ed25519,
@@ -1017,68 +1024,100 @@ FROM jobs
 `+where+`
 ORDER BY created_at DESC, job_id DESC
 LIMIT ?`, args...)
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "job list failed")
-		return
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		out := make([]sqlc.Job, 0, limit)
+		for rows.Next() {
+			var job sqlc.Job
+			if err := rows.Scan(
+				&job.JobID,
+				&job.OfferID,
+				&job.BuyerBotID,
+				&job.SellerBotID,
+				&job.Status,
+				&job.PriceRaw,
+				&job.TurnaroundSeconds,
+				&job.CreatedAt,
+				&job.JobExpiresAt,
+				&job.RequestPayloadID,
+				&job.ChargeID,
+				&job.ChargeAddress,
+				&job.ChargeAmountRaw,
+				&job.ChargeExpiresAt,
+				&job.ChargeSigEd25519,
+				&job.PaidAt,
+				&job.DeliveredAt,
+				&job.CancelledAt,
+				&job.ExpiredAt,
+				&job.PaymentVerifier,
+				&job.PaymentBlockHash,
+				&job.PaymentObservedAt,
+				&job.AmountRawReceived,
+			); err != nil {
+				return nil, err
+			}
+			out = append(out, job)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		return out, nil
 	}
-	defer rows.Close()
 
 	resp := adminJobListResponse{Jobs: make([]adminJobRow, 0, limit)}
 	jobHandler := &JobHandler{Store: h.Store, StreamHub: h.StreamHub, Clock: h.Clock}
-	for rows.Next() {
-		var job sqlc.Job
-		if err := rows.Scan(
-			&job.JobID,
-			&job.OfferID,
-			&job.BuyerBotID,
-			&job.SellerBotID,
-			&job.Status,
-			&job.PriceRaw,
-			&job.TurnaroundSeconds,
-			&job.CreatedAt,
-			&job.JobExpiresAt,
-			&job.RequestPayloadID,
-			&job.ChargeID,
-			&job.ChargeAddress,
-			&job.ChargeAmountRaw,
-			&job.ChargeExpiresAt,
-			&job.ChargeSigEd25519,
-			&job.PaidAt,
-			&job.DeliveredAt,
-			&job.CancelledAt,
-			&job.ExpiredAt,
-			&job.PaymentVerifier,
-			&job.PaymentBlockHash,
-			&job.PaymentObservedAt,
-			&job.AmountRawReceived,
-		); err != nil {
+
+	nextCursor := ""
+	batchCursorCreatedAt := cursorCreatedAt
+	batchCursorJobID := cursorJobID
+
+	for len(resp.Jobs) < limit {
+		batch, err := fetchBatch(r.Context(), batchCursorCreatedAt, batchCursorJobID)
+		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "job list failed")
 			return
 		}
-
-		// Apply expiry using the same logic as the public job endpoints (best-effort).
-		updated, err := jobHandler.applyExpiry(r.Context(), job)
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "job expiry failed")
-			return
+		if len(batch) == 0 {
+			break
 		}
 
-		resp.Jobs = append(resp.Jobs, adminJobRowFromJob(updated))
-	}
-	if err := rows.Err(); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "job list failed")
-		return
-	}
+		usedAllBatch := true
+		for _, job := range batch {
+			// Apply expiry using the same logic as the public job endpoints (best-effort).
+			updated, err := jobHandler.applyExpiry(r.Context(), job)
+			if err != nil {
+				writeJSONError(w, http.StatusInternalServerError, "job expiry failed")
+				return
+			}
+			if statusFilter != nil && !statusFilter[updated.Status] {
+				continue
+			}
 
-	hasMore := len(resp.Jobs) > limit
-	if hasMore {
-		resp.Jobs = resp.Jobs[:limit]
-	}
-	if hasMore && len(resp.Jobs) > 0 {
-		last := resp.Jobs[len(resp.Jobs)-1]
-		createdAt, err := parseTime(last.CreatedAt)
-		if err == nil {
-			resp.NextCursor = encodeCursor(createdAt, last.JobID)
+			resp.Jobs = append(resp.Jobs, adminJobRowFromJob(updated))
+			if len(resp.Jobs) == limit {
+				usedAllBatch = false
+				nextCursor = encodeCursor(updated.CreatedAt, updated.JobID)
+				break
+			}
+		}
+
+		last := batch[len(batch)-1]
+		batchCursorCreatedAt = &last.CreatedAt
+		batchCursorJobID = &last.JobID
+
+		if len(resp.Jobs) == limit {
+			hasMore := !usedAllBatch || len(batch) == limit
+			if hasMore {
+				resp.NextCursor = nextCursor
+			}
+			break
+		}
+
+		if len(batch) < limit {
+			break
 		}
 	}
 
