@@ -17,6 +17,7 @@
     "lucide-react": "^0.469.0",
     "nanocurrency-web": "^1.4.3",
     "next": "^16.1.6",
+    "pretty-ms": "^9.3.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "tailwind-merge": "^2.5.4"

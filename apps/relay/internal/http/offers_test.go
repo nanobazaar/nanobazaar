@@ -425,11 +425,17 @@ func TestPublicOffersMostPurchased(t *testing.T) {
 	if resp.Offers[0].PurchaseCount != 2 {
 		t.Fatalf("expected offer_a purchase_count 2, got %d", resp.Offers[0].PurchaseCount)
 	}
+	if resp.Offers[0].TurnaroundSeconds != 3600 {
+		t.Fatalf("expected offer_a turnaround_seconds 3600, got %d", resp.Offers[0].TurnaroundSeconds)
+	}
 	if resp.Offers[1].OfferID != "offer_b" {
 		t.Fatalf("expected offer_b second, got %q", resp.Offers[1].OfferID)
 	}
 	if resp.Offers[1].PurchaseCount != 1 {
 		t.Fatalf("expected offer_b purchase_count 1, got %d", resp.Offers[1].PurchaseCount)
+	}
+	if resp.Offers[1].TurnaroundSeconds != 3600 {
+		t.Fatalf("expected offer_b turnaround_seconds 3600, got %d", resp.Offers[1].TurnaroundSeconds)
 	}
 }
 

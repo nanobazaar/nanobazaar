@@ -77,6 +77,7 @@ type publicOfferResponse struct {
 	Description       string    `json:"description"`
 	Tags              []string  `json:"tags"`
 	PriceRaw          string    `json:"price_raw"`
+	TurnaroundSeconds int64     `json:"turnaround_seconds"`
 	PurchaseCount     int       `json:"purchase_count"`
 	CreatedAt         time.Time `json:"created_at"`
 	RequestSchemaHint string    `json:"request_schema_hint,omitempty"`
@@ -951,6 +952,7 @@ func publicOfferToResponse(entry offerEntry) publicOfferResponse {
 		Description:       entry.Offer.Description,
 		Tags:              entry.Tags,
 		PriceRaw:          entry.Offer.PriceRaw,
+		TurnaroundSeconds: entry.Offer.TurnaroundSeconds,
 		PurchaseCount:     entry.PurchaseCount,
 		CreatedAt:         entry.Offer.CreatedAt,
 		RequestSchemaHint: requestSchemaHint,
