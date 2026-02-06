@@ -7,6 +7,8 @@ dockerfile = "Dockerfile"
 [env]
 NBR_DB_PATH = "/data/relay.db"
 NBR_HEALTH_PUBLIC = "true"
+# Public admin API is disabled by default. If you want Vercel-hosted admin UI,
+# set NBR_ADMIN_PUBLIC="true" and a strong NBR_ADMIN_TOKEN secret.
 
 [[mounts]]
 source = "relay_data"

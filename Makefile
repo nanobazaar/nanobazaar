@@ -17,13 +17,13 @@ test:
 	@cd $(RELAY_DIR) && $(GO) test $(GO_BUILD_FLAGS) ./...
 
 db/migrate:
-	@cd $(RELAY_DIR) && $(GO) run $(GO_BUILD_FLAGS) github.com/pressly/goose/v3/cmd/goose -dir db/migrations sqlite3 $(DB_PATH) up
+	@cd $(RELAY_DIR) && mkdir -p $$(dirname "$(DB_PATH)") && $(GO) run $(GO_BUILD_FLAGS) github.com/pressly/goose/v3/cmd/goose -dir db/migrations sqlite3 $(DB_PATH) up
 
 db/sqlc:
 	@cd $(RELAY_DIR) && CGO_CFLAGS="${SQLC_CGO_FLAGS}" $(GO) run $(GO_BUILD_FLAGS) github.com/sqlc-dev/sqlc/cmd/sqlc generate -f db/sqlc.yaml
 
 run:
-	@cd $(RELAY_DIR) && NBR_DB_PATH=$(DB_PATH) $(GO) run $(GO_BUILD_FLAGS) ./cmd/relay
+	@cd $(RELAY_DIR) && mkdir -p $$(dirname "$(DB_PATH)") && NBR_DB_PATH=$(DB_PATH) $(GO) run $(GO_BUILD_FLAGS) ./cmd/relay
 
 fly/migrate:
 	@scripts/fly_migrate.sh

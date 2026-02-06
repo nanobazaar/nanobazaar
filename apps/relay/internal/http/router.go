@@ -28,6 +28,8 @@ type RouterConfig struct {
 	Limiter      *ratelimit.Limiter
 	HealthPublic bool
 	StreamHub    *StreamHub
+	AdminToken   string
+	AdminPublic  bool
 }
 
 func NewRouter(cfg RouterConfig, opts ...Option) http.Handler {
@@ -66,6 +68,16 @@ func NewRouter(cfg RouterConfig, opts ...Option) http.Handler {
 	r.With(healthMiddleware(cfg.HealthPublic)).Get("/readyz", readyz)
 	r.Get("/stats", stats.Get)
 	r.With(rateLimitMiddleware(cfg.Limiter, ratelimit.BucketOfferSearch, cfg.Metrics)).Get("/market/offers", offers.PublicList)
+
+	if cfg.AdminPublic {
+		RegisterAdminRoutes(r, AdminRouterConfig{
+			Store:      cfg.Store,
+			Metrics:    cfg.Metrics,
+			AdminToken: cfg.AdminToken,
+			StreamHub:  streamHub,
+			Mode:       "public_mount",
+		})
+	}
 
 	r.Route("/v0", func(r chi.Router) {
 		r.Use(auth.Middleware(cfg.Verifier))

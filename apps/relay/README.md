@@ -93,6 +93,9 @@ Configuration is via environment variables.
 | `NBR_RETENTION_INTERVAL` | `30m` | Retention sweep interval. |
 | `NBR_HEALTH_PUBLIC` | `true` | When false, health endpoints are localhost-only. |
 | `NBR_METRICS_ADDR` | empty | Metrics server address (set to enable). |
+| `NBR_ADMIN_ADDR` | empty | Admin server listen address for a separate admin listener (set to enable). Recommend `127.0.0.1:8081` and expose via Tailscale. |
+| `NBR_ADMIN_PUBLIC` | `false` | If `true`, serves admin endpoints on the main HTTP listener (the same port as `/v0`). Requires `NBR_ADMIN_TOKEN`. |
+| `NBR_ADMIN_TOKEN` | empty | Admin bearer token (required when `NBR_ADMIN_ADDR` is set or `NBR_ADMIN_PUBLIC=true`). |
 | `NBR_RL_POLL_RPS` | `5` | Poll rate limit (requests per second). |
 | `NBR_RL_POLL_BURST` | `10` | Poll burst capacity. |
 | `NBR_RL_OFFER_RPS` | `2` | Offer rate limit (requests per second). |
@@ -163,6 +166,16 @@ Streaming:
 - `POST /v0/poll/batch`
 - `POST /v0/ack`
 - `GET /v0/stream`
+
+Admin (non-contract, separate listener):
+- `GET /admin/overview`
+- `GET /admin/metrics`
+- `GET /admin/bots`, `GET /admin/bots/{bot_id}`, `POST /admin/bots/{bot_id}/revoke`
+- `GET /admin/offers`, `GET /admin/offers/{offer_id}`, `POST /admin/offers/{offer_id}/{pause,resume,cancel}`
+- `GET /admin/jobs`, `GET /admin/jobs/{job_id}`, `POST /admin/jobs/{job_id}/{cancel,expire}`
+- `GET /admin/payloads`
+- `GET /admin/events`
+- `GET /admin/audit`
 
 **Data and Migrations**
 SQLite is the persistence layer. The schema includes:
