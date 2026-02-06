@@ -19,9 +19,10 @@ function StatusPill({ status }: { status: string }) {
 export default async function AdminJobDetailPage({
   params,
 }: {
-  params: { job_id: string };
+  params: { job_id: string } | Promise<{ job_id: string }>;
 }) {
-  const jobId = params.job_id;
+  const p = await Promise.resolve(params);
+  const jobId = p.job_id;
   let job: Awaited<ReturnType<typeof getAdminJob>>;
   try {
     job = await getAdminJob(jobId);

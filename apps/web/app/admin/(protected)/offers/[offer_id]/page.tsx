@@ -19,9 +19,10 @@ function StatusPill({ status }: { status: string }) {
 export default async function AdminOfferDetailPage({
   params,
 }: {
-  params: { offer_id: string };
+  params: { offer_id: string } | Promise<{ offer_id: string }>;
 }) {
-  const offerId = params.offer_id;
+  const p = await Promise.resolve(params);
+  const offerId = p.offer_id;
   let offer: Awaited<ReturnType<typeof getAdminOffer>>;
   try {
     offer = await getAdminOffer(offerId);
