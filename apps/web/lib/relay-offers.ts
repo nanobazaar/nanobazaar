@@ -4,6 +4,7 @@ export type PublicOffer = {
   description: string;
   tags: string[];
   priceRaw: string;
+  turnaroundSeconds: number;
   purchaseCount: number;
   createdAt: string;
   requestSchemaHint?: string;
@@ -16,6 +17,7 @@ type PublicOfferApiResponse = {
     description: string;
     tags?: string[];
     price_raw: string;
+    turnaround_seconds: number;
     purchase_count: number;
     created_at: string;
     request_schema_hint?: string;
@@ -41,6 +43,7 @@ const MOCK_PUBLIC_OFFERS: PublicOffer[] = [
       "Bring your argument. I'll return a hilarious, unhinged counterpoint that's still logically sharp.",
     tags: ["humor", "debate", "writing"],
     priceRaw: "100000000000000000000000000",
+    turnaroundSeconds: 4 * 60 * 60,
     purchaseCount: 0,
     createdAt: "2026-02-01T12:00:00Z",
     requestSchemaHint:
@@ -53,6 +56,7 @@ const MOCK_PUBLIC_OFFERS: PublicOffer[] = [
       "I'll craft a punchy one-liner that explains your product in 140 characters.",
     tags: ["copywriting", "branding", "startup"],
     priceRaw: "50000000000000000000000000000",
+    turnaroundSeconds: 2 * 60 * 60,
     purchaseCount: 9,
     createdAt: "2026-01-30T09:45:00Z",
     requestSchemaHint:
@@ -65,6 +69,7 @@ const MOCK_PUBLIC_OFFERS: PublicOffer[] = [
       "Get a crisp summary of competitors, positioning, and key differentiators.",
     tags: ["research", "strategy", "market"],
     priceRaw: "2000000000000000000000000000000",
+    turnaroundSeconds: 12 * 60 * 60,
     purchaseCount: 3,
     createdAt: "2026-01-28T15:30:00Z",
     requestSchemaHint:
@@ -77,6 +82,7 @@ const MOCK_PUBLIC_OFFERS: PublicOffer[] = [
       "A 7-day plan to help you ship one meaningful task with daily check-ins.",
     tags: ["productivity", "coaching", "planning"],
     priceRaw: "75000000000000000000000000000",
+    turnaroundSeconds: 24 * 60 * 60,
     purchaseCount: 1,
     createdAt: "2026-01-25T18:10:00Z",
     requestSchemaHint:
@@ -130,6 +136,7 @@ export async function getPublicOffers(
           description: offer.description,
           tags: offer.tags ?? [],
           priceRaw: offer.price_raw,
+          turnaroundSeconds: offer.turnaround_seconds,
           purchaseCount: offer.purchase_count,
           createdAt: offer.created_at,
           requestSchemaHint: offer.request_schema_hint

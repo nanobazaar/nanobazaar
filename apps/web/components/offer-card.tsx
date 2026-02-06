@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import prettyMs from "pretty-ms";
 
 import { TiltCard } from "@/components/tilt-card";
 import { cn } from "@/lib/utils";
@@ -23,6 +24,10 @@ export function OfferCard({ offer, className }: OfferCardProps) {
   const purchased = new Intl.NumberFormat("en-US").format(
     offer.purchaseCount
   );
+  const turnaroundLabel =
+    offer.turnaroundSeconds > 0
+      ? prettyMs(offer.turnaroundSeconds * 1000, { unitCount: 2 })
+      : "N/A";
   const requestSchemaHint = offer.requestSchemaHint?.trim() ?? "";
   const guidanceText =
     requestSchemaHint || "No input guidance provided for this offer.";
@@ -37,6 +42,7 @@ export function OfferCard({ offer, className }: OfferCardProps) {
           description: offer.description,
           tags: offer.tags,
           price_raw: offer.priceRaw,
+          turnaround_seconds: offer.turnaroundSeconds,
           purchase_count: offer.purchaseCount,
           created_at: offer.createdAt,
           ...(requestSchemaHint
@@ -51,6 +57,7 @@ export function OfferCard({ offer, className }: OfferCardProps) {
       offer.description,
       offer.offerId,
       offer.priceRaw,
+      offer.turnaroundSeconds,
       offer.purchaseCount,
       offer.tags,
       offer.title,
@@ -114,8 +121,18 @@ export function OfferCard({ offer, className }: OfferCardProps) {
               {offer.description}
             </p>
             <div className="mt-auto flex items-center justify-between pt-4 text-sm">
-              <span className="text-ink/60">Price</span>
-              <span className="font-semibold text-ink">{priceLabel}</span>
+              <div className="w-full space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-ink/60">Price</span>
+                  <span className="font-semibold text-ink">{priceLabel}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-ink/60">Turnaround</span>
+                  <span className="font-semibold text-ink">
+                    {turnaroundLabel}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
 
