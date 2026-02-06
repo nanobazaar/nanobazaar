@@ -6,6 +6,7 @@ export type PublicOffer = {
   priceRaw: string;
   purchaseCount: number;
   createdAt: string;
+  requestSchemaHint?: string;
 };
 
 type PublicOfferApiResponse = {
@@ -17,6 +18,7 @@ type PublicOfferApiResponse = {
     price_raw: string;
     purchase_count: number;
     created_at: string;
+    request_schema_hint?: string;
   }>;
   next_cursor?: string;
 };
@@ -40,7 +42,9 @@ const MOCK_PUBLIC_OFFERS: PublicOffer[] = [
     tags: ["humor", "debate", "writing"],
     priceRaw: "100000000000000000000000000",
     purchaseCount: 0,
-    createdAt: "2026-02-01T12:00:00Z"
+    createdAt: "2026-02-01T12:00:00Z",
+    requestSchemaHint:
+      "Share the argument you want rebutted, the target audience, and how spicy you want the counterpoint."
   },
   {
     offerId: "mock_offer_pitch",
@@ -50,7 +54,9 @@ const MOCK_PUBLIC_OFFERS: PublicOffer[] = [
     tags: ["copywriting", "branding", "startup"],
     priceRaw: "50000000000000000000000000000",
     purchaseCount: 9,
-    createdAt: "2026-01-30T09:45:00Z"
+    createdAt: "2026-01-30T09:45:00Z",
+    requestSchemaHint:
+      "Provide your product name, target customer, and the outcome you deliver."
   },
   {
     offerId: "mock_offer_research",
@@ -60,7 +66,9 @@ const MOCK_PUBLIC_OFFERS: PublicOffer[] = [
     tags: ["research", "strategy", "market"],
     priceRaw: "2000000000000000000000000000000",
     purchaseCount: 3,
-    createdAt: "2026-01-28T15:30:00Z"
+    createdAt: "2026-01-28T15:30:00Z",
+    requestSchemaHint:
+      "Share your product category, target geography, and any known competitors."
   },
   {
     offerId: "mock_offer_productivity",
@@ -70,7 +78,9 @@ const MOCK_PUBLIC_OFFERS: PublicOffer[] = [
     tags: ["productivity", "coaching", "planning"],
     priceRaw: "75000000000000000000000000000",
     purchaseCount: 1,
-    createdAt: "2026-01-25T18:10:00Z"
+    createdAt: "2026-01-25T18:10:00Z",
+    requestSchemaHint:
+      "Tell me the goal you want to finish, your timezone, and daily availability."
   }
 ];
 
@@ -121,7 +131,8 @@ export async function getPublicOffers(
           tags: offer.tags ?? [],
           priceRaw: offer.price_raw,
           purchaseCount: offer.purchase_count,
-          createdAt: offer.created_at
+          createdAt: offer.created_at,
+          requestSchemaHint: offer.request_schema_hint
         }))
       : [];
 

@@ -1,5 +1,7 @@
 "use client";
 
+import * as React from "react";
+
 import { TiltCard } from "@/components/tilt-card";
 import { cn } from "@/lib/utils";
 import { formatNanoRaw } from "@/lib/nano";
@@ -11,11 +13,66 @@ type OfferCardProps = {
 };
 
 export function OfferCard({ offer, className }: OfferCardProps) {
+  const [isFlipped, setIsFlipped] = React.useState(false);
+  const [inputText, setInputText] = React.useState("");
+  const [copyStatus, setCopyStatus] = React.useState<
+    "idle" | "copied" | "error"
+  >("idle");
   const price = formatNanoRaw(offer.priceRaw);
   const priceLabel = price ? `XNO ${price}` : `${offer.priceRaw} raw`;
   const purchased = new Intl.NumberFormat("en-US").format(
     offer.purchaseCount
   );
+  const requestSchemaHint = offer.requestSchemaHint?.trim() ?? "";
+  const guidanceText =
+    requestSchemaHint || "No input guidance provided for this offer.";
+  const promptInput =
+    inputText.trim() || requestSchemaHint || "YOUR_INPUT_HERE";
+  const offerJson = React.useMemo(
+    () =>
+      JSON.stringify(
+        {
+          offer_id: offer.offerId,
+          title: offer.title,
+          description: offer.description,
+          tags: offer.tags,
+          price_raw: offer.priceRaw,
+          purchase_count: offer.purchaseCount,
+          created_at: offer.createdAt,
+          ...(requestSchemaHint
+            ? { request_schema_hint: requestSchemaHint }
+            : {})
+        },
+        null,
+        2
+      ),
+    [
+      offer.createdAt,
+      offer.description,
+      offer.offerId,
+      offer.priceRaw,
+      offer.purchaseCount,
+      offer.tags,
+      offer.title,
+      requestSchemaHint
+    ]
+  );
+
+  const handleCopyPrompt = async () => {
+    if (!navigator?.clipboard?.writeText) {
+      setCopyStatus("error");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(
+        `use the nanobazaar skill to buy offer with ID ${offer.offerId} and add this input: ${promptInput}`
+      );
+      setCopyStatus("copied");
+      window.setTimeout(() => setCopyStatus("idle"), 2000);
+    } catch {
+      setCopyStatus("error");
+    }
+  };
 
   return (
     <TiltCard
@@ -25,16 +82,86 @@ export function OfferCard({ offer, className }: OfferCardProps) {
       )}
     >
       <div className="flex h-full flex-col">
-        <div className="flex items-center justify-between text-xs uppercase tracking-[0.3em] text-ink/60">
-          <span>Offer</span>
-          <span>{purchased} purchased</span>
-        </div>
-        <h3 className="mt-3 text-lg font-bold text-ink">{offer.title}</h3>
-        <p className="mt-2 text-sm text-ink/70">{offer.description}</p>
-        <div className="mt-auto flex items-center justify-between pt-4 text-sm">
-          <span className="text-ink/60">Price</span>
-          <span className="font-semibold text-ink">{priceLabel}</span>
-        </div>
+        {isFlipped ? (
+          <>
+            <div className="flex items-center justify-between text-xs uppercase tracking-[0.3em] text-ink/60">
+              <span>Offer details</span>
+              <button
+                type="button"
+                onClick={() => setIsFlipped(false)}
+                className="rounded-full border border-white/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-ink/70 transition hover:border-white/40 hover:text-ink"
+              >
+                Back
+              </button>
+            </div>
+            <div className="mt-4 space-y-3 text-sm text-ink/70">
+              <div>
+                <p className="text-xs uppercase tracking-[0.2em] text-ink/50">
+                  Input guidance
+                </p>
+                <p className="mt-2 text-sm text-ink">{guidanceText}</p>
+              </div>
+              <label className="block">
+                <span className="text-xs uppercase tracking-[0.2em] text-ink/50">
+                  Input for this offer
+                </span>
+                <textarea
+                  value={inputText}
+                  onChange={(event) => setInputText(event.target.value)}
+                  placeholder={guidanceText}
+                  rows={3}
+                  className="mt-2 w-full rounded-xl border border-white/10 bg-ink/10 px-3 py-2 text-sm text-ink placeholder:text-ink/40"
+                />
+              </label>
+              <div className="flex items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={handleCopyPrompt}
+                  className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-ink/80 transition hover:border-white/40 hover:text-ink"
+                >
+                  Copy buy prompt
+                </button>
+                <span className="text-xs text-ink/50">
+                  {copyStatus === "copied"
+                    ? "Copied!"
+                    : copyStatus === "error"
+                      ? "Clipboard unavailable"
+                      : " "}
+                </span>
+              </div>
+            </div>
+            <div className="mt-4 rounded-xl border border-white/10 bg-ink/10 p-3">
+              <p className="text-xs uppercase tracking-[0.2em] text-ink/50">
+                JSON representation
+              </p>
+              <pre className="mt-2 max-h-40 overflow-auto text-xs text-ink/80">
+                {offerJson}
+              </pre>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="flex items-center justify-between text-xs uppercase tracking-[0.3em] text-ink/60">
+              <span>Offer</span>
+              <div className="flex items-center gap-3">
+                <span>{purchased} purchased</span>
+                <button
+                  type="button"
+                  onClick={() => setIsFlipped(true)}
+                  className="rounded-full border border-white/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-ink/70 transition hover:border-white/40 hover:text-ink"
+                >
+                  Flip
+                </button>
+              </div>
+            </div>
+            <h3 className="mt-3 text-lg font-bold text-ink">{offer.title}</h3>
+            <p className="mt-2 text-sm text-ink/70">{offer.description}</p>
+            <div className="mt-auto flex items-center justify-between pt-4 text-sm">
+              <span className="text-ink/60">Price</span>
+              <span className="font-semibold text-ink">{priceLabel}</span>
+            </div>
+          </>
+        )}
       </div>
     </TiltCard>
   );
