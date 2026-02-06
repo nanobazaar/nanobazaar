@@ -77,13 +77,54 @@ export function OfferCard({ offer, className }: OfferCardProps) {
   return (
     <TiltCard
       className={cn(
-        "rounded-2xl border border-white/10 bg-panel/70 p-5 text-left shadow-soft",
+        "min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-panel/70 p-5 text-left shadow-soft",
         className
       )}
     >
-      <div className="flex h-full flex-col">
-        {isFlipped ? (
-          <>
+      <div className="min-w-0 [perspective:1200px]">
+        <div
+          className={cn(
+            "grid min-w-0 w-full transition-transform duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)] will-change-transform motion-reduce:duration-0 [transform-style:preserve-3d]",
+            isFlipped ? "[transform:rotateY(180deg)]" : "[transform:rotateY(0deg)]"
+          )}
+        >
+          <div
+            className={cn(
+              "col-start-1 row-start-1 flex min-w-0 flex-col [backface-visibility:hidden]",
+              isFlipped ? "pointer-events-none" : "pointer-events-auto"
+            )}
+          >
+            <div className="flex items-center justify-between text-xs uppercase tracking-[0.3em] text-ink/60">
+              <span>Offer</span>
+              <div className="flex items-center gap-3">
+                <span>{purchased} purchased</span>
+                <button
+                  type="button"
+                  onClick={() => setIsFlipped(true)}
+                  className="rounded-full border border-white/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-ink/70 transition hover:border-white/40 hover:text-ink"
+                >
+                  Flip
+                </button>
+              </div>
+            </div>
+            <h3 className="mt-3 min-w-0 break-words text-lg font-bold text-ink">
+              {offer.title}
+            </h3>
+            <p className="mt-2 min-w-0 break-words text-sm text-ink/70">
+              {offer.description}
+            </p>
+            <div className="mt-auto flex items-center justify-between pt-4 text-sm">
+              <span className="text-ink/60">Price</span>
+              <span className="font-semibold text-ink">{priceLabel}</span>
+            </div>
+          </div>
+
+          <div
+            className={cn(
+              "col-start-1 row-start-1 flex min-w-0 flex-col [backface-visibility:hidden] [transform:rotateY(180deg)]",
+              isFlipped ? "pointer-events-auto" : "pointer-events-none"
+            )}
+          >
             <div className="flex items-center justify-between text-xs uppercase tracking-[0.3em] text-ink/60">
               <span>Offer details</span>
               <button
@@ -134,34 +175,12 @@ export function OfferCard({ offer, className }: OfferCardProps) {
               <p className="text-xs uppercase tracking-[0.2em] text-ink/50">
                 JSON representation
               </p>
-              <pre className="mt-2 max-h-40 overflow-auto text-xs text-ink/80">
+              <pre className="mt-2 max-h-40 overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-words text-xs text-ink/80">
                 {offerJson}
               </pre>
             </div>
-          </>
-        ) : (
-          <>
-            <div className="flex items-center justify-between text-xs uppercase tracking-[0.3em] text-ink/60">
-              <span>Offer</span>
-              <div className="flex items-center gap-3">
-                <span>{purchased} purchased</span>
-                <button
-                  type="button"
-                  onClick={() => setIsFlipped(true)}
-                  className="rounded-full border border-white/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-ink/70 transition hover:border-white/40 hover:text-ink"
-                >
-                  Flip
-                </button>
-              </div>
-            </div>
-            <h3 className="mt-3 text-lg font-bold text-ink">{offer.title}</h3>
-            <p className="mt-2 text-sm text-ink/70">{offer.description}</p>
-            <div className="mt-auto flex items-center justify-between pt-4 text-sm">
-              <span className="text-ink/60">Price</span>
-              <span className="font-semibold text-ink">{priceLabel}</span>
-            </div>
-          </>
-        )}
+          </div>
+        </div>
       </div>
     </TiltCard>
   );
