@@ -732,6 +732,8 @@ Commands:
   job payment-sent --job-id <id> [--payment-block-hash <hash>]
                    [--amount-raw-sent <raw>] [--sent-at <rfc3339>] [--note "..."]
                              Notify seller that payment was sent
+  payload fetch --payload-id <id> [--job-id <id>] [--raw] [--compact]
+                             Fetch and decrypt a delivered payload
   poll [--since-event-id <id>] [--limit <n>] [--types a,b] [--no-ack]
                              Poll events and optionally ack
   poll ack --up-to-event-id <id>
@@ -1365,6 +1367,80 @@ async function runJobPaymentSent(argv) {
   }
 
   printJson(result.data, !!flags.compact);
+}
+
+async function runPayloadFetch(argv) {
+  const {flags} = parseArgs(argv);
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  let payloadId = flags.payloadId || flags.payload;
+  if (!payloadId && flags.jobId) {
+    const jobId = String(flags.jobId);
+    const eventLog = Array.isArray(state.event_log) ? state.event_log : [];
+    let found = null;
+    for (let i = eventLog.length - 1; i >= 0; i -= 1) {
+      const event = eventLog[i];
+      if (!event) {
+        continue;
+      }
+      const eventType = event.event_type || (event.data && event.data.event_type);
+      const eventData = event.data && typeof event.data === 'object' ? event.data : event;
+      if (eventType === 'job.payload_available' && eventData.job_id === jobId && eventData.payload_id) {
+        found = eventData.payload_id;
+        break;
+      }
+    }
+    if (!found) {
+      throw new Error(`No job.payload_available event found for job ${jobId} in event log.`);
+    }
+    payloadId = found;
+  }
+
+  if (!payloadId) {
+    throw new Error('Missing payload id. Provide --payload-id or --job-id.');
+  }
+
+  const result = await signedRequest({
+    method: 'GET',
+    path: `/v0/payloads/${payloadId}`,
+    relayUrl: config.relay_url,
+    keys,
+    identity,
+  });
+
+  if (!result.response.ok) {
+    throw new Error(`Payload fetch failed (${result.response.status}): ${result.text || result.response.statusText}`);
+  }
+
+  const envelope = result.data;
+  if (!envelope || !envelope.ciphertext_b64) {
+    throw new Error('Payload response missing ciphertext_b64.');
+  }
+
+  const sodium = await loadSodium();
+  const ciphertext = Buffer.from(envelope.ciphertext_b64, 'base64url');
+  const publicKey = Buffer.from(keys.encryption_public_key_b64url, 'base64url');
+  const privateKey = Buffer.from(keys.encryption_private_key_b64url, 'base64url');
+  const plaintext = sodium.crypto_box_seal_open(ciphertext, publicKey, privateKey);
+  if (!plaintext) {
+    throw new Error('Decryption failed. Are you the intended recipient?');
+  }
+
+  const inner = JSON.parse(Buffer.from(plaintext).toString('utf8'));
+
+  if (flags.raw) {
+    if (inner.body !== undefined) {
+      console.log(typeof inner.body === 'string' ? inner.body : JSON.stringify(inner.body));
+    } else {
+      console.log(JSON.stringify(inner));
+    }
+    return;
+  }
+
+  printJson(inner, !!flags.compact);
 }
 
 async function runPoll(argv, options) {
@@ -2329,6 +2405,14 @@ async function main() {
         return;
       }
       throw new Error('Unknown job command. Use: job create|reissue-request|reissue-charge|payment-sent');
+    }
+    case 'payload': {
+      const sub = rest[0];
+      if (sub === 'fetch') {
+        await runPayloadFetch(rest.slice(1));
+        return;
+      }
+      throw new Error('Unknown payload command. Use: payload fetch');
     }
     case 'poll':
       if (rest[0] === 'ack') {
