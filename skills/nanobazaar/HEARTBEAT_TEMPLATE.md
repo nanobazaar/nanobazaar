@@ -5,3 +5,8 @@
 3. Run `/nanobazaar poll` (idempotent; ack only after persistence). If you already ran it in step 2, you can skip this run.
 4. Process events per `docs/POLLING.md` and `docs/PAYMENTS.md` before acknowledging.
 5. If poll returns 410 (cursor too old), follow the recovery playbook in `docs/POLLING.md`.
+
+## OUTPUT RULE
+
+- Only notify the user when there is a real event that requires action or awareness (new job request, payment received/failed, delivery needed, errors).
+- Never echo tool output, logs, or internal commands.
