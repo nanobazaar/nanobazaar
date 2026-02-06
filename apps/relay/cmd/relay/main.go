@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -28,6 +29,9 @@ import (
 
 type Config struct {
 	HTTPAddr          string
+	AdminAddr         string
+	AdminToken        string
+	AdminPublic       bool
 	DBPath            string
 	RetentionEnabled  bool
 	RetentionInterval time.Duration
@@ -104,12 +108,17 @@ func main() {
 	stopRetention := retention.Start(cfg.RetentionEnabled, cfg.RetentionInterval, log.Default(), store)
 	defer stopRetention()
 
+	streamHub := httpapi.NewStreamHub(store)
+
 	router := httpapi.NewRouter(httpapi.RouterConfig{
 		Verifier:     verifier,
 		Store:        store,
 		Metrics:      metricsRegistry,
 		Limiter:      limiter,
 		HealthPublic: cfg.HealthPublic,
+		StreamHub:    streamHub,
+		AdminToken:   cfg.AdminToken,
+		AdminPublic:  cfg.AdminPublic,
 	})
 
 	server := &http.Server{
@@ -154,6 +163,28 @@ func main() {
 		}()
 	}
 
+	var adminServer *http.Server
+	if cfg.AdminAddr != "" {
+		adminRouter := httpapi.NewAdminRouter(httpapi.AdminRouterConfig{
+			Store:      store,
+			Metrics:    metricsRegistry,
+			AdminToken: cfg.AdminToken,
+			StreamHub:  streamHub,
+			Mode:       "separate_listener",
+		})
+		adminServer = &http.Server{
+			Addr:              cfg.AdminAddr,
+			Handler:           adminRouter,
+			ReadHeaderTimeout: 5 * time.Second,
+		}
+		go func() {
+			log.Printf("admin listening on %s", cfg.AdminAddr)
+			if err := adminServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Fatalf("admin server: %v", err)
+			}
+		}()
+	}
+
 	shutdownCh := make(chan os.Signal, 1)
 	signal.Notify(shutdownCh, syscall.SIGINT, syscall.SIGTERM)
 	<-shutdownCh
@@ -166,6 +197,11 @@ func main() {
 	if metricsServer != nil {
 		if err := metricsServer.Shutdown(ctx); err != nil {
 			log.Printf("metrics shutdown: %v", err)
+		}
+	}
+	if adminServer != nil {
+		if err := adminServer.Shutdown(ctx); err != nil {
+			log.Printf("admin shutdown: %v", err)
 		}
 	}
 }
@@ -189,6 +225,12 @@ func loadConfig() (Config, error) {
 	metricsAddr := os.Getenv("NBR_METRICS_ADDR")
 	healthPublic := parseBoolEnv("NBR_HEALTH_PUBLIC", true)
 	migrateOnStart := parseBoolEnv("NBR_MIGRATE_ON_START", true)
+	adminAddr := strings.TrimSpace(os.Getenv("NBR_ADMIN_ADDR"))
+	adminPublic := parseBoolEnv("NBR_ADMIN_PUBLIC", false)
+	adminToken := os.Getenv("NBR_ADMIN_TOKEN")
+	if (adminAddr != "" || adminPublic) && strings.TrimSpace(adminToken) == "" {
+		return Config{}, fmt.Errorf("NBR_ADMIN_TOKEN required when NBR_ADMIN_ADDR is set or NBR_ADMIN_PUBLIC=true")
+	}
 
 	rateLimits := RateLimitConfig{
 		PollRPS:      parseFloatEnv("NBR_RL_POLL_RPS", 5),
@@ -203,6 +245,9 @@ func loadConfig() (Config, error) {
 
 	return Config{
 		HTTPAddr:          addr,
+		AdminAddr:         adminAddr,
+		AdminToken:        adminToken,
+		AdminPublic:       adminPublic,
 		DBPath:            envOrDefault("NBR_DB_PATH", "./data/relay.db"),
 		RetentionEnabled:  retentionEnabled,
 		RetentionInterval: retentionInterval,

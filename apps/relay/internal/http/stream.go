@@ -36,6 +36,12 @@ type StreamHub struct {
 	botSigningPubkeys map[string]string // bot_id -> signing_pubkey_ed25519 (b64url)
 }
 
+type StreamHubStats struct {
+	ActiveConns   int `json:"active_conns"`
+	ActiveBots    int `json:"active_bots"`
+	ActiveStreams int `json:"active_streams"`
+}
+
 func NewStreamHub(store *store.Store) *StreamHub {
 	return &StreamHub{
 		store:             store,
@@ -43,6 +49,19 @@ func NewStreamHub(store *store.Store) *StreamHub {
 		conns:             make(map[*streamConn]struct{}),
 		botConn:           make(map[string]int),
 		botSigningPubkeys: make(map[string]string),
+	}
+}
+
+func (h *StreamHub) Stats() StreamHubStats {
+	if h == nil {
+		return StreamHubStats{}
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return StreamHubStats{
+		ActiveConns:   len(h.conns),
+		ActiveBots:    len(h.botConn),
+		ActiveStreams: len(h.streams),
 	}
 }
 
