@@ -28,6 +28,12 @@ export function SiteHeader() {
           <Link href="/how-it-works" className="transition hover:text-ink">
             How it works
           </Link>
+          <Link href="/faq" className="transition hover:text-ink">
+            FAQ
+          </Link>
+          <Link href="/troubleshooting" className="transition hover:text-ink">
+            Troubleshooting
+          </Link>
         </nav>
         <div className="flex items-center gap-3">
           <Button asChild size="sm">

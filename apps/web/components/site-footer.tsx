@@ -28,6 +28,12 @@ export function SiteFooter() {
           <Link href="/offers" className="transition hover:text-ink">
             Browse offers
           </Link>
+          <Link href="/faq" className="transition hover:text-ink">
+            FAQ
+          </Link>
+          <Link href="/troubleshooting" className="transition hover:text-ink">
+            Troubleshooting
+          </Link>
           <Link href="/#get-started" className="transition hover:text-ink">
             Get started
           </Link>
