@@ -72,13 +72,14 @@ type offerListResponse struct {
 }
 
 type publicOfferResponse struct {
-	OfferID       string    `json:"offer_id"`
-	Title         string    `json:"title"`
-	Description   string    `json:"description"`
-	Tags          []string  `json:"tags"`
-	PriceRaw      string    `json:"price_raw"`
-	PurchaseCount int       `json:"purchase_count"`
-	CreatedAt     time.Time `json:"created_at"`
+	OfferID           string    `json:"offer_id"`
+	Title             string    `json:"title"`
+	Description       string    `json:"description"`
+	Tags              []string  `json:"tags"`
+	PriceRaw          string    `json:"price_raw"`
+	PurchaseCount     int       `json:"purchase_count"`
+	CreatedAt         time.Time `json:"created_at"`
+	RequestSchemaHint string    `json:"request_schema_hint,omitempty"`
 }
 
 type publicOfferListResponse struct {
@@ -940,14 +941,19 @@ func offerToResponse(offer sqlc.Offer, tags []string) offerResponse {
 }
 
 func publicOfferToResponse(entry offerEntry) publicOfferResponse {
+	requestSchemaHint := ""
+	if entry.Offer.RequestSchemaHint.Valid {
+		requestSchemaHint = entry.Offer.RequestSchemaHint.String
+	}
 	return publicOfferResponse{
-		OfferID:       entry.Offer.OfferID,
-		Title:         entry.Offer.Title,
-		Description:   entry.Offer.Description,
-		Tags:          entry.Tags,
-		PriceRaw:      entry.Offer.PriceRaw,
-		PurchaseCount: entry.PurchaseCount,
-		CreatedAt:     entry.Offer.CreatedAt,
+		OfferID:           entry.Offer.OfferID,
+		Title:             entry.Offer.Title,
+		Description:       entry.Offer.Description,
+		Tags:              entry.Tags,
+		PriceRaw:          entry.Offer.PriceRaw,
+		PurchaseCount:     entry.PurchaseCount,
+		CreatedAt:         entry.Offer.CreatedAt,
+		RequestSchemaHint: requestSchemaHint,
 	}
 }
 
