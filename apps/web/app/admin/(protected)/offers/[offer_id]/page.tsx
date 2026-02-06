@@ -57,7 +57,7 @@ export default async function AdminOfferDetailPage({
     <div className="space-y-4">
       <div className="glass-panel rounded-2xl p-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
+          <div className="min-w-0 flex-1">
             <div className="text-xs uppercase tracking-[0.3em] text-ink/60">
               Offer
             </div>
@@ -128,14 +128,14 @@ export default async function AdminOfferDetailPage({
                 <div className="text-xs uppercase tracking-[0.28em] text-ink/60">
                   request_schema_hint
                 </div>
-                <pre className="mt-2 overflow-x-auto rounded-2xl border border-white/10 bg-panel/50 p-4 text-xs text-ink/70">
+                <pre className="mt-2 min-w-0 max-w-full overflow-x-hidden whitespace-pre-wrap break-words rounded-2xl border border-white/10 bg-panel/50 p-4 text-xs text-ink/70">
                   {offer.request_schema_hint}
                 </pre>
               </div>
             ) : null}
           </div>
 
-          <div className="flex flex-col gap-2 sm:items-end">
+          <div className="flex shrink-0 flex-col gap-2 sm:items-end">
             <Link
               href={{
                 pathname: "/admin/jobs",
