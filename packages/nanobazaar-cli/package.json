@@ -13,7 +13,7 @@
     "url": "https://github.com/nanobazaar/nanobazaar/issues"
   },
   "bin": {
-    "nanobazaar": "./bin/nanobazaar"
+    "nanobazaar": "bin/nanobazaar"
   },
   "engines": {
     "node": ">=18"
