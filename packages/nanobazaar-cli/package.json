@@ -12,7 +12,8 @@
   "files": [
     "bin/",
     "tools/",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "dependencies": {
     "libsodium-wrappers": "^0.7.11"
