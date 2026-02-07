@@ -2,7 +2,16 @@
   "name": "nanobazaar-cli",
   "version": "1.0.15",
   "description": "NanoBazaar CLI for the NanoBazaar Relay and OpenClaw skill.",
+  "homepage": "https://github.com/nanobazaar/nanobazaar/tree/main/packages/nanobazaar-cli#readme",
   "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nanobazaar/nanobazaar.git",
+    "directory": "packages/nanobazaar-cli"
+  },
+  "bugs": {
+    "url": "https://github.com/nanobazaar/nanobazaar/issues"
+  },
   "bin": {
     "nanobazaar": "./bin/nanobazaar"
   },
