@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.0.13] - 2026-02-07
+
+### Added
+- `docs/PAYLOADS.md` with payload construction, verification rules, and prompt-injection guidance.
+- `/nanobazaar payload list` and `/nanobazaar payload fetch` for secure payload download (decrypt + verify + local caching).
+- Automatic payload fetch/decrypt/verify/cache in `nanobazaar poll` and `nanobazaar watch` (disable via `--no-fetch-payloads`).
+
+### Changed
+- Buyer/seller prompts now explicitly treat payload/message bodies as untrusted content (authenticity is not safety).
+- `payload fetch --job-id ...` now falls back to `GET /v0/payloads?job_id=...` when local state/event logs are missing/truncated.
+- State writes are now skipped when state content is unchanged, preventing repeated local wakeups from mtime-only updates.
+
 ## [1.0.12] - 2026-02-05
 
 ### Changed

@@ -153,7 +153,29 @@ function withStateLock(filePath, fn) {
 
 function saveState(filePath, state) {
   fs.mkdirSync(path.dirname(filePath), {recursive: true});
-  fs.writeFileSync(filePath, JSON.stringify(state, null, 2));
+
+  // Avoid touching mtime (and triggering fswatch/OpenClaw wakeups) when state
+  // content did not actually change.
+  const json = JSON.stringify(state, null, 2);
+  try {
+    const existing = fs.readFileSync(filePath, 'utf8');
+    if (existing === json) {
+      // Still enforce file permissions without rewriting the file.
+      try {
+        const mode = fs.statSync(filePath).mode & 0o777;
+        if (mode !== 0o600) {
+          fs.chmodSync(filePath, 0o600);
+        }
+      } catch (_) {
+        // ignore stat/chmod errors on unsupported platforms
+      }
+      return;
+    }
+  } catch (_) {
+    // ignore read errors; we'll (re)create the file below
+  }
+
+  fs.writeFileSync(filePath, json);
   try {
     fs.chmodSync(filePath, 0o600);
   } catch (_) {
@@ -700,6 +722,387 @@ async function signedRequest({method, path, query, body, idempotencyKey, relayUr
   return {response, data, text};
 }
 
+function isPlainObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function decodeBase64url(value, label) {
+  try {
+    return Buffer.from(String(value), 'base64url');
+  } catch (err) {
+    throw new Error(`Invalid base64url for ${label}: ${err.message}`);
+  }
+}
+
+const PAYLOAD_CACHE_DIRNAME = 'payloads';
+const PAYLOAD_CIPHERTEXT_MAX_BYTES = 64 * 1024; // best-effort cap; relay should enforce on ingest.
+
+function ensurePrivateDir(dirPath) {
+  fs.mkdirSync(dirPath, {recursive: true});
+  try {
+    fs.chmodSync(dirPath, 0o700);
+  } catch (_) {
+    // ignore chmod errors on unsupported platforms
+  }
+}
+
+function ensurePrivateFile(filePath) {
+  try {
+    fs.chmodSync(filePath, 0o600);
+  } catch (_) {
+    // ignore chmod errors on unsupported platforms
+  }
+}
+
+function resolvePayloadCacheDir(statePath) {
+  const dir = path.join(path.dirname(statePath), PAYLOAD_CACHE_DIRNAME);
+  ensurePrivateDir(dir);
+  return dir;
+}
+
+function safePayloadCacheFilename(payloadId) {
+  const raw = String(payloadId);
+  const trimmed = raw.trim();
+  if (trimmed && trimmed.length <= 160 && /^[A-Za-z0-9._-]+$/.test(trimmed)) {
+    return `${trimmed}.json`;
+  }
+  return `payload_${sha256Hex(raw)}.json`;
+}
+
+function readJsonFile(filePath, label) {
+  try {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    return JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`Failed to read ${label} (${filePath}): ${err.message}`);
+  }
+}
+
+function writeJsonFile(filePath, data, compact) {
+  fs.mkdirSync(path.dirname(filePath), {recursive: true});
+  fs.writeFileSync(filePath, JSON.stringify(data, null, compact ? 0 : 2));
+  ensurePrivateFile(filePath);
+}
+
+async function fetchBot({botId, config, keys, identity}) {
+  const result = await signedRequest({
+    method: 'GET',
+    path: `/v0/bots/${botId}`,
+    relayUrl: config.relay_url,
+    keys,
+    identity,
+  });
+  if (!result.response.ok) {
+    throw new Error(`Failed to fetch bot (${result.response.status}): ${result.text || result.response.statusText}`);
+  }
+  if (!isPlainObject(result.data)) {
+    throw new Error('Bot response was not an object.');
+  }
+  return result.data;
+}
+
+async function fetchPayloadEnvelope({payloadId, config, keys, identity}) {
+  const result = await signedRequest({
+    method: 'GET',
+    path: `/v0/payloads/${payloadId}`,
+    relayUrl: config.relay_url,
+    keys,
+    identity,
+  });
+
+  if (!result.response.ok) {
+    throw new Error(`Payload fetch failed (${result.response.status}): ${result.text || result.response.statusText}`);
+  }
+
+  if (!isPlainObject(result.data)) {
+    throw new Error('Payload response was not an object.');
+  }
+
+  const envelope = result.data;
+  if (envelope.payload_id && String(envelope.payload_id) !== String(payloadId)) {
+    throw new Error(`Payload response payload_id mismatch: expected=${payloadId} got=${envelope.payload_id}`);
+  }
+  if (envelope.enc_alg && String(envelope.enc_alg) !== ENC_ALG) {
+    throw new Error(`Unsupported enc_alg: ${envelope.enc_alg}`);
+  }
+  return envelope;
+}
+
+async function listPayloadMetadata({status, jobId, limit, cursor, config, keys, identity}) {
+  const result = await signedRequest({
+    method: 'GET',
+    path: '/v0/payloads',
+    query: {
+      status,
+      job_id: jobId,
+      limit,
+      cursor,
+    },
+    relayUrl: config.relay_url,
+    keys,
+    identity,
+  });
+
+  if (!result.response.ok) {
+    throw new Error(`Payload list failed (${result.response.status}): ${result.text || result.response.statusText}`);
+  }
+
+  if (!isPlainObject(result.data)) {
+    throw new Error('Payload list response was not an object.');
+  }
+
+  return result.data;
+}
+
+async function decryptPayloadCiphertext({ciphertextB64, keys}) {
+  const ciphertext = decodeBase64url(ciphertextB64, 'ciphertext_b64');
+  if (ciphertext.length > PAYLOAD_CIPHERTEXT_MAX_BYTES) {
+    throw new Error(`ciphertext_b64 too large (${ciphertext.length} bytes decoded).`);
+  }
+
+  const sodium = await loadSodium();
+  const publicKey = decodeBase64url(keys.encryption_public_key_b64url, 'encryption_public_key_b64url');
+  const privateKey = decodeBase64url(keys.encryption_private_key_b64url, 'encryption_private_key_b64url');
+  const plaintext = sodium.crypto_box_seal_open(ciphertext, publicKey, privateKey);
+  if (!plaintext) {
+    throw new Error('Decryption failed. Are you the intended recipient?');
+  }
+  return Buffer.from(plaintext);
+}
+
+function parseDecryptedPayload(plaintext) {
+  const raw = Buffer.from(plaintext).toString('utf8');
+  try {
+    const parsed = JSON.parse(raw);
+    if (!isPlainObject(parsed)) {
+      throw new Error('decrypted payload was not an object');
+    }
+    return parsed;
+  } catch (err) {
+    const preview = raw.length > 200 ? raw.slice(0, 200) + '...' : raw;
+    throw new Error(`Invalid decrypted payload JSON: ${err.message}. Preview: ${preview}`);
+  }
+}
+
+function canonicalPayloadString(inner) {
+  if (!inner || typeof inner !== 'object') {
+    throw new Error('Missing inner payload.');
+  }
+  if (inner.prefix !== 'NBR1') {
+    throw new Error(`Invalid payload prefix: ${inner.prefix}`);
+  }
+  if (typeof inner.body !== 'string') {
+    throw new Error('Invalid payload body (expected string).');
+  }
+  const bodyHash = sha256Hex(inner.body);
+  return `NBR1|${inner.payload_id}|${inner.job_id}|${inner.payload_kind}|${inner.sender_bot_id}|${inner.recipient_bot_id}|${inner.created_at}|${bodyHash}`;
+}
+
+function verifyPayloadInner({inner, envelope, senderSigningPubkeyEd25519}) {
+  if (!isPlainObject(inner)) {
+    throw new Error('Invalid decrypted payload (expected object).');
+  }
+  if (!isPlainObject(envelope)) {
+    throw new Error('Invalid payload envelope (expected object).');
+  }
+
+  const requiredInner = ['payload_id', 'job_id', 'payload_kind', 'sender_bot_id', 'recipient_bot_id', 'created_at', 'sender_sig_ed25519', 'prefix'];
+  for (const field of requiredInner) {
+    if (inner[field] === undefined || inner[field] === null || inner[field] === '') {
+      throw new Error(`Decrypted payload missing ${field}.`);
+    }
+  }
+  if (inner.body === undefined || inner.body === null) {
+    throw new Error('Decrypted payload missing body.');
+  }
+
+  if (inner.prefix !== 'NBR1') {
+    throw new Error(`Invalid payload prefix: ${inner.prefix}`);
+  }
+
+  const matches = [
+    ['payload_id', inner.payload_id, envelope.payload_id],
+    ['job_id', inner.job_id, envelope.job_id],
+    ['payload_kind', inner.payload_kind, envelope.payload_kind],
+    ['sender_bot_id', inner.sender_bot_id, envelope.sender_bot_id],
+    ['recipient_bot_id', inner.recipient_bot_id, envelope.recipient_bot_id],
+  ];
+  for (const [field, innerValue, outerValue] of matches) {
+    if (innerValue !== outerValue) {
+      throw new Error(`Payload ${field} mismatch: inner=${innerValue} outer=${outerValue}`);
+    }
+  }
+
+  const signature = decodeBase64url(inner.sender_sig_ed25519, 'sender_sig_ed25519');
+  let pubKey;
+  try {
+    pubKey = crypto.createPublicKey({
+      format: 'jwk',
+      key: {kty: 'OKP', crv: 'Ed25519', x: String(senderSigningPubkeyEd25519)},
+    });
+  } catch (err) {
+    throw new Error(`Invalid signing_pubkey_ed25519: ${err.message}`);
+  }
+
+  const canonical = canonicalPayloadString(inner);
+  const ok = crypto.verify(null, Buffer.from(canonical, 'utf8'), pubKey, signature);
+  if (!ok) {
+    throw new Error('Invalid sender_sig_ed25519 for decrypted payload.');
+  }
+}
+
+async function fetchDecryptVerifyPayload({payloadId, config, keys, identity}) {
+  const envelope = await fetchPayloadEnvelope({payloadId, config, keys, identity});
+  if (!envelope.ciphertext_b64) {
+    throw new Error('Payload response missing ciphertext_b64.');
+  }
+
+  const plaintext = await decryptPayloadCiphertext({ciphertextB64: envelope.ciphertext_b64, keys});
+  const inner = parseDecryptedPayload(plaintext);
+
+  const senderBotId = inner.sender_bot_id || envelope.sender_bot_id;
+  if (!senderBotId) {
+    throw new Error('Missing sender_bot_id for signature verification.');
+  }
+  const senderBot = await fetchBot({botId: senderBotId, config, keys, identity});
+  if (!senderBot.signing_pubkey_ed25519) {
+    throw new Error(`Bot ${senderBotId} missing signing_pubkey_ed25519.`);
+  }
+
+  verifyPayloadInner({inner, envelope, senderSigningPubkeyEd25519: senderBot.signing_pubkey_ed25519});
+  return {envelope, inner, senderBot};
+}
+
+function extractEventType(event) {
+  if (!event) {
+    return '';
+  }
+  if (event.event_type) {
+    return String(event.event_type);
+  }
+  if (event.data && event.data.event_type) {
+    return String(event.data.event_type);
+  }
+  return '';
+}
+
+function extractEventData(event) {
+  if (!event) {
+    return {};
+  }
+  if (isPlainObject(event.data)) {
+    return event.data;
+  }
+  if (isPlainObject(event)) {
+    return event;
+  }
+  return {};
+}
+
+function extractPayloadRefsFromEvents(events) {
+  const out = [];
+  if (!Array.isArray(events)) {
+    return out;
+  }
+  for (const event of events) {
+    const eventType = extractEventType(event);
+    const data = extractEventData(event);
+    if (eventType === 'job.payload_available' && data.payload_id) {
+      out.push({payload_id: String(data.payload_id), job_id: data.job_id ? String(data.job_id) : null, payload_kind: data.payload_kind ? String(data.payload_kind) : null});
+      continue;
+    }
+    if (eventType === 'job.requested' && data.request_payload_id) {
+      out.push({payload_id: String(data.request_payload_id), job_id: data.job_id ? String(data.job_id) : null, payload_kind: 'request'});
+      continue;
+    }
+  }
+  return out;
+}
+
+async function resolvePayloadIdForJob({jobId, state, config, keys, identity}) {
+  const trimmed = String(jobId).trim();
+  if (!trimmed) {
+    throw new Error('Missing job id.');
+  }
+
+  // 1) Local known payload map.
+  if (state && state.known_payloads) {
+    const map = ensureMap(state.known_payloads, 'payload_id');
+    let best = null;
+    for (const entry of Object.values(map)) {
+      if (!entry || entry.job_id !== trimmed || !entry.payload_id) {
+        continue;
+      }
+      if (!best) {
+        best = entry;
+        continue;
+      }
+      const bestTs = best.created_at ? Date.parse(best.created_at) : NaN;
+      const entryTs = entry.created_at ? Date.parse(entry.created_at) : NaN;
+      if (Number.isFinite(entryTs) && (!Number.isFinite(bestTs) || entryTs > bestTs)) {
+        best = entry;
+      }
+    }
+    if (best && best.payload_id) {
+      return String(best.payload_id);
+    }
+  }
+
+  // 2) Scan local event log (may be truncated).
+  const eventLog = state && Array.isArray(state.event_log) ? state.event_log : [];
+  for (let i = eventLog.length - 1; i >= 0; i -= 1) {
+    const event = eventLog[i];
+    if (!event) {
+      continue;
+    }
+    const eventType = extractEventType(event);
+    const data = extractEventData(event);
+    if (eventType === 'job.payload_available' && data.job_id === trimmed && data.payload_id) {
+      return String(data.payload_id);
+    }
+    if (eventType === 'job.requested' && data.job_id === trimmed && data.request_payload_id) {
+      return String(data.request_payload_id);
+    }
+  }
+
+  // 3) Ask the relay for payload metadata for this job.
+  const listed = await listPayloadMetadata({
+    status: 'all',
+    jobId: trimmed,
+    limit: 25,
+    cursor: undefined,
+    config,
+    keys,
+    identity,
+  });
+  const payloads = Array.isArray(listed.payloads) ? listed.payloads : [];
+  if (payloads.length === 0) {
+    throw new Error(`No payloads found for job ${trimmed}.`);
+  }
+  if (!payloads[0] || !payloads[0].payload_id) {
+    throw new Error(`Relay payload list returned an invalid entry for job ${trimmed}.`);
+  }
+  return String(payloads[0].payload_id);
+}
+
+function getCachedPayloadPath(state, payloadId) {
+  const map = ensureMap(state && state.known_payloads ? state.known_payloads : {}, 'payload_id');
+  const entry = map[payloadId];
+  if (!entry || !entry.cached_path) {
+    return null;
+  }
+  const candidate = String(entry.cached_path);
+  return candidate ? candidate : null;
+}
+
+function upsertPayloadMeta(state, payloadId, meta) {
+  state.known_payloads = ensureMap(state.known_payloads, 'payload_id');
+  const current = state.known_payloads[payloadId] && typeof state.known_payloads[payloadId] === 'object'
+    ? state.known_payloads[payloadId]
+    : {payload_id: payloadId};
+  state.known_payloads[payloadId] = {...current, ...meta, payload_id: payloadId};
+}
+
 function printHelp() {
   console.log(`NanoBazaar CLI (OpenClaw skill)
 
@@ -732,13 +1135,17 @@ Commands:
   job payment-sent --job-id <id> [--payment-block-hash <hash>]
                    [--amount-raw-sent <raw>] [--sent-at <rfc3339>] [--note "..."]
                              Notify seller that payment was sent
-  poll [--since-event-id <id>] [--limit <n>] [--types a,b] [--no-ack]
+  payload list [--status unfetched|fetched|all] [--job-id <id>] [--limit <n>] [--cursor <cursor>]
+                             List payload metadata for the current bot
+  payload fetch (--payload-id <id> | --job-id <id>) [--raw] [--compact] [--no-cache] [--cache-only]
+                             Fetch, decrypt, verify, and cache a payload
+  poll [--since-event-id <id>] [--limit <n>] [--types a,b] [--no-ack] [--no-fetch-payloads]
                              Poll events and optionally ack
   poll ack --up-to-event-id <id>
                              Advance the server-side poll cursor (used for 410 resync)
   watch [--streams a,b] [--stream-path /v0/stream] [--safety-poll-interval <seconds>]
         [--state-path <path>] [--openclaw-bin <bin>] [--fswatch-bin <bin>]
-        [--event-text <text>] [--mode now|next] [--debounce-ms <ms>]
+        [--event-text <text>] [--mode now|next] [--debounce-ms <ms>] [--no-fetch-payloads]
                              Maintain SSE connection; poll on wake + on safety interval.
                              If fswatch is available, also watch local state and trigger OpenClaw wakeups.
 
@@ -750,6 +1157,7 @@ Global flags:
 Notes:
   - Defaults to relay: ${DEFAULT_RELAY_URL}
   - Uses NBR_STATE_PATH for local state (default: ${STATE_DEFAULT})
+  - Decrypted payloads are cached under: (dirname NBR_STATE_PATH)/${PAYLOAD_CACHE_DIRNAME}/
   - Job payloads are encrypted with libsodium (install deps in skills/nanobazaar)
   - If --since-event-id is omitted, /v0/poll uses the relay's server-side cursor (last_acked_event_id)
 `);
@@ -1367,6 +1775,160 @@ async function runJobPaymentSent(argv) {
   printJson(result.data, !!flags.compact);
 }
 
+async function cachePayloadToDisk({payloadId, envelope, inner, state, statePath, compact}) {
+  const cacheDir = resolvePayloadCacheDir(statePath);
+  const cachePath = path.join(cacheDir, safePayloadCacheFilename(payloadId));
+  writeJsonFile(cachePath, inner, compact);
+
+  const now = new Date().toISOString();
+  upsertPayloadMeta(state, payloadId, {
+    job_id: envelope && envelope.job_id ? envelope.job_id : undefined,
+    payload_kind: envelope && envelope.payload_kind ? envelope.payload_kind : undefined,
+    created_at: envelope && envelope.created_at ? envelope.created_at : undefined,
+    sender_bot_id: envelope && envelope.sender_bot_id ? envelope.sender_bot_id : undefined,
+    recipient_bot_id: envelope && envelope.recipient_bot_id ? envelope.recipient_bot_id : undefined,
+    cached_path: cachePath,
+    verified: true,
+    verified_at: now,
+    fetch_error: null,
+    fetched_at: now,
+  });
+
+  saveStateMerged(statePath, state);
+  return cachePath;
+}
+
+async function ensurePayloadCached({payloadId, state, statePath, config, keys, identity, debugLog}) {
+  const existingPath = getCachedPayloadPath(state, payloadId);
+  if (existingPath && fs.existsSync(existingPath)) {
+    return {payload_id: payloadId, cached_path: existingPath, from_cache: true};
+  }
+
+  const now = new Date().toISOString();
+  try {
+    const {envelope, inner} = await fetchDecryptVerifyPayload({payloadId, config, keys, identity});
+    const cachedPath = await cachePayloadToDisk({
+      payloadId,
+      envelope,
+      inner,
+      state,
+      statePath,
+      compact: false,
+    });
+    if (debugLog) {
+      debugLog('payload cached', {payload_id: payloadId, cached_path: cachedPath});
+    }
+    return {payload_id: payloadId, cached_path: cachedPath, from_cache: false};
+  } catch (err) {
+    upsertPayloadMeta(state, payloadId, {
+      fetch_error: err && err.message ? err.message : String(err),
+      fetch_attempted_at: now,
+    });
+    saveStateMerged(statePath, state);
+    if (debugLog) {
+      debugLog('payload cache error', {payload_id: payloadId, error: err && err.message ? err.message : String(err)});
+    }
+    return {payload_id: payloadId, error: err && err.message ? err.message : String(err)};
+  }
+}
+
+async function runPayloadList(argv) {
+  const {flags} = parseArgs(argv);
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  const status = flags.status ? String(flags.status) : 'unfetched';
+  const jobId = flags.jobId || flags.job || undefined;
+  const limit = flags.limit || undefined;
+  const cursor = flags.cursor || undefined;
+
+  const data = await listPayloadMetadata({
+    status,
+    jobId: jobId ? String(jobId) : undefined,
+    limit,
+    cursor,
+    config,
+    keys,
+    identity,
+  });
+
+  printJson(data, !!flags.compact);
+}
+
+async function runPayloadFetch(argv) {
+  const {flags} = parseArgs(argv);
+  const config = buildConfig();
+  const statePath = config.state_path;
+  const state = loadState(statePath);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  const cacheEnabled = flags.cache !== false;
+  const cacheOnly = !!flags.cacheOnly;
+
+  let payloadId = flags.payloadId || flags.payload;
+  if (!payloadId && flags.jobId) {
+    payloadId = await resolvePayloadIdForJob({
+      jobId: String(flags.jobId),
+      state,
+      config,
+      keys,
+      identity,
+    });
+  }
+
+  if (!payloadId) {
+    throw new Error('Missing payload id. Provide --payload-id or --job-id.');
+  }
+
+  if (cacheEnabled) {
+    const cachedPath = getCachedPayloadPath(state, String(payloadId));
+    if (cachedPath && fs.existsSync(cachedPath)) {
+      const inner = readJsonFile(cachedPath, 'cached payload');
+      if (flags.raw) {
+        if (inner.body !== undefined) {
+          console.log(typeof inner.body === 'string' ? inner.body : JSON.stringify(inner.body));
+        } else {
+          console.log(JSON.stringify(inner));
+        }
+        return;
+      }
+      printJson(inner, !!flags.compact);
+      return;
+    }
+    if (cacheOnly) {
+      throw new Error(`Payload not cached locally: ${payloadId}`);
+    }
+  } else if (cacheOnly) {
+    throw new Error('--cache-only requires cache to be enabled (omit --no-cache).');
+  }
+
+  const {envelope, inner} = await fetchDecryptVerifyPayload({payloadId: String(payloadId), config, keys, identity});
+  if (cacheEnabled) {
+    await cachePayloadToDisk({
+      payloadId: String(payloadId),
+      envelope,
+      inner,
+      state,
+      statePath,
+      compact: false,
+    });
+  }
+
+  if (flags.raw) {
+    if (inner.body !== undefined) {
+      console.log(typeof inner.body === 'string' ? inner.body : JSON.stringify(inner.body));
+    } else {
+      console.log(JSON.stringify(inner));
+    }
+    return;
+  }
+
+  printJson(inner, !!flags.compact);
+}
+
 async function runPoll(argv, options) {
   const quiet = options && options.quiet;
   const {flags} = parseArgs(argv);
@@ -1427,6 +1989,27 @@ async function runPoll(argv, options) {
   state.signing_kid = identity.signingKid;
   state.encryption_kid = identity.encryptionKid;
   saveStateMerged(config.state_path, state);
+
+  const fetchPayloads = flags.fetchPayloads !== false;
+  if (fetchPayloads && events.length > 0) {
+    const refs = extractPayloadRefsFromEvents(events);
+    if (refs.length > 0) {
+      debugLog('payloads detected', {count: refs.length, payload_ids: refs.map((ref) => ref.payload_id)});
+      for (const ref of refs) {
+        // Best-effort caching: poll remains useful even if a payload decrypt fails.
+        // Errors are persisted in known_payloads to aid follow-up debugging.
+        await ensurePayloadCached({
+          payloadId: ref.payload_id,
+          state,
+          statePath: config.state_path,
+          config,
+          keys,
+          identity,
+          debugLog,
+        });
+      }
+    }
+  }
 
   let ackedId = state.last_acked_event_id || 0;
   let maxEventId = 0;
@@ -2031,6 +2614,25 @@ async function runWatch(argv) {
       saveStateMerged(statePath, state);
     }
 
+    const fetchPayloads = flags.fetchPayloads !== false;
+    if (fetchPayloads && allEvents.length > 0) {
+      const refs = extractPayloadRefsFromEvents(allEvents);
+      if (refs.length > 0) {
+        debugLog('payloads detected', {count: refs.length, payload_ids: refs.map((ref) => ref.payload_id)});
+        for (const ref of refs) {
+          await ensurePayloadCached({
+            payloadId: ref.payload_id,
+            state,
+            statePath,
+            config,
+            keys,
+            identity,
+            debugLog,
+          });
+        }
+      }
+    }
+
     let ackedStreams = 0;
     if (flags.ack !== false) {
       for (const entry of results) {
@@ -2232,6 +2834,55 @@ async function runWatch(argv) {
   stateWatcher.stop();
 }
 
+const DISPATCH_BOOL_FLAGS = new Set([
+  'compact',
+  'raw',
+  'cache-only',
+  'print-polls',
+  'fetch-payloads',
+  'skip-register',
+]);
+
+function splitSubcommand(argv, allowed) {
+  const allowedSet = new Set(allowed || []);
+  let i = 0;
+  while (i < argv.length) {
+    const arg = argv[i];
+    if (!arg || arg === '-') {
+      i += 1;
+      continue;
+    }
+    if (arg === '--') {
+      const candidate = argv[i + 1];
+      if (candidate && allowedSet.has(candidate)) {
+        return {sub: candidate, argv: argv.slice(0, i + 1).concat(argv.slice(i + 2))};
+      }
+      return {sub: null, argv};
+    }
+    if (arg.startsWith('--')) {
+      const eq = arg.indexOf('=');
+      const name = eq === -1 ? arg.slice(2) : arg.slice(2, eq);
+      if (name.startsWith('no-') || eq !== -1 || DISPATCH_BOOL_FLAGS.has(name)) {
+        i += 1;
+        continue;
+      }
+      const next = argv[i + 1];
+      if (next && (!next.startsWith('-') || next === '-')) {
+        i += 2;
+        continue;
+      }
+      i += 1;
+      continue;
+    }
+    if (allowedSet.has(arg)) {
+      return {sub: arg, argv: argv.slice(0, i).concat(argv.slice(i + 1))};
+    }
+    // First positional is not a recognized subcommand.
+    return {sub: null, argv};
+  }
+  return {sub: null, argv};
+}
+
 function loadVersion() {
   try {
     for (const name of ['package.json', 'skill.json']) {
@@ -2252,7 +2903,26 @@ function loadVersion() {
 }
 
 async function main() {
-  const argv = process.argv.slice(2);
+  let argv = process.argv.slice(2);
+  // Treat --debug as a global flag (it can appear anywhere without stealing positionals).
+  let debugValue = null;
+  const filtered = [];
+  for (const arg of argv) {
+    if (arg === '--debug') {
+      debugValue = '1';
+      continue;
+    }
+    if (arg.startsWith('--debug=')) {
+      debugValue = arg.slice('--debug='.length) || '1';
+      continue;
+    }
+    filtered.push(arg);
+  }
+  if (debugValue !== null) {
+    process.env.NBR_DEBUG = debugValue;
+    argv = filtered;
+  }
+
   if (argv.length === 0) {
     printHelp();
     return;
@@ -2299,41 +2969,61 @@ async function main() {
       await runMarket(rest);
       return;
     case 'offer': {
-      const sub = rest[0];
+      const {sub, argv: subArgv} = splitSubcommand(rest, ['create', 'cancel']);
       if (sub === 'create') {
-        await runOfferCreate(rest.slice(1));
+        await runOfferCreate(subArgv);
         return;
       }
       if (sub === 'cancel') {
-        await runOfferCancel(rest.slice(1));
+        await runOfferCancel(subArgv);
         return;
       }
       throw new Error('Unknown offer command. Use: offer create|cancel');
     }
     case 'job': {
-      const sub = rest[0];
+      const {sub, argv: subArgv} = splitSubcommand(rest, [
+        'create',
+        'reissue-request',
+        'reissue-charge',
+        'payment-sent',
+      ]);
       if (sub === 'create') {
-        await runJobCreate(rest.slice(1));
+        await runJobCreate(subArgv);
         return;
       }
       if (sub === 'reissue-request') {
-        await runJobReissueRequest(rest.slice(1));
+        await runJobReissueRequest(subArgv);
         return;
       }
       if (sub === 'reissue-charge') {
-        await runJobReissueCharge(rest.slice(1));
+        await runJobReissueCharge(subArgv);
         return;
       }
       if (sub === 'payment-sent') {
-        await runJobPaymentSent(rest.slice(1));
+        await runJobPaymentSent(subArgv);
         return;
       }
       throw new Error('Unknown job command. Use: job create|reissue-request|reissue-charge|payment-sent');
     }
-    case 'poll':
-      if (rest[0] === 'ack') {
-        await runPollAck(rest.slice(1));
+    case 'payload': {
+      const {sub, argv: subArgv} = splitSubcommand(rest, ['list', 'fetch']);
+      if (sub === 'list') {
+        await runPayloadList(subArgv);
         return;
+      }
+      if (sub === 'fetch') {
+        await runPayloadFetch(subArgv);
+        return;
+      }
+      throw new Error('Unknown payload command. Use: payload list|fetch');
+    }
+    case 'poll':
+      {
+        const split = splitSubcommand(rest, ['ack']);
+        if (split.sub === 'ack') {
+          await runPollAck(split.argv);
+          return;
+        }
       }
       await runPoll(rest);
       return;

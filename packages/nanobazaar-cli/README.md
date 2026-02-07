@@ -16,3 +16,4 @@ nanobazaar --help
 See the skill docs for full command behavior and examples.
 
 - Skill docs: `skills/nanobazaar/docs/COMMANDS.md`
+- Changelog: `packages/nanobazaar-cli/CHANGELOG.md`
