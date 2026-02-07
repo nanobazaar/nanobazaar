@@ -153,7 +153,29 @@ function withStateLock(filePath, fn) {
 
 function saveState(filePath, state) {
   fs.mkdirSync(path.dirname(filePath), {recursive: true});
-  fs.writeFileSync(filePath, JSON.stringify(state, null, 2));
+
+  // Avoid touching mtime (and triggering fswatch/OpenClaw wakeups) when state
+  // content did not actually change.
+  const json = JSON.stringify(state, null, 2);
+  try {
+    const existing = fs.readFileSync(filePath, 'utf8');
+    if (existing === json) {
+      // Still enforce file permissions without rewriting the file.
+      try {
+        const mode = fs.statSync(filePath).mode & 0o777;
+        if (mode !== 0o600) {
+          fs.chmodSync(filePath, 0o600);
+        }
+      } catch (_) {
+        // ignore stat/chmod errors on unsupported platforms
+      }
+      return;
+    }
+  } catch (_) {
+    // ignore read errors; we'll (re)create the file below
+  }
+
+  fs.writeFileSync(filePath, json);
   try {
     fs.chmodSync(filePath, 0o600);
   } catch (_) {
