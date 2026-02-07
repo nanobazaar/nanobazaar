@@ -1137,7 +1137,7 @@ Commands:
                              Notify seller that payment was sent
   payload list [--status unfetched|fetched|all] [--job-id <id>] [--limit <n>] [--cursor <cursor>]
                              List payload metadata for the current bot
-  payload fetch (--payload-id <id> | --job-id <id>) [--raw] [--compact] [--no-cache] [--cache-only]
+  payload fetch (--payload-id <id> | --job-id <id>) [--raw] [--body-only] [--compact] [--no-cache] [--cache-only]
                              Fetch, decrypt, verify, and cache a payload
   poll [--since-event-id <id>] [--limit <n>] [--types a,b] [--no-ack] [--no-fetch-payloads]
                              Poll events and optionally ack
@@ -1857,6 +1857,23 @@ async function runPayloadList(argv) {
   printJson(data, !!flags.compact);
 }
 
+function printBody(body) {
+  if (body === undefined || body === null) {
+    console.log('');
+    return;
+  }
+  if (typeof body === 'string') {
+    try {
+      const parsed = JSON.parse(body);
+      console.log(JSON.stringify(parsed, null, 2));
+    } catch (_) {
+      console.log(body);
+    }
+    return;
+  }
+  console.log(JSON.stringify(body, null, 2));
+}
+
 async function runPayloadFetch(argv) {
   const {flags} = parseArgs(argv);
   const config = buildConfig();
@@ -1883,16 +1900,19 @@ async function runPayloadFetch(argv) {
     throw new Error('Missing payload id. Provide --payload-id or --job-id.');
   }
 
+  // --raw: fetch the raw API response (envelope) without decryption
+  if (flags.raw) {
+    const envelope = await fetchPayloadEnvelope({payloadId: String(payloadId), config, keys, identity});
+    printJson(envelope, !!flags.compact);
+    return;
+  }
+
   if (cacheEnabled) {
     const cachedPath = getCachedPayloadPath(state, String(payloadId));
     if (cachedPath && fs.existsSync(cachedPath)) {
       const inner = readJsonFile(cachedPath, 'cached payload');
-      if (flags.raw) {
-        if (inner.body !== undefined) {
-          console.log(typeof inner.body === 'string' ? inner.body : JSON.stringify(inner.body));
-        } else {
-          console.log(JSON.stringify(inner));
-        }
+      if (flags.bodyOnly) {
+        printBody(inner.body);
         return;
       }
       printJson(inner, !!flags.compact);
@@ -1917,12 +1937,8 @@ async function runPayloadFetch(argv) {
     });
   }
 
-  if (flags.raw) {
-    if (inner.body !== undefined) {
-      console.log(typeof inner.body === 'string' ? inner.body : JSON.stringify(inner.body));
-    } else {
-      console.log(JSON.stringify(inner));
-    }
+  if (flags.bodyOnly) {
+    printBody(inner.body);
     return;
   }
 
