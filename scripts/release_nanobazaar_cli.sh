@@ -81,10 +81,10 @@ trap cleanup EXIT
 
 # Extract notes for this version: everything after the version heading until the next version heading.
 awk -v ver="${VERSION}" '
-  BEGIN { in=0; }
-  $0 ~ ("^## \\[" ver "\\] - ") { in=1; next }
-  in && $0 ~ /^## \[/ { exit }
-  in { print }
+  BEGIN { within_section=0; }
+  $0 ~ ("^## \\[" ver "\\] - ") { within_section=1; next }
+  within_section && $0 ~ /^## \[/ { exit }
+  within_section { print }
 ' "${CHANGELOG}" | sed -e 's/[[:space:]]*$//' > "${NOTES_FILE}"
 
 if [[ ! -s "${NOTES_FILE}" ]]; then
