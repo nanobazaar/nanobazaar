@@ -11,4 +11,9 @@ node "$CLI" --debug watch --help > /tmp/nanobazaar_cli_watch_help_pre_debug.txt
 node "$CLI" watch --debug --help > /tmp/nanobazaar_cli_watch_help_post_debug.txt
 node "$CLI" config --json > /tmp/nanobazaar_cli_config.json
 
+grep -q -- "job charge" /tmp/nanobazaar_cli_help.txt
+grep -q -- "job mark-paid" /tmp/nanobazaar_cli_help.txt
+grep -q -- "job deliver" /tmp/nanobazaar_cli_help.txt
+! grep -q -- "--streams" /tmp/nanobazaar_cli_help.txt
+
 echo "CLI smoke test passed."

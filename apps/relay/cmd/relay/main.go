@@ -108,7 +108,7 @@ func main() {
 	stopRetention := retention.Start(cfg.RetentionEnabled, cfg.RetentionInterval, log.Default(), store)
 	defer stopRetention()
 
-	streamHub := httpapi.NewStreamHub(store)
+	streamHub := httpapi.NewStreamHub()
 
 	router := httpapi.NewRouter(httpapi.RouterConfig{
 		Verifier:     verifier,

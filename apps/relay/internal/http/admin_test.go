@@ -72,7 +72,7 @@ func TestAdminRevokeBotCreatesAudit(t *testing.T) {
 	router := NewAdminRouter(AdminRouterConfig{
 		Store:      st,
 		AdminToken: "secret-token",
-		StreamHub:  NewStreamHub(st),
+		StreamHub:  NewStreamHub(),
 	})
 
 	body := mustJSONBytes(t, map[string]any{"reason": "moderation"})
@@ -196,7 +196,7 @@ func TestAdminListJobsRechecksStatusAfterExpiry(t *testing.T) {
 	router := NewAdminRouter(AdminRouterConfig{
 		Store:      st,
 		AdminToken: "secret-token",
-		StreamHub:  NewStreamHub(st),
+		StreamHub:  NewStreamHub(),
 	})
 
 	req := newJSONRequest(t, http.MethodGet, "/admin/jobs?status=REQUESTED", nil)

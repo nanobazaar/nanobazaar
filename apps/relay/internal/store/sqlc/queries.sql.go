@@ -466,43 +466,6 @@ func (q *Queries) CreatePayload(ctx context.Context, arg CreatePayloadParams) er
 	return err
 }
 
-const createStreamEvent = `-- name: CreateStreamEvent :one
-INSERT INTO stream_events (
-	stream_key,
-	cursor,
-	event_type,
-	created_at,
-	payload_json
-) VALUES (
-	?1,
-	(SELECT COALESCE(MAX(cursor), 0) + 1 FROM stream_events WHERE stream_key = ?1),
-	?2,
-	?3,
-	?4
-)
-RETURNING cursor
-`
-
-type CreateStreamEventParams struct {
-	StreamKey   string    `json:"stream_key"`
-	EventType   string    `json:"event_type"`
-	CreatedAt   time.Time `json:"created_at"`
-	PayloadJson string    `json:"payload_json"`
-}
-
-// Stream events
-func (q *Queries) CreateStreamEvent(ctx context.Context, arg CreateStreamEventParams) (int64, error) {
-	row := q.queryRow(ctx, q.createStreamEventStmt, createStreamEvent,
-		arg.StreamKey,
-		arg.EventType,
-		arg.CreatedAt,
-		arg.PayloadJson,
-	)
-	var cursor int64
-	err := row.Scan(&cursor)
-	return cursor, err
-}
-
 const deleteEventsBefore = `-- name: DeleteEventsBefore :exec
 DELETE FROM events
 WHERE created_at < ?1
@@ -576,17 +539,6 @@ WHERE fetched_at IS NOT NULL
 
 func (q *Queries) DeletePayloadsFetchedBefore(ctx context.Context, cutoff sql.NullTime) error {
 	_, err := q.exec(ctx, q.deletePayloadsFetchedBeforeStmt, deletePayloadsFetchedBefore, cutoff)
-	return err
-}
-
-const deleteStreamEventsAckedBefore = `-- name: DeleteStreamEventsAckedBefore :exec
-DELETE FROM stream_events
-WHERE created_at < ?1
-	AND cursor <= COALESCE((SELECT ack_cursor FROM stream_acks WHERE stream_key = stream_events.stream_key), -1)
-`
-
-func (q *Queries) DeleteStreamEventsAckedBefore(ctx context.Context, cutoff time.Time) error {
-	_, err := q.exec(ctx, q.deleteStreamEventsAckedBeforeStmt, deleteStreamEventsAckedBefore, cutoff)
 	return err
 }
 
@@ -782,19 +734,6 @@ func (q *Queries) GetPollAck(ctx context.Context, recipientBotID string) (PollAc
 	row := q.queryRow(ctx, q.getPollAckStmt, getPollAck, recipientBotID)
 	var i PollAck
 	err := row.Scan(&i.RecipientBotID, &i.LastAckedEventID, &i.UpdatedAt)
-	return i, err
-}
-
-const getStreamAck = `-- name: GetStreamAck :one
-SELECT stream_key, ack_cursor, updated_at FROM stream_acks
-WHERE stream_key = ?1
-`
-
-// Stream acks
-func (q *Queries) GetStreamAck(ctx context.Context, streamKey string) (StreamAck, error) {
-	row := q.queryRow(ctx, q.getStreamAckStmt, getStreamAck, streamKey)
-	var i StreamAck
-	err := row.Scan(&i.StreamKey, &i.AckCursor, &i.UpdatedAt)
 	return i, err
 }
 
@@ -2781,62 +2720,6 @@ func (q *Queries) ListPayloadMetadataUnfetchedAfter(ctx context.Context, arg Lis
 	return items, nil
 }
 
-const listStreamEventsAfterCursor = `-- name: ListStreamEventsAfterCursor :many
-SELECT stream_key,
-	cursor,
-	event_type,
-	payload_json,
-	created_at
-FROM stream_events
-WHERE stream_key = ?1
-	AND cursor > ?2
-ORDER BY cursor ASC
-LIMIT ?3
-`
-
-type ListStreamEventsAfterCursorParams struct {
-	StreamKey   string `json:"stream_key"`
-	SinceCursor int64  `json:"since_cursor"`
-	Limit       int64  `json:"limit"`
-}
-
-type ListStreamEventsAfterCursorRow struct {
-	StreamKey   string    `json:"stream_key"`
-	Cursor      int64     `json:"cursor"`
-	EventType   string    `json:"event_type"`
-	PayloadJson string    `json:"payload_json"`
-	CreatedAt   time.Time `json:"created_at"`
-}
-
-func (q *Queries) ListStreamEventsAfterCursor(ctx context.Context, arg ListStreamEventsAfterCursorParams) ([]ListStreamEventsAfterCursorRow, error) {
-	rows, err := q.query(ctx, q.listStreamEventsAfterCursorStmt, listStreamEventsAfterCursor, arg.StreamKey, arg.SinceCursor, arg.Limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListStreamEventsAfterCursorRow
-	for rows.Next() {
-		var i ListStreamEventsAfterCursorRow
-		if err := rows.Scan(
-			&i.StreamKey,
-			&i.Cursor,
-			&i.EventType,
-			&i.PayloadJson,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const markPayloadFetched = `-- name: MarkPayloadFetched :exec
 UPDATE payloads
 SET fetched_at = ?1
@@ -3188,31 +3071,5 @@ type UpsertPollAckParams struct {
 
 func (q *Queries) UpsertPollAck(ctx context.Context, arg UpsertPollAckParams) error {
 	_, err := q.exec(ctx, q.upsertPollAckStmt, upsertPollAck, arg.RecipientBotID, arg.LastAckedEventID, arg.UpdatedAt)
-	return err
-}
-
-const upsertStreamAck = `-- name: UpsertStreamAck :exec
-INSERT INTO stream_acks (
-	stream_key,
-	ack_cursor,
-	updated_at
-) VALUES (
-	?1,
-	?2,
-	?3
-)
-ON CONFLICT(stream_key) DO UPDATE SET
-	ack_cursor = excluded.ack_cursor,
-	updated_at = excluded.updated_at
-`
-
-type UpsertStreamAckParams struct {
-	StreamKey string    `json:"stream_key"`
-	AckCursor int64     `json:"ack_cursor"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-func (q *Queries) UpsertStreamAck(ctx context.Context, arg UpsertStreamAckParams) error {
-	_, err := q.exec(ctx, q.upsertStreamAckStmt, upsertStreamAck, arg.StreamKey, arg.AckCursor, arg.UpdatedAt)
 	return err
 }

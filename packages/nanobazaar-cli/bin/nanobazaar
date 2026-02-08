@@ -154,8 +154,7 @@ function withStateLock(filePath, fn) {
 function saveState(filePath, state) {
   fs.mkdirSync(path.dirname(filePath), {recursive: true});
 
-  // Avoid touching mtime (and triggering fswatch/OpenClaw wakeups) when state
-  // content did not actually change.
+  // Avoid touching mtime when state content did not actually change.
   const json = JSON.stringify(state, null, 2);
   try {
     const existing = fs.readFileSync(filePath, 'utf8');
@@ -185,7 +184,8 @@ function saveState(filePath, state) {
 
 const DEFAULT_STATE_MERGE = Object.freeze({
   mergeLastAcked: true,
-  mergeStreamCursors: true,
+  // Stream cursors are deprecated; /v0/poll is the single durable cursor model.
+  mergeStreamCursors: false,
   mergeKnownMaps: true,
   mergeEventLog: true,
 });
@@ -577,6 +577,52 @@ function rawToXnoString(raw) {
   return `${whole.toString()}.${fracStr}`;
 }
 
+function formatRFC3339Nano(date) {
+  const d = date instanceof Date ? date : new Date(date);
+  if (!Number.isFinite(d.getTime())) {
+    throw new Error('Invalid date.');
+  }
+  // JS Date has millisecond precision; format as canonical RFC3339Nano (Go-style):
+  // trim trailing zeros in the fractional part and omit the fraction if it's all zeros.
+  const iso = d.toISOString(); // always ends with "Z"
+  return iso
+    .replace(/\\.000Z$/, 'Z')
+    .replace(/(\\.\\d*[1-9])0+Z$/, '$1Z');
+}
+
+function canonicalizeRFC3339Nano(value, label) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    throw new Error(`Missing ${label}.`);
+  }
+  if (!raw.endsWith('Z')) {
+    throw new Error(`${label} must be UTC (end with 'Z').`);
+  }
+  const ms = Date.parse(raw);
+  if (!Number.isFinite(ms)) {
+    throw new Error(`Invalid ${label}: ${raw}`);
+  }
+  return formatRFC3339Nano(new Date(ms));
+}
+
+function canonicalChargeString({jobId, offerId, sellerBotId, buyerBotId, chargeId, address, amountRaw, chargeExpiresAt}) {
+  const expiresAt = canonicalizeRFC3339Nano(chargeExpiresAt, 'charge_expires_at');
+  return `NBR1_CHARGE|${jobId}|${offerId}|${sellerBotId}|${buyerBotId}|${chargeId}|${address}|${amountRaw}|${expiresAt}`;
+}
+
+function printQr(text, {toStderr} = {}) {
+  const output = toStderr ? console.error : console.log;
+  try {
+    // Optional dependency: QR output is best-effort.
+    // eslint-disable-next-line global-require, import/no-extraneous-dependencies
+    const qr = require('qrcode-terminal');
+    qr.generate(String(text), {small: true}, (code) => output(code));
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 function withXnoPrices(value) {
   if (Array.isArray(value)) {
     return value.map((entry) => withXnoPrices(entry));
@@ -769,6 +815,15 @@ function safePayloadCacheFilename(payloadId) {
   return `payload_${sha256Hex(raw)}.json`;
 }
 
+function safeIdPart(value) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return '';
+  }
+  const cleaned = raw.replace(/[^A-Za-z0-9._-]+/g, '_');
+  return cleaned.length > 80 ? cleaned.slice(0, 80) : cleaned;
+}
+
 function readJsonFile(filePath, label) {
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
@@ -797,6 +852,27 @@ async function fetchBot({botId, config, keys, identity}) {
   }
   if (!isPlainObject(result.data)) {
     throw new Error('Bot response was not an object.');
+  }
+  return result.data;
+}
+
+async function fetchJob({jobId, config, keys, identity}) {
+  const trimmed = String(jobId).trim();
+  if (!trimmed) {
+    throw new Error('Missing job id.');
+  }
+  const result = await signedRequest({
+    method: 'GET',
+    path: `/v0/jobs/${trimmed}`,
+    relayUrl: config.relay_url,
+    keys,
+    identity,
+  });
+  if (!result.response.ok) {
+    throw new Error(`Failed to fetch job (${result.response.status}): ${result.text || result.response.statusText}`);
+  }
+  if (!isPlainObject(result.data)) {
+    throw new Error('Job response was not an object.');
   }
   return result.data;
 }
@@ -1122,6 +1198,8 @@ Commands:
                              Fetch a bot record (includes bot_name when set)
   wallet [--output <path>] [--no-qr]
                              Show BerryPay wallet address + QR
+  qr <text>
+                             Render a terminal QR code (best-effort)
   search <query> [--tags a,b] [--seller <bot_id>] [--mine]
                              Search offers
   market [--query <q>] [--tags a,b] [--seller <bot_id>] [--sort <mode>]
@@ -1133,14 +1211,22 @@ Commands:
                              Cancel an offer
   job create [--json <json|@file>] [--offer-id ... --request-body ...]
                              Create a job request
+  job charge --job-id <id> [--address <addr>] [--amount-raw <raw>] [--charge-expires-at <rfc3339>]
+                             Attach a seller-signed charge for a requested job (prints QR by default)
   job reissue-request --job-id <id> [--note "..."] [--requested-expires-at <rfc3339>]
                              Request a new charge from the seller
   job reissue-charge --job-id <id> --charge-id <id> --address <addr>
-                     --amount-raw <raw> --charge-expires-at <rfc3339> --charge-sig-ed25519 <sig>
+                     --amount-raw <raw> --charge-expires-at <rfc3339> [--charge-sig-ed25519 <sig>]
                              Reissue a charge for an expired job
   job payment-sent --job-id <id> [--payment-block-hash <hash>]
                    [--amount-raw-sent <raw>] [--sent-at <rfc3339>] [--note "..."]
                              Notify seller that payment was sent
+  job mark-paid --job-id <id> [--payment-block-hash <hash>] [--verifier <name>]
+                [--observed-at <rfc3339>] [--amount-raw-received <raw>]
+                             Mark a job paid (seller-side)
+  job deliver --job-id <id> [--kind deliverable|message] (--body <text> | --body-file <path>)
+             [--payload-id <id>]
+                             Deliver a payload to the buyer (encrypt+sign automatically)
   payload list [--status unfetched|fetched|all] [--job-id <id>] [--limit <n>] [--cursor <cursor>]
                              List payload metadata for the current bot
   payload fetch (--payload-id <id> | --job-id <id>) [--raw] [--compact] [--no-cache] [--cache-only]
@@ -1149,11 +1235,11 @@ Commands:
                              Poll events and optionally ack
   poll ack --up-to-event-id <id>
                              Advance the server-side poll cursor (used for 410 resync)
-  watch [--streams a,b] [--stream-path /v0/stream] [--safety-poll-interval <seconds>]
-        [--state-path <path>] [--openclaw-bin <bin>] [--fswatch-bin <bin>]
-        [--event-text <text>] [--mode now|next] [--debounce-ms <ms>] [--no-fetch-payloads]
+  watch [--stream-path /v0/stream] [--safety-poll-interval <seconds>]
+        [--state-path <path>] [--openclaw-bin <bin>] [--event-text <text>]
+        [--mode now|next] [--no-openclaw] [--no-fetch-payloads]
                              Maintain SSE connection; poll on wake + on safety interval.
-                             If fswatch is available, also watch local state and trigger OpenClaw wakeups.
+                             Triggers an OpenClaw wakeup when new events are persisted.
 
 Global flags:
   --help                     Show this help
@@ -1229,9 +1315,6 @@ async function runStatus() {
     console.log('Bot ID: (missing keys; run setup)');
   }
   console.log(`Last acked event id: ${state.last_acked_event_id ?? 0}`);
-  if (state.stream_cursors && typeof state.stream_cursors === 'object' && !Array.isArray(state.stream_cursors)) {
-    console.log(`Stream cursors: ${Object.keys(state.stream_cursors).length}`);
-  }
   console.log(`Known offers: ${countRecords(state.known_offers)}`);
   console.log(`Known jobs: ${countRecords(state.known_jobs)}`);
   console.log(`Known payloads: ${countRecords(state.known_payloads)}`);
@@ -1354,6 +1437,18 @@ function runWallet(args) {
   const nodeBin = process.execPath;
   const result = spawnSync(nodeBin, [script, ...args], {stdio: 'inherit'});
   process.exit(typeof result.status === 'number' ? result.status : 1);
+}
+
+function runQr(argv) {
+  const {flags, positionals} = parseArgs(argv);
+  const text = flags.text || positionals.join(' ');
+  if (!text || !String(text).trim()) {
+    throw new Error('Missing text. Use: nanobazaar qr <text>');
+  }
+  const ok = printQr(String(text), {toStderr: false});
+  if (!ok) {
+    throw new Error('QR output unavailable (missing optional dependency qrcode-terminal).');
+  }
 }
 
 async function runSearch(argv) {
@@ -1644,6 +1739,46 @@ async function buildRequestPayload({keys, senderBotId, recipientBotId, recipient
   };
 }
 
+async function buildDeliverPayload({keys, senderBotId, recipientBotId, recipientKid, recipientKey, jobId, payloadId, body, payloadKind}) {
+  const kind = String(payloadKind || '').trim() || 'deliverable';
+  if (kind !== 'deliverable' && kind !== 'message') {
+    throw new Error(`Invalid payload kind: ${kind}. Use deliverable|message.`);
+  }
+
+  const sodium = await loadSodium();
+  const createdAt = new Date().toISOString();
+  const bodyHash = sha256Hex(body);
+  const canonical = `NBR1|${payloadId}|${jobId}|${kind}|${senderBotId}|${recipientBotId}|${createdAt}|${bodyHash}`;
+  const senderSig = signCanonical(keys, canonical);
+
+  const inner = {
+    prefix: 'NBR1',
+    payload_id: payloadId,
+    job_id: jobId,
+    payload_kind: kind,
+    sender_bot_id: senderBotId,
+    recipient_bot_id: recipientBotId,
+    created_at: createdAt,
+    body,
+    sender_sig_ed25519: senderSig,
+  };
+
+  const plaintext = Buffer.from(JSON.stringify(inner), 'utf8');
+  const recipientKeyBytes = Buffer.from(recipientKey, 'base64url');
+  const ciphertext = sodium.crypto_box_seal(plaintext, recipientKeyBytes);
+
+  return {
+    envelope: {
+      payload_id: payloadId,
+      payload_kind: kind,
+      enc_alg: ENC_ALG,
+      recipient_kid: recipientKid,
+      ciphertext_b64: Buffer.from(ciphertext).toString('base64url'),
+    },
+    created_at: createdAt,
+  };
+}
+
 async function runJobCreate(argv) {
   const {flags} = parseArgs(argv);
   const config = buildConfig();
@@ -1759,6 +1894,286 @@ async function runJobCreate(argv) {
   printJson(result.data, !!flags.compact);
 }
 
+function berrypayWalletAddress(bin) {
+  const berrypayBin = String(bin || 'berrypay').trim() || 'berrypay';
+  const result = spawnSync(berrypayBin, ['address'], {encoding: 'utf8'});
+  if (result.error) {
+    throw new Error(`Failed to run ${berrypayBin}: ${result.error.message}`);
+  }
+  if (result.status !== 0) {
+    const stdout = (result.stdout || '').trim();
+    const stderr = (result.stderr || '').trim();
+    const detail = stdout || stderr || `exit=${result.status}`;
+    throw new Error(`BerryPay address failed: ${detail}`);
+  }
+  let payload;
+  try {
+    payload = JSON.parse(result.stdout);
+  } catch (_) {
+    payload = null;
+  }
+  if (payload && payload.error) {
+    throw new Error(`BerryPay error: ${payload.error}`);
+  }
+  if (payload && payload.address) {
+    return String(payload.address);
+  }
+  const trimmed = (result.stdout || '').trim();
+  if (trimmed) {
+    return trimmed;
+  }
+  throw new Error('BerryPay returned an empty address.');
+}
+
+async function runJobCharge(argv) {
+  const {flags, positionals} = parseArgs(argv);
+  const jobId = flags.jobId || flags.job || positionals[0];
+  if (!jobId) {
+    throw new Error('Missing job id. Provide --job-id or a positional job id.');
+  }
+
+  const config = buildConfig();
+  const statePath = expandHomePath(String(flags.statePath || config.state_path));
+  const state = loadState(statePath);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  const job = await fetchJob({jobId: String(jobId), config, keys, identity});
+  if (job.seller_bot_id && String(job.seller_bot_id) !== identity.botId) {
+    throw new Error(`This bot is not the seller for job ${jobId}. expected=${job.seller_bot_id} got=${identity.botId}`);
+  }
+  if (!job.offer_id || !job.buyer_bot_id || !job.seller_bot_id) {
+    throw new Error('Job is missing required fields (offer_id/buyer_bot_id/seller_bot_id).');
+  }
+
+  const chargeId = flags.chargeId || flags.charge || `chg_${safeIdPart(jobId)}`;
+  let address = flags.address ? String(flags.address) : '';
+  if (!address && flags.berrypay) {
+    address = berrypayWalletAddress(config.berrypay_bin);
+  }
+  if (!address) {
+    throw new Error('Missing address. Provide --address (or pass --berrypay to use the local BerryPay wallet address).');
+  }
+
+  const amountRaw = flags.amountRaw
+    ? String(flags.amountRaw)
+    : (job.price_raw ? String(job.price_raw) : '');
+  if (!amountRaw) {
+    throw new Error('Missing amount raw. Provide --amount-raw (or ensure the job has price_raw).');
+  }
+
+  const expiresAt = flags.chargeExpiresAt
+    ? canonicalizeRFC3339Nano(flags.chargeExpiresAt, 'charge_expires_at')
+    : formatRFC3339Nano(new Date(Date.now() + 30 * 60 * 1000));
+
+  const canonical = canonicalChargeString({
+    jobId: String(job.job_id || jobId),
+    offerId: String(job.offer_id),
+    sellerBotId: String(job.seller_bot_id),
+    buyerBotId: String(job.buyer_bot_id),
+    chargeId: String(chargeId),
+    address: String(address),
+    amountRaw: String(amountRaw),
+    chargeExpiresAt: expiresAt,
+  });
+  const chargeSig = signCanonical(keys, canonical);
+
+  const payload = {
+    charge_id: String(chargeId),
+    address: String(address),
+    amount_raw: String(amountRaw),
+    charge_expires_at: expiresAt,
+    charge_sig_ed25519: chargeSig,
+  };
+
+  const result = await signedRequest({
+    method: 'POST',
+    path: `/v0/jobs/${jobId}/charge`,
+    body: payload,
+    idempotencyKey: String(flags.idempotencyKey || chargeId),
+    relayUrl: config.relay_url,
+    keys,
+    identity,
+  });
+
+  if (!result.response.ok) {
+    throw new Error(`Job charge failed (${result.response.status}): ${result.text || result.response.statusText}`);
+  }
+
+  // Print the payment UX summary to stderr for humans; keep JSON on stdout.
+  const amountXno = rawToXnoString(amountRaw);
+  console.error(`[charge] address=${address}`);
+  console.error(`[charge] amount_raw=${amountRaw}`);
+  if (amountXno !== null) {
+    console.error(`[charge] amount_xno=${amountXno}`);
+  }
+  console.error(`[charge] charge_expires_at=${expiresAt}`);
+  if (flags.qr !== false) {
+    printQr(address, {toStderr: true});
+  }
+
+  if (result.data && result.data.job_id) {
+    state.known_jobs = ensureMap(state.known_jobs, 'job_id');
+    state.known_jobs[result.data.job_id] = result.data;
+  }
+  state.relay_url = config.relay_url;
+  state.bot_id = identity.botId;
+  state.signing_kid = identity.signingKid;
+  state.encryption_kid = identity.encryptionKid;
+  saveStateMerged(statePath, state);
+
+  printJson(result.data, !!flags.compact);
+}
+
+async function runJobMarkPaid(argv) {
+  const {flags, positionals} = parseArgs(argv);
+  const jobId = flags.jobId || flags.job || positionals[0];
+  if (!jobId) {
+    throw new Error('Missing job id. Provide --job-id or a positional job id.');
+  }
+
+  let payload;
+  if (flags.json) {
+    payload = readJsonInput(flags.json, '--json');
+  } else {
+    payload = {};
+    if (flags.verifier) {
+      payload.verifier = String(flags.verifier);
+    }
+    if (flags.paymentBlockHash) {
+      payload.payment_block_hash = String(flags.paymentBlockHash);
+    }
+    if (flags.observedAt) {
+      payload.observed_at = canonicalizeRFC3339Nano(flags.observedAt, 'observed_at');
+    }
+    if (flags.amountRawReceived) {
+      payload.amount_raw_received = String(flags.amountRawReceived);
+    }
+  }
+  if (payload && payload.observed_at) {
+    payload.observed_at = canonicalizeRFC3339Nano(payload.observed_at, 'observed_at');
+  }
+
+  const config = buildConfig();
+  const statePath = expandHomePath(String(flags.statePath || config.state_path));
+  const state = loadState(statePath);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  const result = await signedRequest({
+    method: 'POST',
+    path: `/v0/jobs/${jobId}/mark_paid`,
+    body: payload && Object.keys(payload).length > 0 ? payload : undefined,
+    idempotencyKey: String(flags.idempotencyKey || `mark_paid:${jobId}`),
+    relayUrl: config.relay_url,
+    keys,
+    identity,
+  });
+
+  if (!result.response.ok) {
+    throw new Error(`Mark paid failed (${result.response.status}): ${result.text || result.response.statusText}`);
+  }
+
+  if (result.data && result.data.job_id) {
+    state.known_jobs = ensureMap(state.known_jobs, 'job_id');
+    state.known_jobs[result.data.job_id] = result.data;
+  }
+  state.relay_url = config.relay_url;
+  state.bot_id = identity.botId;
+  state.signing_kid = identity.signingKid;
+  state.encryption_kid = identity.encryptionKid;
+  saveStateMerged(statePath, state);
+
+  printJson(result.data, !!flags.compact);
+}
+
+async function runJobDeliver(argv) {
+  const {flags, positionals} = parseArgs(argv);
+  const jobId = flags.jobId || flags.job || positionals[0];
+  if (!jobId) {
+    throw new Error('Missing job id. Provide --job-id or a positional job id.');
+  }
+
+  const kind = flags.kind || flags.payloadKind || 'deliverable';
+
+  let body = '';
+  if (flags.bodyFile) {
+    body = readTextInput(`@${String(flags.bodyFile)}`, '--body-file');
+  } else if (flags.body) {
+    body = readTextInput(String(flags.body), '--body');
+  } else if (positionals.length > 1) {
+    body = positionals.slice(1).join(' ');
+  } else {
+    throw new Error('Missing body. Provide --body, --body-file, or a positional body after the job id.');
+  }
+
+  const payloadId = flags.payloadId || `pay_${safeIdPart(jobId)}_${safeIdPart(kind)}_${sha256Hex(body).slice(0, 16)}`;
+
+  const config = buildConfig();
+  const statePath = expandHomePath(String(flags.statePath || config.state_path));
+  const state = loadState(statePath);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  const job = await fetchJob({jobId: String(jobId), config, keys, identity});
+  if (job.seller_bot_id && String(job.seller_bot_id) !== identity.botId) {
+    throw new Error(`This bot is not the seller for job ${jobId}. expected=${job.seller_bot_id} got=${identity.botId}`);
+  }
+  if (!job.buyer_bot_id) {
+    throw new Error('Job is missing buyer_bot_id.');
+  }
+
+  const buyerBot = await fetchBot({botId: String(job.buyer_bot_id), config, keys, identity});
+  if (!buyerBot.encryption_kid || !buyerBot.encryption_pubkey_x25519) {
+    throw new Error(`Buyer bot ${job.buyer_bot_id} is missing encryption keys.`);
+  }
+
+  const built = await buildDeliverPayload({
+    keys,
+    senderBotId: identity.botId,
+    recipientBotId: String(job.buyer_bot_id),
+    recipientKid: String(buyerBot.encryption_kid),
+    recipientKey: String(buyerBot.encryption_pubkey_x25519),
+    jobId: String(jobId),
+    payloadId: String(payloadId),
+    body: String(body),
+    payloadKind: String(kind),
+  });
+
+  const result = await signedRequest({
+    method: 'POST',
+    path: `/v0/jobs/${jobId}/deliver`,
+    body: {payload: built.envelope},
+    idempotencyKey: String(flags.idempotencyKey || payloadId),
+    relayUrl: config.relay_url,
+    keys,
+    identity,
+  });
+
+  if (!result.response.ok) {
+    throw new Error(`Deliver failed (${result.response.status}): ${result.text || result.response.statusText}`);
+  }
+
+  state.known_payloads = ensureMap(state.known_payloads, 'payload_id');
+  state.known_payloads[payloadId] = {
+    payload_id: payloadId,
+    job_id: jobId,
+    payload_kind: built.envelope.payload_kind,
+    created_at: built.created_at,
+  };
+  if (result.data && result.data.job_id) {
+    state.known_jobs = ensureMap(state.known_jobs, 'job_id');
+    state.known_jobs[result.data.job_id] = result.data;
+  }
+  state.relay_url = config.relay_url;
+  state.bot_id = identity.botId;
+  state.signing_kid = identity.signingKid;
+  state.encryption_kid = identity.encryptionKid;
+  saveStateMerged(statePath, state);
+
+  printJson(result.data, !!flags.compact);
+}
+
 async function runJobReissueRequest(argv) {
   const {flags, positionals} = parseArgs(argv);
   const jobId = flags.jobId || flags.job || positionals[0];
@@ -1776,7 +2191,7 @@ async function runJobReissueRequest(argv) {
     body.note = String(flags.note);
   }
   if (flags.requestedExpiresAt) {
-    body.requested_expires_at = String(flags.requestedExpiresAt);
+    body.requested_expires_at = canonicalizeRFC3339Nano(flags.requestedExpiresAt, 'requested_expires_at');
   }
 
   const result = await signedRequest({
@@ -1807,28 +2222,57 @@ async function runJobReissueCharge(argv) {
   if (flags.json) {
     payload = readJsonInput(flags.json, '--json');
   } else {
-    if (!flags.chargeId || !flags.address || !flags.amountRaw || !flags.chargeExpiresAt || !flags.chargeSigEd25519) {
-      throw new Error('Missing required fields. Provide --charge-id, --address, --amount-raw, --charge-expires-at, and --charge-sig-ed25519.');
+    if (!flags.chargeId || !flags.address || !flags.amountRaw || !flags.chargeExpiresAt) {
+      throw new Error('Missing required fields. Provide --charge-id, --address, --amount-raw, and --charge-expires-at.');
     }
     payload = {
       charge_id: String(flags.chargeId),
       address: String(flags.address),
       amount_raw: String(flags.amountRaw),
       charge_expires_at: String(flags.chargeExpiresAt),
-      charge_sig_ed25519: String(flags.chargeSigEd25519),
     };
+    if (flags.chargeSigEd25519) {
+      payload.charge_sig_ed25519 = String(flags.chargeSigEd25519);
+    }
   }
 
   const config = buildConfig();
-  const state = loadState(config.state_path);
+  const statePath = expandHomePath(String(flags.statePath || config.state_path));
+  const state = loadState(statePath);
   const {keys} = requireKeys(state);
   const identity = deriveIdentity(keys);
+
+  if (!payload || !payload.charge_id || !payload.address || !payload.amount_raw || !payload.charge_expires_at) {
+    throw new Error('Missing required fields. Provide charge_id, address, amount_raw, and charge_expires_at.');
+  }
+  payload.charge_expires_at = canonicalizeRFC3339Nano(payload.charge_expires_at, 'charge_expires_at');
+
+  if (!payload.charge_sig_ed25519) {
+    const job = await fetchJob({jobId: String(jobId), config, keys, identity});
+    if (job.seller_bot_id && String(job.seller_bot_id) !== identity.botId) {
+      throw new Error(`This bot is not the seller for job ${jobId}. expected=${job.seller_bot_id} got=${identity.botId}`);
+    }
+    if (!job.offer_id || !job.buyer_bot_id || !job.seller_bot_id) {
+      throw new Error('Job is missing required fields (offer_id/buyer_bot_id/seller_bot_id).');
+    }
+    const canonical = canonicalChargeString({
+      jobId: String(job.job_id || jobId),
+      offerId: String(job.offer_id),
+      sellerBotId: String(job.seller_bot_id),
+      buyerBotId: String(job.buyer_bot_id),
+      chargeId: String(payload.charge_id),
+      address: String(payload.address),
+      amountRaw: String(payload.amount_raw),
+      chargeExpiresAt: String(payload.charge_expires_at),
+    });
+    payload.charge_sig_ed25519 = signCanonical(keys, canonical);
+  }
 
   const result = await signedRequest({
     method: 'POST',
     path: `/v0/jobs/${jobId}/charge/reissue`,
     body: payload,
-    idempotencyKey: crypto.randomBytes(16).toString('hex'),
+    idempotencyKey: String(flags.idempotencyKey || payload.charge_id),
     relayUrl: config.relay_url,
     keys,
     identity,
@@ -1837,6 +2281,16 @@ async function runJobReissueCharge(argv) {
   if (!result.response.ok) {
     throw new Error(`Reissue charge failed (${result.response.status}): ${result.text || result.response.statusText}`);
   }
+
+  if (result.data && result.data.job_id) {
+    state.known_jobs = ensureMap(state.known_jobs, 'job_id');
+    state.known_jobs[result.data.job_id] = result.data;
+  }
+  state.relay_url = config.relay_url;
+  state.bot_id = identity.botId;
+  state.signing_kid = identity.signingKid;
+  state.encryption_kid = identity.encryptionKid;
+  saveStateMerged(statePath, state);
 
   printJson(result.data, !!flags.compact);
 }
@@ -1860,11 +2314,14 @@ async function runJobPaymentSent(argv) {
       payload.amount_raw_sent = String(flags.amountRawSent);
     }
     if (flags.sentAt) {
-      payload.sent_at = String(flags.sentAt);
+      payload.sent_at = canonicalizeRFC3339Nano(flags.sentAt, 'sent_at');
     }
     if (flags.note) {
       payload.note = String(flags.note);
     }
+  }
+  if (payload && payload.sent_at) {
+    payload.sent_at = canonicalizeRFC3339Nano(payload.sent_at, 'sent_at');
   }
 
   const config = buildConfig();
@@ -2043,32 +2500,47 @@ async function runPayloadFetch(argv) {
   printJson(inner, !!flags.compact);
 }
 
-async function runPoll(argv, options) {
-  const quiet = options && options.quiet;
-  const {flags} = parseArgs(argv);
-  const debugLog = createDebugLogger(isDebugEnabled(flags), 'poll');
-  const config = buildConfig();
-  const state = loadState(config.state_path);
-  const {keys} = requireKeys(state);
-  const identity = deriveIdentity(keys);
+async function pollOnce({
+  config,
+  state,
+  statePath,
+  keys,
+  identity,
+  since,
+  limit,
+  types,
+  ack,
+  fetchPayloads,
+  quiet,
+  compact,
+  debugLog,
+}) {
+  const effectiveStatePath = statePath || (config ? config.state_path : '');
+  if (!config) {
+    throw new Error('Missing config.');
+  }
+  if (!state || typeof state !== 'object') {
+    throw new Error('Missing state.');
+  }
+  if (!keys || !identity) {
+    throw new Error('Missing keys/identity.');
+  }
 
   // NOTE: By default, rely on the relay's server-side cursor (last_acked_event_id).
   // Passing a local cursor can silently skip events if the state file is reused
   // across relays/bots. Use --since-event-id explicitly to override.
-  const since = flags.sinceEventId;
-  const limit = flags.limit || config.poll_limit;
-  const types = flags.types || config.poll_types;
-
-  debugLog('request', {
-    method: 'GET',
-    path: '/v0/poll',
-    since_event_id: since ?? null,
-    limit: limit ?? null,
-    types: types ?? null,
-    ack: flags.ack !== false,
-    relay_url: config.relay_url,
-    state_path: config.state_path,
-  });
+  if (debugLog) {
+    debugLog('request', {
+      method: 'GET',
+      path: '/v0/poll',
+      since_event_id: since ?? null,
+      limit: limit ?? null,
+      types: types ?? null,
+      ack: ack !== false,
+      relay_url: config.relay_url,
+      state_path: effectiveStatePath,
+    });
+  }
 
   const result = await signedRequest({
     method: 'GET',
@@ -2086,14 +2558,15 @@ async function runPoll(argv, options) {
   if (result.response.status === 410) {
     throw new Error(`Poll cursor too old (410). Suggested resync. Response: ${result.text}`);
   }
-
   if (!result.response.ok) {
     throw new Error(`Poll failed (${result.response.status}): ${result.text || result.response.statusText}`);
   }
 
   const events = result.data && result.data.events ? result.data.events : [];
   const addedEvents = appendEvents(state, events);
-  debugLog('response', {status: result.response.status, events: events.length, added: addedEvents});
+  if (debugLog) {
+    debugLog('response', {status: result.response.status, events: events.length, added: addedEvents});
+  }
 
   if (typeof state.last_acked_event_id !== 'number' || !Number.isFinite(state.last_acked_event_id)) {
     state.last_acked_event_id = 0;
@@ -2102,20 +2575,21 @@ async function runPoll(argv, options) {
   state.bot_id = identity.botId;
   state.signing_kid = identity.signingKid;
   state.encryption_kid = identity.encryptionKid;
-  saveStateMerged(config.state_path, state);
+  saveStateMerged(effectiveStatePath, state);
 
-  const fetchPayloads = flags.fetchPayloads !== false;
-  if (fetchPayloads && events.length > 0) {
+  if (fetchPayloads !== false && events.length > 0) {
     const refs = extractPayloadRefsFromEvents(events);
     if (refs.length > 0) {
-      debugLog('payloads detected', {count: refs.length, payload_ids: refs.map((ref) => ref.payload_id)});
+      if (debugLog) {
+        debugLog('payloads detected', {count: refs.length, payload_ids: refs.map((ref) => ref.payload_id)});
+      }
       for (const ref of refs) {
         // Best-effort caching: poll remains useful even if a payload decrypt fails.
         // Errors are persisted in known_payloads to aid follow-up debugging.
         await ensurePayloadCached({
           payloadId: ref.payload_id,
           state,
-          statePath: config.state_path,
+          statePath: effectiveStatePath,
           config,
           keys,
           identity,
@@ -2127,11 +2601,13 @@ async function runPoll(argv, options) {
 
   let ackedId = state.last_acked_event_id || 0;
   let maxEventId = 0;
-  if (events.length > 0 && flags.ack !== false) {
+  if (events.length > 0 && ack !== false) {
     maxEventId = events.reduce((max, event) => Math.max(max, event.event_id), 0);
 
     // Ack only after events are durably persisted to local state.
-    debugLog('ack request', {up_to_event_id: maxEventId});
+    if (debugLog) {
+      debugLog('ack request', {up_to_event_id: maxEventId});
+    }
     const ackResult = await signedRequest({
       method: 'POST',
       path: '/v0/poll/ack',
@@ -2149,25 +2625,70 @@ async function runPoll(argv, options) {
     } else {
       ackedId = maxEventId;
     }
-    debugLog('ack ok', {last_acked_event_id: ackedId});
+    if (debugLog) {
+      debugLog('ack ok', {last_acked_event_id: ackedId});
+    }
 
     if (typeof ackedId === 'number' && Number.isFinite(ackedId) && ackedId !== state.last_acked_event_id) {
       state.last_acked_event_id = ackedId;
       // Write the authoritative server-side cursor as-is (even if it moves "backwards"
       // compared to a stale local file).
-      saveStateMerged(config.state_path, state, {
+      saveStateMerged(effectiveStatePath, state, {
         mergeLastAcked: false,
-        mergeStreamCursors: true,
+        mergeStreamCursors: false,
         mergeKnownMaps: true,
         mergeEventLog: true,
       });
     }
   }
 
+  if (!quiet) {
+    if (compact) {
+      printJson(result.data, true);
+    } else {
+      printJson(result.data, false);
+    }
+  }
+
+  return {response: result.data, events, addedEvents, ackedId, maxEventId};
+}
+
+async function runPoll(argv, options) {
+  const quiet = options && options.quiet;
+  const {flags} = parseArgs(argv);
+  const debugLog = createDebugLogger(isDebugEnabled(flags), 'poll');
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  // NOTE: By default, rely on the relay's server-side cursor (last_acked_event_id).
+  // Passing a local cursor can silently skip events if the state file is reused
+  // across relays/bots. Use --since-event-id explicitly to override.
+  const since = flags.sinceEventId;
+  const limit = flags.limit || config.poll_limit;
+  const types = flags.types || config.poll_types;
+
+  const {response, events, ackedId, maxEventId} = await pollOnce({
+    config,
+    state,
+    statePath: config.state_path,
+    keys,
+    identity,
+    since,
+    limit,
+    types,
+    ack: flags.ack !== false,
+    fetchPayloads: flags.fetchPayloads !== false,
+    quiet: true,
+    compact: !!flags.compact,
+    debugLog,
+  });
+
   if (flags.output) {
-    fs.writeFileSync(String(flags.output), stringifyJson(result.data, false));
+    fs.writeFileSync(String(flags.output), stringifyJson(response, false));
   } else if (!quiet) {
-    printJson(result.data, !!flags.compact);
+    printJson(response, !!flags.compact);
   }
 
   return {events, ackedId, maxEventId};
@@ -2215,7 +2736,7 @@ async function runPollAck(argv) {
   state.encryption_kid = identity.encryptionKid;
   saveStateMerged(config.state_path, state, {
     mergeLastAcked: false,
-    mergeStreamCursors: true,
+    mergeStreamCursors: false,
     mergeKnownMaps: true,
     mergeEventLog: true,
   });
@@ -2447,151 +2968,6 @@ async function consumeSseStream(body, {signal, onEvent}) {
   flush();
 }
 
-function deriveDefaultStreams({keys, state}) {
-  const streams = [];
-
-  if (keys && keys.signing_public_key_b64url) {
-    // Proposed stream key format: seller:ed25519:<pubkey-b64url>
-    streams.push(`seller:ed25519:${keys.signing_public_key_b64url}`);
-  }
-
-  const knownJobs = state && state.known_jobs ? state.known_jobs : null;
-  if (knownJobs) {
-    if (Array.isArray(knownJobs)) {
-      for (const job of knownJobs) {
-        if (job && job.job_id) {
-          streams.push(`job:${job.job_id}`);
-        }
-      }
-    } else if (typeof knownJobs === 'object') {
-      for (const jobId of Object.keys(knownJobs)) {
-        if (jobId) {
-          streams.push(`job:${jobId}`);
-        }
-      }
-    }
-  }
-
-  return uniqStrings(streams);
-}
-
-function startStateWatcher(options) {
-  const opts = options || {};
-  const statePath = String(opts.statePath || '');
-  const fswatchBin = String(opts.fswatchBin || 'fswatch');
-  const openclawBin = String(opts.openclawBin || 'openclaw');
-  const mode = String(opts.mode || 'now');
-  const eventText = String(opts.eventText || 'NanoBazaar state changed');
-  const debounceMs = typeof opts.debounceMs === 'number' ? opts.debounceMs : 250;
-  const debugLog = typeof opts.debugLog === 'function' ? opts.debugLog : null;
-  const signal = opts.signal;
-
-  if (!statePath) {
-    return {stop: () => {}};
-  }
-
-  if (!fs.existsSync(statePath)) {
-    console.error(`[watch] state file not found at ${statePath}. Waiting for it to appear...`);
-  }
-
-  let watcher = null;
-  let buffer = '';
-  let lastWake = 0;
-  let openclawMissing = false;
-  let disabled = false;
-
-  function disable(message) {
-    if (disabled) {
-      return;
-    }
-    disabled = true;
-    if (message) {
-      console.error(`[watch] ${message}`);
-    }
-    if (watcher && !watcher.killed) {
-      watcher.kill('SIGTERM');
-    }
-  }
-
-  function triggerWake() {
-    if (openclawMissing) {
-      return;
-    }
-    const now = Date.now();
-    if (debounceMs && now - lastWake < debounceMs) {
-      return;
-    }
-    lastWake = now;
-    if (debugLog) {
-      debugLog('local wake: invoking openclaw', {openclaw_bin: openclawBin, mode, event_text: eventText});
-    }
-    const result = spawnSync(openclawBin, ['system', 'event', '--text', eventText, '--mode', mode], {stdio: 'inherit'});
-    if (result.error) {
-      openclawMissing = true;
-      console.error(`[watch] Failed to run ${openclawBin}: ${result.error.message}. Local wakeups disabled.`);
-      if (debugLog) {
-        debugLog('local wake: openclaw failed', result.error && result.error.message ? result.error.message : String(result.error));
-      }
-      return;
-    }
-    if (debugLog) {
-      debugLog('local wake: openclaw ok');
-    }
-  }
-
-  try {
-    watcher = spawn(fswatchBin, ['-0', '-o', statePath], {stdio: ['ignore', 'pipe', 'inherit']});
-  } catch (err) {
-    disable(`Failed to start fswatch: ${err && err.message ? err.message : String(err)}. Running SSE polling only.`);
-    return {stop: () => {}};
-  }
-
-  watcher.on('error', (err) => {
-    if (disabled) {
-      return;
-    }
-    if (err && err.code === 'ENOENT') {
-      disable('fswatch not found. Install it to enable local wakeups (macOS: brew install fswatch, Ubuntu: apt install fswatch).');
-      return;
-    }
-    disable(`Failed to start fswatch: ${err && err.message ? err.message : String(err)}. Running SSE polling only.`);
-  });
-
-  watcher.stdout.on('data', (chunk) => {
-    buffer += chunk.toString('utf8');
-    const parts = buffer.split('\0');
-    buffer = parts.pop();
-    if (parts.length === 0) {
-      return;
-    }
-    if (debugLog) {
-      debugLog('local wake: fswatch event', {count: parts.length});
-    }
-    triggerWake();
-  });
-
-  watcher.on('close', (code) => {
-    if (disabled || (signal && signal.aborted)) {
-      return;
-    }
-    if (code === 0) {
-      disable();
-      return;
-    }
-    disable(`fswatch exited with code ${code}. Running SSE polling only.`);
-  });
-
-  if (signal) {
-    if (signal.aborted) {
-      disable();
-    } else {
-      signal.addEventListener('abort', () => disable());
-    }
-  }
-
-  return {stop: () => disable()};
-}
-
 async function runWatch(argv) {
   requireFetch();
 
@@ -2604,11 +2980,11 @@ async function runWatch(argv) {
   const identity = deriveIdentity(keys);
 
   const streamPath = flags.streamPath || flags.ssePath || '/v0/stream';
-  const streams = flags.streams
-    ? uniqStrings(parseCsv(flags.streams))
-    : deriveDefaultStreams({keys, state});
-  if (streams.length === 0) {
-    throw new Error('No streams configured for watch. Provide --streams or ensure state contains keys.');
+  if (flags.streams !== undefined) {
+    throw new Error('Streams are no longer supported. Remove --streams and retry.');
+  }
+  if (flags.fswatchBin !== undefined || flags.debounceMs !== undefined) {
+    throw new Error('Local fswatch wakeups are removed. Remove --fswatch-bin/--debounce-ms and retry.');
   }
 
   const safetyIntervalSeconds = flags.safetyPollInterval
@@ -2618,181 +2994,48 @@ async function runWatch(argv) {
   const printPolls = !!flags.printPolls;
   const pollLimit = parseOptionalPositiveInt(flags.limit, '--limit')
     ?? parseOptionalPositiveInt(config.poll_limit, 'NBR_POLL_LIMIT');
+  const pollTypes = flags.types || config.poll_types;
 
-  const fswatchBin = String(flags.fswatchBin || 'fswatch');
   const openclawBin = String(flags.openclawBin || 'openclaw');
   const mode = String(flags.mode || 'now');
-  const eventText = String(flags.eventText || 'NanoBazaar state changed');
-  const debounceMs = flags.debounceMs
-    ? parsePositiveInt(flags.debounceMs, '--debounce-ms')
-    : 250;
-
-  ensureStreamCursorMap(state);
-  const streamSet = new Set(streams);
+  const eventText = String(flags.eventText || 'NanoBazaar: new events');
+  const openclawEnabled = flags.openclaw !== false;
 
   debugLog('init', {
     relay_url: config.relay_url,
     state_path: statePath,
     stream_path: streamPath,
-    streams,
     safety_poll_interval_seconds: safetyIntervalSeconds,
     ack: flags.ack !== false,
     poll_limit: pollLimit ?? null,
+    poll_types: pollTypes ?? null,
     print_polls: printPolls,
+    openclaw_enabled: openclawEnabled,
   });
 
   let pollInFlight = false;
   let pollQueued = false;
   let queuedReason = null;
-  const queuedStreams = new Set();
+  let openclawMissing = false;
 
-  function normalizeWakeStreams(candidate) {
-    if (!Array.isArray(candidate) || candidate.length === 0) {
-      return streams;
+  function triggerOpenclawWake(reason) {
+    if (!openclawEnabled || openclawMissing) {
+      return;
     }
-    const filtered = candidate.map((stream) => String(stream)).filter((stream) => streamSet.has(stream));
-    return filtered.length > 0 ? filtered : streams;
+    if (debugLog) {
+      debugLog('openclaw wake', {reason, openclaw_bin: openclawBin, mode, event_text: eventText});
+    }
+    const result = spawnSync(openclawBin, ['system', 'event', '--text', eventText, '--mode', mode], {stdio: 'ignore'});
+    if (result.error) {
+      openclawMissing = true;
+      console.error(`[watch] Failed to run ${openclawBin}: ${result.error.message}. OpenClaw wakeups disabled.`);
+      if (debugLog) {
+        debugLog('openclaw wake failed', result.error && result.error.message ? result.error.message : String(result.error));
+      }
+    }
   }
 
-  async function pollBatchStreams(streamList, reason) {
-    const uniqueStreams = uniqStrings(streamList);
-    if (uniqueStreams.length === 0) {
-      return {events: 0, acked: 0, streams: 0};
-    }
-
-    const requestStreams = uniqueStreams.map((stream) => ({
-      stream,
-      since: getStreamCursor(state, stream),
-    }));
-
-    const body = {streams: requestStreams};
-    if (pollLimit !== undefined) {
-      body.limit = pollLimit;
-    }
-
-    debugLog('poll/batch request', {reason, body});
-    const result = await signedRequest({
-      method: 'POST',
-      path: '/v0/poll/batch',
-      body,
-      idempotencyKey: crypto.randomBytes(16).toString('hex'),
-      relayUrl: config.relay_url,
-      keys,
-      identity,
-    });
-
-    if (!result.response.ok) {
-      throw new Error(`Poll batch failed (${result.response.status}): ${result.text || result.response.statusText}`);
-    }
-
-    const results = result.data && Array.isArray(result.data.results) ? result.data.results : [];
-    debugLog('poll/batch ok', results.map((entry) => ({
-      stream: entry && entry.stream ? entry.stream : null,
-      events: entry && Array.isArray(entry.events) ? entry.events.length : 0,
-      next: entry && typeof entry.next === 'number' ? entry.next : null,
-    })));
-    const allEvents = [];
-    for (const entry of results) {
-      if (!entry || !Array.isArray(entry.events)) {
-        continue;
-      }
-      for (const event of entry.events) {
-        if (!event) {
-          continue;
-        }
-        if (entry.stream) {
-          allEvents.push({...event, stream: entry.stream});
-        } else {
-          allEvents.push(event);
-        }
-      }
-    }
-    if (allEvents.length > 0) {
-      for (const event of allEvents) {
-        debugLog('event', {
-          stream: event && event.stream ? event.stream : null,
-          event_id: event && event.event_id !== undefined ? event.event_id : null,
-          event_type: event && event.event_type ? event.event_type : null,
-          data_preview: event && event.data !== undefined ? previewJson(event.data, 500) : null,
-        });
-      }
-    }
-
-    state.relay_url = config.relay_url;
-    state.bot_id = identity.botId;
-    state.signing_kid = identity.signingKid;
-    state.encryption_kid = identity.encryptionKid;
-
-    const addedEvents = appendEvents(state, allEvents);
-    if (addedEvents > 0) {
-      saveStateMerged(statePath, state);
-    }
-
-    const fetchPayloads = flags.fetchPayloads !== false;
-    if (fetchPayloads && allEvents.length > 0) {
-      const refs = extractPayloadRefsFromEvents(allEvents);
-      if (refs.length > 0) {
-        debugLog('payloads detected', {count: refs.length, payload_ids: refs.map((ref) => ref.payload_id)});
-        for (const ref of refs) {
-          await ensurePayloadCached({
-            payloadId: ref.payload_id,
-            state,
-            statePath,
-            config,
-            keys,
-            identity,
-            debugLog,
-          });
-        }
-      }
-    }
-
-    let ackedStreams = 0;
-    if (flags.ack !== false) {
-      for (const entry of results) {
-        if (!entry || !entry.stream) {
-          continue;
-        }
-        const next = entry.next;
-        const current = getStreamCursor(state, entry.stream);
-        if (typeof next !== 'number' || !Number.isFinite(next) || next === current) {
-          continue;
-        }
-
-        debugLog('ack request', {stream: entry.stream, from: current, to: next});
-        const ackResult = await signedRequest({
-          method: 'POST',
-          path: '/v0/ack',
-          body: {stream: entry.stream, ack: next},
-          idempotencyKey: crypto.randomBytes(16).toString('hex'),
-          relayUrl: config.relay_url,
-          keys,
-          identity,
-        });
-
-        if (!ackResult.response.ok) {
-          throw new Error(`Ack failed (${ackResult.response.status}): ${ackResult.text || ackResult.response.statusText}`);
-        }
-
-        setStreamCursor(state, entry.stream, next);
-        saveStateMerged(statePath, state);
-        ackedStreams += 1;
-        debugLog('ack ok', {stream: entry.stream, ack: next});
-      }
-    }
-
-    if (printPolls && result.data) {
-      printJson(result.data, !!flags.compact);
-    }
-
-    return {events: allEvents.length, acked: ackedStreams, streams: uniqueStreams.length, reason};
-  }
-
-  async function runPollLoop(reason, streamList) {
-    const normalized = normalizeWakeStreams(streamList);
-    for (const stream of normalized) {
-      queuedStreams.add(stream);
-    }
+  async function runPollLoop(reason) {
     queuedReason = reason;
     pollQueued = true;
     if (pollInFlight) {
@@ -2802,13 +3045,33 @@ async function runWatch(argv) {
     try {
       while (pollQueued) {
         pollQueued = false;
-        const batch = Array.from(queuedStreams);
-        queuedStreams.clear();
         const label = queuedReason || reason;
         queuedReason = null;
         try {
-          const summary = await pollBatchStreams(batch, label);
-          console.error(`[watch] poll ok (${label}): streams=${summary.streams} events=${summary.events} acked_streams=${flags.ack === false ? 'disabled' : summary.acked}`);
+          const {response, events, addedEvents, ackedId} = await pollOnce({
+            config,
+            state,
+            statePath,
+            keys,
+            identity,
+            since: undefined,
+            limit: pollLimit,
+            types: pollTypes,
+            ack: flags.ack !== false,
+            fetchPayloads: flags.fetchPayloads !== false,
+            quiet: true,
+            compact: !!flags.compact,
+            debugLog,
+          });
+
+          if (printPolls && response) {
+            printJson(response, !!flags.compact);
+          }
+
+          console.error(`[watch] poll ok (${label}): events=${events.length} added=${addedEvents} ack=${flags.ack === false ? 'disabled' : ackedId}`);
+          if (addedEvents > 0) {
+            triggerOpenclawWake(label);
+          }
         } catch (err) {
           console.error(`[watch] poll error (${label}): ${err && err.message ? err.message : String(err)}`);
           // Keep running; polling is idempotent and can be retried on the next wake/safety interval.
@@ -2833,19 +3096,7 @@ async function runWatch(argv) {
   console.error(`[watch] relay=${config.relay_url}`);
   console.error(`[watch] state_path=${statePath}`);
   console.error(`[watch] stream_path=${streamPath}`);
-  console.error(`[watch] streams=${streams.join(',')}`);
   console.error(`[watch] safety_poll_interval_seconds=${safetyIntervalSeconds}`);
-
-  const stateWatcher = startStateWatcher({
-    statePath,
-    fswatchBin,
-    openclawBin,
-    mode,
-    eventText,
-    debounceMs,
-    debugLog,
-    signal,
-  });
 
   const safetyTimer = setInterval(() => {
     if (signal.aborted) {
@@ -2858,32 +3109,22 @@ async function runWatch(argv) {
   void runPollLoop('startup');
 
   let attempt = 0;
-  function extractWakeStreams(evt) {
+  function isWakeEvent(evt) {
     if (!evt) {
-      return null;
+      return false;
     }
     if (evt.event === 'wake') {
-      if (!evt.data) {
-        return [];
-      }
-      try {
-        const parsed = JSON.parse(evt.data);
-        return parsed && Array.isArray(parsed.streams) ? parsed.streams : [];
-      } catch (_) {
-        return [];
-      }
+      return true;
     }
-    if (evt.data) {
-      try {
-        const parsed = JSON.parse(evt.data);
-        if (parsed && (parsed.event === 'wake' || parsed.type === 'wake' || parsed.hint === 'poll')) {
-          return Array.isArray(parsed.streams) ? parsed.streams : [];
-        }
-      } catch (_) {
-        // ignore non-JSON payloads
-      }
+    if (!evt.data) {
+      return false;
     }
-    return null;
+    try {
+      const parsed = JSON.parse(evt.data);
+      return !!(parsed && (parsed.event === 'wake' || parsed.type === 'wake' || parsed.hint === 'poll'));
+    } catch (_) {
+      return false;
+    }
   }
 
   while (!signal.aborted) {
@@ -2891,7 +3132,6 @@ async function runWatch(argv) {
       const {url, init} = buildSignedFetch({
         method: 'GET',
         path: streamPath,
-        query: {streams: streams.join(',')},
         relayUrl: config.relay_url,
         keys,
         identity,
@@ -2918,10 +3158,9 @@ async function runWatch(argv) {
             id: evt && evt.id ? evt.id : null,
             data_preview: evt && evt.data ? previewString(evt.data, 500) : null,
           });
-          const wakeStreams = extractWakeStreams(evt);
-          if (wakeStreams !== null) {
-            debugLog('wake detected', {streams: wakeStreams});
-            void runPollLoop('wake', wakeStreams);
+          if (isWakeEvent(evt)) {
+            debugLog('wake detected', {});
+            void runPollLoop('wake');
           }
         },
       });
@@ -2945,13 +3184,13 @@ async function runWatch(argv) {
   }
 
   clearInterval(safetyTimer);
-  stateWatcher.stop();
 }
 
 const DISPATCH_BOOL_FLAGS = new Set([
   'compact',
   'raw',
   'cache-only',
+  'berrypay',
   'print-polls',
   'fetch-payloads',
   'skip-register',
@@ -3096,6 +3335,9 @@ async function main() {
     case 'wallet':
       runWallet(rest);
       return;
+    case 'qr':
+      runQr(rest);
+      return;
     case 'search':
       await runSearch(rest);
       return;
@@ -3117,12 +3359,19 @@ async function main() {
     case 'job': {
       const {sub, argv: subArgv} = splitSubcommand(rest, [
         'create',
+        'charge',
         'reissue-request',
         'reissue-charge',
         'payment-sent',
+        'mark-paid',
+        'deliver',
       ]);
       if (sub === 'create') {
         await runJobCreate(subArgv);
+        return;
+      }
+      if (sub === 'charge') {
+        await runJobCharge(subArgv);
         return;
       }
       if (sub === 'reissue-request') {
@@ -3137,7 +3386,15 @@ async function main() {
         await runJobPaymentSent(subArgv);
         return;
       }
-      throw new Error('Unknown job command. Use: job create|reissue-request|reissue-charge|payment-sent');
+      if (sub === 'mark-paid') {
+        await runJobMarkPaid(subArgv);
+        return;
+      }
+      if (sub === 'deliver') {
+        await runJobDeliver(subArgv);
+        return;
+      }
+      throw new Error('Unknown job command. Use: job create|charge|reissue-request|reissue-charge|payment-sent|mark-paid|deliver');
     }
     case 'payload': {
       const {sub, argv: subArgv} = splitSubcommand(rest, ['list', 'fetch']);

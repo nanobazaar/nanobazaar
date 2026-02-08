@@ -25,7 +25,6 @@ type Cleaner interface {
 	DeletePayloadsFetchedBefore(ctx context.Context, cutoff sql.NullTime) error
 	DeletePayloadsBefore(ctx context.Context, cutoff time.Time) error
 	DeleteEventsBefore(ctx context.Context, cutoff time.Time) error
-	DeleteStreamEventsAckedBefore(ctx context.Context, cutoff time.Time) error
 }
 
 func Start(enabled bool, interval time.Duration, logger *log.Logger, cleaner Cleaner) func() {
@@ -67,7 +66,6 @@ func runCleanup(cleaner Cleaner, logger *log.Logger) {
 	logErr("payloads_fetched", cleaner.DeletePayloadsFetchedBefore(ctx, sql.NullTime{Time: now.Add(-payloadFetchTTL), Valid: true}))
 	logErr("payloads", cleaner.DeletePayloadsBefore(ctx, now.Add(-payloadTTL)))
 	logErr("events", cleaner.DeleteEventsBefore(ctx, now.Add(-eventTTL)))
-	logErr("stream_events", cleaner.DeleteStreamEventsAckedBefore(ctx, now.Add(-eventTTL)))
 	logErr("jobs", cleaner.DeleteJobsTerminalBefore(ctx, sql.NullTime{Time: now.Add(-jobTTL), Valid: true}))
 	logErr("offers", cleaner.DeleteOffersBefore(ctx, now.Add(-offerTTL)))
 }

@@ -43,15 +43,13 @@ func TestStreamWakeup(t *testing.T) {
 		t.Fatalf("create bot: %v", err)
 	}
 
-	hub := NewStreamHub(st)
+	hub := NewStreamHub()
 	router := NewRouter(RouterConfig{Verifier: verifier, Store: st, StreamHub: hub})
 	srv := httptest.NewServer(router)
 	defer srv.Close()
 
-	streamKey := "seller:ed25519:" + base64.RawURLEncoding.EncodeToString(pub)
-	rawQuery := "streams=" + streamKey
-
-	req, err := http.NewRequest(http.MethodGet, srv.URL+"/v0/stream?"+rawQuery, nil)
+	rawQuery := ""
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/v0/stream", nil)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
@@ -86,7 +84,7 @@ func TestStreamWakeup(t *testing.T) {
 	}
 
 	// Trigger a wakeup.
-	hub.NotifyStream(streamKey)
+	hub.NotifyEvent(context.Background(), botID, "test.wakeup", nil)
 
 	var gotWake bool
 	var gotData string
@@ -110,24 +108,66 @@ func TestStreamWakeup(t *testing.T) {
 		t.Fatalf("expected wake event with data, gotWake=%v gotData=%q", gotWake, gotData)
 	}
 
-	var payload struct {
-		Streams []string `json:"streams"`
-		Hint    string   `json:"hint"`
-	}
+	var payload map[string]any
 	if err := json.Unmarshal([]byte(gotData), &payload); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if payload.Hint != "poll" {
-		t.Fatalf("expected hint=poll, got %q", payload.Hint)
+	if payload["hint"] != "poll" {
+		t.Fatalf("expected hint=poll, got %v", payload["hint"])
 	}
-	found := false
-	for _, stream := range payload.Streams {
-		if stream == streamKey {
-			found = true
-			break
-		}
+	if _, ok := payload["streams"]; ok {
+		t.Fatalf("expected no streams in wake payload, got %v", payload["streams"])
 	}
-	if !found {
-		t.Fatalf("expected streams to include %q, got %v", streamKey, payload.Streams)
+}
+
+func TestStreamRejectsStreamsParam(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	st := store.New(db)
+	verifier := auth.NewVerifier(st)
+	now := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+	verifier.Clock = func() time.Time { return now }
+
+	pub, priv := generateSigningKey(t)
+	encryptionPub := randomKeyBytes(t)
+	botID := botIDFromSigningKey(pub)
+
+	if err := st.CreateBot(context.Background(), sqlc.CreateBotParams{
+		BotID:                  botID,
+		SigningPubkeyEd25519:   base64.RawURLEncoding.EncodeToString(pub),
+		EncryptionPubkeyX25519: base64.RawURLEncoding.EncodeToString(encryptionPub),
+		SigningKid:             kidFromKey(pub),
+		EncryptionKid:          kidFromKey(encryptionPub),
+		CreatedAt:              now,
+		LastSeenAt:             sql.NullTime{Time: now, Valid: true},
+	}); err != nil {
+		t.Fatalf("create bot: %v", err)
+	}
+
+	hub := NewStreamHub()
+	router := NewRouter(RouterConfig{Verifier: verifier, Store: st, StreamHub: hub})
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	rawQuery := "streams=job:ignored"
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/v0/stream?"+rawQuery, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	bodyHash := sha256Hex(nil)
+	canonical := canonicalString(http.MethodGet, "/v0/stream", rawQuery, now.Format(time.RFC3339), "nonce-1", bodyHash)
+	sig := ed25519.Sign(priv, []byte(canonical))
+	setAuthHeaders(req, botID, now, "nonce-1", bodyHash, sig)
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("do request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
 	}
 }

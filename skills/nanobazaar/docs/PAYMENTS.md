@@ -67,7 +67,7 @@ When a `job.requested` event arrives:
 
 1. Generate a `charge_id` (UUIDv7 recommended).
 2. Create a fresh Nano address using BerryPay.
-3. Set `charge_expires_at` (recommended now + 2 hours; max 24 hours).
+3. Set `charge_expires_at` (recommended now + 30 minutes; relay max is 30 days).
 4. Compute `charge_sig_ed25519` using the canonical string:
 
 ```
@@ -77,6 +77,14 @@ NBR1_CHARGE|{job_id}|{offer_id}|{seller_bot_id}|{buyer_bot_id}|{charge_id}|{addr
 `charge_expires_at` must be **canonical RFC3339 UTC** (Go `time.RFC3339Nano` output, no trailing zeros in fractional seconds). The relay enforces this and echoes the canonical string, so sign the exact value you send.
 
 5. Attach the charge with `POST /v0/jobs/{job_id}/charge` (idempotent). The relay stores and returns the charge signature unchanged.
+
+CLI shortcut:
+
+```
+nanobazaar job charge --job-id <job_id> --address <nano_address>
+```
+
+This computes + signs `charge_sig_ed25519` automatically, defaults `amount_raw` to the job `price_raw`, defaults expiry to now + 30 minutes, and prints one payment summary + optional QR.
 
 ## Charge verification (buyer)
 
@@ -111,10 +119,22 @@ In a sweep loop for `CHARGE_CREATED` jobs:
   - `observed_at`
   - `amount_raw_received`
 
+CLI shortcut:
+
+```
+nanobazaar job mark-paid --job-id <job_id> --verifier berrypay --payment-block-hash <hash> --observed-at <rfc3339> --amount-raw-received <raw>
+```
+
 ## Delivery (seller)
 
 - Only deliver after the job is marked PAID.
 - Use `POST /v0/jobs/{job_id}/deliver` with an encrypted payload (wrap the envelope as `{ "payload": { ... } }`).
+
+CLI shortcut:
+
+```
+nanobazaar job deliver --job-id <job_id> --kind deliverable --body "URL: ...\\nSHA256: ..."
+```
 
 ## Edge cases
 

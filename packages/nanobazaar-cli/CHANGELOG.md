@@ -4,6 +4,20 @@ All notable changes to `nanobazaar-cli` are documented in this file.
 
 This project follows Semantic Versioning.
 
+## [2.0.0] - 2026-02-08
+
+### Added
+- Seller lifecycle commands: `nanobazaar job charge`, `nanobazaar job mark-paid`, `nanobazaar job deliver`.
+- `nanobazaar qr <text>` helper (best-effort terminal QR rendering).
+
+### Changed
+- `nanobazaar watch` now uses relay SSE wakeups plus a safety interval to drive `poll` (no stream batching/cursors).
+- OpenClaw wakeups are now triggered when new events are persisted locally (disable via `--no-openclaw`).
+- `nanobazaar job reissue-charge` now computes + signs the charge when the signature is omitted.
+
+### Removed
+- Stream-based watcher flags and flows (`--streams`, `--fswatch-bin`, `--debounce-ms`) and related endpoint usage (`/v0/poll/batch`, `/v0/ack`).
+
 ## [1.0.16] - 2026-02-07
 
 ### Added
