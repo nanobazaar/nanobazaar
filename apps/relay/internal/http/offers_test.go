@@ -492,6 +492,98 @@ func TestPublicOffersMostPurchased(t *testing.T) {
 	}
 }
 
+func TestPublicOfferGet(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	st := store.New(db)
+	verifier := auth.NewVerifier(st)
+	now := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+	verifier.Clock = func() time.Time { return now }
+
+	buyerID := "bot_buyer"
+	sellerID := "bot_seller"
+	seedJobBot(t, st, buyerID, now)
+	seedJobBot(t, st, sellerID, now)
+
+	if _, err := st.DB.Exec(`UPDATE bots SET bot_name = ?1 WHERE bot_id = ?2`, "Seller", sellerID); err != nil {
+		t.Fatalf("update bot_name: %v", err)
+	}
+
+	seedJobOffer(t, st, "offer_a", sellerID, now)
+	if _, err := st.DB.Exec(`UPDATE offers SET tags_json = ?1, request_schema_hint = ?2 WHERE offer_id = ?3`, `["nano","writing"]`, "input hint", "offer_a"); err != nil {
+		t.Fatalf("update offer fields: %v", err)
+	}
+
+	seedJobWithStatus(t, st, "job_a1", "offer_a", buyerID, sellerID, now, string(domain.JobPaid), "1000")
+	seedJobWithStatus(t, st, "job_a2", "offer_a", buyerID, sellerID, now, string(domain.JobDelivered), "1000")
+
+	req := newJSONRequest(t, http.MethodGet, "/market/offers/offer_a", nil)
+	rec := httptestRequest(t, NewRouter(RouterConfig{Verifier: verifier, Store: st}), req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp publicOfferResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.OfferID != "offer_a" {
+		t.Fatalf("expected offer_id offer_a, got %q", resp.OfferID)
+	}
+	if resp.SellerBotName != "Seller" {
+		t.Fatalf("expected seller_bot_name Seller, got %q", resp.SellerBotName)
+	}
+	if resp.PurchaseCount != 2 {
+		t.Fatalf("expected purchase_count 2, got %d", resp.PurchaseCount)
+	}
+	if resp.RequestSchemaHint != "input hint" {
+		t.Fatalf("expected request_schema_hint set, got %q", resp.RequestSchemaHint)
+	}
+	if len(resp.Tags) != 2 || resp.Tags[0] != "nano" || resp.Tags[1] != "writing" {
+		t.Fatalf("unexpected tags: %#v", resp.Tags)
+	}
+}
+
+func TestPublicOfferGetNotFoundWhenPausedOrExpired(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	st := store.New(db)
+	verifier := auth.NewVerifier(st)
+	now := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+	verifier.Clock = func() time.Time { return now }
+
+	sellerID := "bot_seller"
+	seedJobBot(t, st, sellerID, now)
+
+	seedJobOffer(t, st, "offer_paused", sellerID, now)
+	if _, err := st.DB.Exec(`UPDATE offers SET status = 'PAUSED' WHERE offer_id = 'offer_paused'`); err != nil {
+		t.Fatalf("pause offer: %v", err)
+	}
+
+	reqPaused := newJSONRequest(t, http.MethodGet, "/market/offers/offer_paused", nil)
+	recPaused := httptestRequest(t, NewRouter(RouterConfig{Verifier: verifier, Store: st}), reqPaused)
+	if recPaused.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", recPaused.Code, recPaused.Body.String())
+	}
+
+	insertOfferWithExpiry(t, st, sellerID, "offer_expired", now.Add(-2*time.Hour), now.Add(-time.Hour))
+	reqExpired := newJSONRequest(t, http.MethodGet, "/market/offers/offer_expired", nil)
+	recExpired := httptestRequest(t, NewRouter(RouterConfig{Verifier: verifier, Store: st}), reqExpired)
+	if recExpired.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", recExpired.Code, recExpired.Body.String())
+	}
+
+	offer, err := st.GetOffer(context.Background(), "offer_expired")
+	if err != nil {
+		t.Fatalf("get offer: %v", err)
+	}
+	if offer.Status != string(domain.OfferExpired) {
+		t.Fatalf("expected offer status EXPIRED, got %q", offer.Status)
+	}
+}
+
 func TestOffersListRelevance(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
