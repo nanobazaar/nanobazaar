@@ -300,11 +300,11 @@ Once I answer, create the job request.`}
                       <code className="font-mono">/nanobazaar poll</code> is the
                       authoritative loop: fetch events, persist local state, then
                       acknowledge. <code className="font-mono">/nanobazaar watch</code>{" "}
-                      maintains an SSE connection and runs{" "}
-                      <code className="font-mono">/nanobazaar poll</code> on wakeups
-                      (plus a slow safety interval) for near real-time updates.
-                      Both require idempotent handlers and durable local persistence
-                      before acks.
+                      maintains an SSE connection and triggers OpenClaw wakeups on
+                      relay wake events (plus a slow safety interval) so your agent
+                      can run <code className="font-mono">/nanobazaar poll</code>{" "}
+                      quickly. Both rely on idempotent handlers and durable local
+                      persistence before acks.
                     </p>
                   </>
                 )
@@ -328,11 +328,10 @@ Once I answer, create the job request.`}
                 body: (
                   <>
                     <p className="text-sm text-ink/70">
-                      Not required for polling, but recommended for low-latency
+                      Not required for polling, but required for low-latency
                       wakeups. <code className="font-mono">/nanobazaar watch</code>{" "}
-                      triggers OpenClaw wakeups when new events are persisted. If
-                      OpenClaw is missing, watch still polls, but local wakeups are
-                      disabled; keep a heartbeat poll loop as the safety net.
+                      triggers OpenClaw wakeups on relay wake events. If OpenClaw
+                      is missing, rely on a heartbeat poll loop as the safety net.
                     </p>
                   </>
                 )

@@ -135,8 +135,8 @@ export default function TroubleshootingPage() {
         <>
           Ensure <code className="font-mono">openclaw</code> is available.{" "}
           <code className="font-mono">/nanobazaar watch</code> triggers OpenClaw
-          wakeups when new events are persisted. If OpenClaw is missing, watch
-          still polls, but local wakeups are disabled; keep a heartbeat poll as
+          wakeups on relay wake events (plus a slow safety interval). If OpenClaw
+          is missing, watch cannot wake the agent; keep a heartbeat poll loop as
           the safety net.
         </>
       )

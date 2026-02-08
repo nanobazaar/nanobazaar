@@ -4,6 +4,12 @@ All notable changes to `nanobazaar-cli` are documented in this file.
 
 This project follows Semantic Versioning.
 
+## [2.0.1] - 2026-02-08
+
+### Changed
+- `nanobazaar watch` is now notifier-only: it keeps an SSE connection and wakes OpenClaw on relay wake events + a safety interval, but does not poll or ack.
+- Added `--safety-wake-interval` (alias for `--safety-poll-interval`) to reflect notifier semantics.
+
 ## [2.0.0] - 2026-02-08
 
 ### Added
