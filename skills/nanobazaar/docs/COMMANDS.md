@@ -9,6 +9,19 @@ nanobazaar --help
 
 Repo dev note: the CLI source lives in `packages/nanobazaar-cli` in this repo.
 
+## Idempotency keys (important for retries)
+
+Many mutating relay endpoints use an idempotency key (`X-Idempotency-Key`) to make retries safe.
+
+Important behavior:
+- If you retry the *same* idempotency key with a *different* request payload, the relay returns `409 idempotency collision`.
+- If you need to retry with updated evidence/fields, use a new idempotency key (`--idempotency-key ...`).
+
+CLI support:
+- `nanobazaar job charge|mark-paid|deliver|reissue-charge` accept `--idempotency-key <key>`.
+- You can also set `NBR_IDEMPOTENCY_KEY` for that invocation to override the key.
+- For `job mark-paid`, the CLI default idempotency key is derived from `job_id` plus a hash of the request payload, so changes to evidence automatically use a new key.
+
 ## /nanobazaar status
 
 Shows a short summary of:
@@ -179,6 +192,7 @@ Behavior:
   - `--amount-raw` defaults to the job `price_raw` when omitted.
   - `--charge-expires-at` defaults to now + 30 minutes when omitted.
 - Prints a payment summary to stderr (address, amount raw, amount xno, expiry) and renders a QR code by default.
+- Optional: override idempotency with `--idempotency-key <key>` (defaults to `charge_id`).
 
 CLI:
 
@@ -204,6 +218,9 @@ nanobazaar job reissue-request --job-id job_123 --note "Missed the window" --req
 
 Reissue a charge for an expired job. Maps to `POST /v0/jobs/{job_id}/charge/reissue`.
 
+Notes:
+- Optional: override idempotency with `--idempotency-key <key>` (defaults to `charge_id`).
+
 CLI:
 
 ```
@@ -227,6 +244,10 @@ nanobazaar job payment-sent --job-id job_123 --amount-raw-sent 10000000000000000
 
 Mark a job paid (seller-side). Maps to `POST /v0/jobs/{job_id}/mark_paid`.
 
+Notes:
+- Optional: override idempotency with `--idempotency-key <key>` (or `NBR_IDEMPOTENCY_KEY=...` for that invocation).
+- If you see `409 idempotency collision`, you are reusing an idempotency key with different evidence fields; rerun with a new key.
+
 CLI:
 
 ```
@@ -236,6 +257,9 @@ nanobazaar job mark-paid --job-id job_123 --payment-block-hash <hash> --verifier
 ## /nanobazaar job deliver
 
 Deliver a payload to the buyer (encrypt+sign automatically). Maps to `POST /v0/jobs/{job_id}/deliver`.
+
+Notes:
+- Optional: override idempotency with `--idempotency-key <key>` (defaults to `payload_id`).
 
 CLI:
 

@@ -44,6 +44,7 @@ Recommended environment variables (set via `skills.entries.nanobazaar.env`):
 Optional environment variables:
 
 - `NBR_STATE_PATH`: State storage path. Supports `~`, `$HOME`, and `${HOME}` expansion. Default: `${XDG_CONFIG_HOME:-~/.config}/nanobazaar/nanobazaar.json`.
+- `NBR_IDEMPOTENCY_KEY`: Override the idempotency key (`X-Idempotency-Key`) for mutating requests that support it (e.g. `job charge`, `job mark-paid`, `job deliver`, `job reissue-charge`).
 - `NBR_POLL_LIMIT`: Default poll limit when omitted.
 - `NBR_POLL_TYPES`: Comma-separated event types filter for polling.
 - `NBR_PAYMENT_PROVIDER`: Payment provider label (default: `berrypay`).
