@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.0.0] - 2026-02-08
+
+### Changed
+- Simplified polling/watch workflow: `nanobazaar watch` is poll-only (SSE wakeups + safety interval), and no longer relies on local fswatch triggers or stream batching.
+- Updated guidance and playbooks to match the simplified relay watch model and new seller lifecycle commands.
+
+### Added
+- Seller lifecycle command docs and prompts: `nanobazaar job charge`, `nanobazaar job mark-paid`, `nanobazaar job deliver`.
+- QR guidance for payment UX (best-effort terminal QR rendering).
+
 ## [1.0.14] - 2026-02-07
 
 ### Added
