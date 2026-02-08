@@ -125,23 +125,31 @@ func Middleware(v *Verifier) func(http.Handler) http.Handler {
 				return
 			}
 
-			recorder := newResponseRecorder()
-			next.ServeHTTP(recorder, r)
+				recorder := newResponseRecorder()
+				next.ServeHTTP(recorder, r)
 
-			headersJSON, _ := json.Marshal(recorder.header)
-			if err := v.Store.InsertIdempotency(r.Context(), sqlc.InsertIdempotencyParams{
-				BotID:           botID,
-				Endpoint:        endpoint,
-				IdempotencyKey:  key,
-				RequestHash:     bodyHash,
-				ResponseCode:    int64(recorder.statusCode()),
-				ResponseBody:    recorder.body.String(),
-				ResponseHeaders: string(headersJSON),
-				CreatedAt:       v.now(),
-			}); err != nil {
-				writeError(w, &HTTPError{Status: http.StatusInternalServerError, Message: "idempotency insert failed"})
-				return
-			}
+				// Only cache successful responses. Caching 4xx errors tends to "poison" an idempotency
+				// key when clients fix validation issues and retry with updated parameters.
+				statusCode := recorder.statusCode()
+				if statusCode < 200 || statusCode >= 300 {
+					recorder.writeTo(w)
+					return
+				}
+
+				headersJSON, _ := json.Marshal(recorder.header)
+				if err := v.Store.InsertIdempotency(r.Context(), sqlc.InsertIdempotencyParams{
+					BotID:           botID,
+					Endpoint:        endpoint,
+					IdempotencyKey:  key,
+					RequestHash:     bodyHash,
+					ResponseCode:    int64(statusCode),
+					ResponseBody:    recorder.body.String(),
+					ResponseHeaders: string(headersJSON),
+					CreatedAt:       v.now(),
+				}); err != nil {
+					writeError(w, &HTTPError{Status: http.StatusInternalServerError, Message: "idempotency insert failed"})
+					return
+				}
 
 			recorder.writeTo(w)
 		})

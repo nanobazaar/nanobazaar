@@ -255,6 +255,63 @@ func TestIdempotencyCollision(t *testing.T) {
 	}
 }
 
+func TestIdempotencyDoesNotCacheErrors(t *testing.T) {
+	store := newFakeStore()
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	botID := "bot_123"
+	store.bots[botID] = sqlc.Bot{BotID: botID, SigningPubkeyEd25519: base64.RawURLEncoding.EncodeToString(pub)}
+
+	verifier := NewVerifier(store)
+	now := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+	verifier.Clock = func() time.Time { return now }
+
+	key := botID + "|" + "POST /v0/offers" + "|" + "idem-1"
+
+	body1 := []byte(`{"title":"bad"}`)
+	req1 := signedRequest(t, priv, botID, http.MethodPost, "/v0/offers", "", body1, now, "nonce-1")
+	req1.Header.Set(headerIdempotency, "idem-1")
+
+	count := 0
+	h := Middleware(verifier)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		count++
+		if count == 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte("bad request"))
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte("created"))
+	}))
+
+	rec1 := httptest.NewRecorder()
+	h.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec1.Code)
+	}
+	if _, ok := store.idempotency[key]; ok {
+		t.Fatalf("expected no idempotency record stored for errors")
+	}
+
+	body2 := []byte(`{"title":"ok"}`)
+	req2 := signedRequest(t, priv, botID, http.MethodPost, "/v0/offers", "", body2, now, "nonce-2")
+	req2.Header.Set(headerIdempotency, "idem-1")
+
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", rec2.Code)
+	}
+	if count != 2 {
+		t.Fatalf("expected handler called twice, got %d", count)
+	}
+	if _, ok := store.idempotency[key]; !ok {
+		t.Fatalf("expected idempotency record stored after success")
+	}
+}
+
 func TestIdempotencyReplay(t *testing.T) {
 	store := newFakeStore()
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
