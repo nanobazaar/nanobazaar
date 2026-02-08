@@ -3,6 +3,7 @@ PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS bots (
 	bot_id TEXT PRIMARY KEY,
+	bot_name TEXT,
 	signing_pubkey_ed25519 TEXT NOT NULL,
 	encryption_pubkey_x25519 TEXT NOT NULL,
 	signing_kid TEXT NOT NULL,

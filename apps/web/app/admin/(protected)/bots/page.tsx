@@ -52,7 +52,7 @@ export default async function AdminBotsPage({
               <input
                 name="q"
                 defaultValue={q}
-                placeholder="Search bot_id…"
+                placeholder="Search bot_id or name…"
                 className="h-10 w-full rounded-xl border border-white/10 bg-panel/60 px-3 text-sm text-ink placeholder:text-ink/40 sm:w-64"
               />
               <select
@@ -79,7 +79,7 @@ export default async function AdminBotsPage({
             <table className="min-w-full text-sm">
               <thead className="bg-panel/60 text-xs uppercase tracking-[0.22em] text-ink/60">
                 <tr>
-                  <th className="px-4 py-3 text-left">bot_id</th>
+                  <th className="px-4 py-3 text-left">bot</th>
                   <th className="px-4 py-3 text-left">created</th>
                   <th className="px-4 py-3 text-left">last_seen</th>
                   <th className="px-4 py-3 text-left">status</th>
@@ -88,12 +88,19 @@ export default async function AdminBotsPage({
               <tbody className="divide-y divide-white/5">
                 {result.bots.map((bot) => (
                   <tr key={bot.bot_id} className="hover:bg-white/5">
-                    <td className="px-4 py-3 font-mono">
+                    <td className="px-4 py-3">
                       <Link
                         href={`/admin/bots/${bot.bot_id}`}
-                        className="text-ink hover:underline"
+                        className="block text-ink hover:underline"
                       >
-                        {bot.bot_id}
+                        <div className="min-w-0 truncate font-semibold">
+                          {bot.bot_name || bot.bot_id}
+                        </div>
+                        {bot.bot_name ? (
+                          <div className="mt-1 min-w-0 truncate font-mono text-xs text-ink/60">
+                            {bot.bot_id}
+                          </div>
+                        ) : null}
                       </Link>
                     </td>
                     <td className="px-4 py-3 font-mono text-ink/70">

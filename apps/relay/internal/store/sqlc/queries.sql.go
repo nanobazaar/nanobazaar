@@ -591,7 +591,7 @@ func (q *Queries) DeleteStreamEventsAckedBefore(ctx context.Context, cutoff time
 }
 
 const getBot = `-- name: GetBot :one
-SELECT bot_id, signing_pubkey_ed25519, encryption_pubkey_x25519, signing_kid, encryption_kid, created_at, last_seen_at, revoked_at FROM bots WHERE bot_id = ?1
+SELECT bot_id, bot_name, signing_pubkey_ed25519, encryption_pubkey_x25519, signing_kid, encryption_kid, created_at, last_seen_at, revoked_at FROM bots WHERE bot_id = ?1
 `
 
 func (q *Queries) GetBot(ctx context.Context, botID string) (Bot, error) {
@@ -599,6 +599,7 @@ func (q *Queries) GetBot(ctx context.Context, botID string) (Bot, error) {
 	var i Bot
 	err := row.Scan(
 		&i.BotID,
+		&i.BotName,
 		&i.SigningPubkeyEd25519,
 		&i.EncryptionPubkeyX25519,
 		&i.SigningKid,
@@ -2870,11 +2871,40 @@ func (q *Queries) UpdateBotLastSeen(ctx context.Context, arg UpdateBotLastSeenPa
 	return err
 }
 
+const updateBotName = `-- name: UpdateBotName :one
+UPDATE bots
+SET bot_name = ?1
+WHERE bot_id = ?2
+RETURNING bot_id, bot_name, signing_pubkey_ed25519, encryption_pubkey_x25519, signing_kid, encryption_kid, created_at, last_seen_at, revoked_at
+`
+
+type UpdateBotNameParams struct {
+	BotName sql.NullString `json:"bot_name"`
+	BotID   string         `json:"bot_id"`
+}
+
+func (q *Queries) UpdateBotName(ctx context.Context, arg UpdateBotNameParams) (Bot, error) {
+	row := q.queryRow(ctx, q.updateBotNameStmt, updateBotName, arg.BotName, arg.BotID)
+	var i Bot
+	err := row.Scan(
+		&i.BotID,
+		&i.BotName,
+		&i.SigningPubkeyEd25519,
+		&i.EncryptionPubkeyX25519,
+		&i.SigningKid,
+		&i.EncryptionKid,
+		&i.CreatedAt,
+		&i.LastSeenAt,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
 const updateBotRevoke = `-- name: UpdateBotRevoke :one
 UPDATE bots
 SET revoked_at = COALESCE(revoked_at, ?1)
 WHERE bot_id = ?2
-RETURNING bot_id, signing_pubkey_ed25519, encryption_pubkey_x25519, signing_kid, encryption_kid, created_at, last_seen_at, revoked_at
+RETURNING bot_id, bot_name, signing_pubkey_ed25519, encryption_pubkey_x25519, signing_kid, encryption_kid, created_at, last_seen_at, revoked_at
 `
 
 type UpdateBotRevokeParams struct {
@@ -2887,6 +2917,7 @@ func (q *Queries) UpdateBotRevoke(ctx context.Context, arg UpdateBotRevokeParams
 	var i Bot
 	err := row.Scan(
 		&i.BotID,
+		&i.BotName,
 		&i.SigningPubkeyEd25519,
 		&i.EncryptionPubkeyX25519,
 		&i.SigningKid,

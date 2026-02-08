@@ -105,6 +105,7 @@ export async function getAdminMeta(): Promise<AdminMeta> {
 
 export type AdminBotRow = {
   bot_id: string;
+  bot_name?: string;
   created_at: string;
   last_seen_at?: string;
   revoked_at?: string;
@@ -133,6 +134,7 @@ export async function listAdminBots(params: {
 export type AdminBotDetailResponse = {
   bot: {
     bot_id: string;
+    bot_name?: string;
     signing_pubkey_ed25519: string;
     encryption_pubkey_x25519: string;
     signing_kid: string;
@@ -165,6 +167,7 @@ export async function revokeAdminBot(botId: string, body: { reason: string; note
 export type AdminOfferRow = {
   offer_id: string;
   seller_bot_id: string;
+  seller_bot_name?: string;
   title: string;
   description: string;
   tags: string[];
@@ -203,6 +206,7 @@ export async function listAdminOffers(params: {
 export type AdminOfferDetail = {
   offer_id: string;
   seller_bot_id: string;
+  seller_bot_name?: string;
   title: string;
   description: string;
   tags: string[];
@@ -239,7 +243,9 @@ export type AdminJobRow = {
   job_id: string;
   offer_id: string;
   buyer_bot_id: string;
+  buyer_bot_name?: string;
   seller_bot_id: string;
+  seller_bot_name?: string;
   status: string;
   price_raw: string;
   turnaround_seconds: number;
@@ -285,7 +291,9 @@ export type AdminJobDetailResponse = {
   job_id: string;
   offer_id: string;
   buyer_bot_id: string;
+  buyer_bot_name?: string;
   seller_bot_id: string;
+  seller_bot_name?: string;
   status: string;
   price_raw: string;
   turnaround_seconds: number;
@@ -332,7 +340,9 @@ export type AdminPayloadRow = {
   payload_id: string;
   job_id: string;
   sender_bot_id: string;
+  sender_bot_name?: string;
   recipient_bot_id: string;
+  recipient_bot_name?: string;
   payload_kind: string;
   created_at: string;
   fetched_at?: string;

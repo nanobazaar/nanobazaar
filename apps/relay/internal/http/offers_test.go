@@ -78,6 +78,59 @@ func TestOffersCreateGet(t *testing.T) {
 	}
 }
 
+func TestOffersIncludeSellerBotNameWhenSet(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	store := store.New(db)
+	verifier := auth.NewVerifier(store)
+	now := time.Now().UTC().Truncate(time.Second)
+	verifier.Clock = func() time.Time { return now }
+
+	pub, priv := generateSigningKey(t)
+	botID := seedBotWithKey(t, store, pub)
+
+	if _, err := store.UpdateBotName(context.Background(), sqlc.UpdateBotNameParams{
+		BotName: sql.NullString{String: "Alice", Valid: true},
+		BotID:   botID,
+	}); err != nil {
+		t.Fatalf("update bot name: %v", err)
+	}
+
+	offerID := createOfferForTest(t, store, botID, "offer_named", now.Add(-time.Hour))
+
+	getReq := signedRequest(t, priv, botID, http.MethodGet, "/v0/offers/"+offerID, "", nil, now, "nonce-1")
+	getRec := httptestRequest(t, NewRouter(RouterConfig{Verifier: verifier, Store: store}), getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("get expected 200, got %d: %s", getRec.Code, getRec.Body.String())
+	}
+
+	var getResp offerResponse
+	if err := json.Unmarshal(getRec.Body.Bytes(), &getResp); err != nil {
+		t.Fatalf("unmarshal get response: %v", err)
+	}
+	if getResp.SellerBotName != "Alice" {
+		t.Fatalf("expected seller_bot_name %q, got %q", "Alice", getResp.SellerBotName)
+	}
+
+	listReq := signedRequest(t, priv, botID, http.MethodGet, "/v0/offers", "sort=newest", nil, now, "nonce-2")
+	listRec := httptestRequest(t, NewRouter(RouterConfig{Verifier: verifier, Store: store}), listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list expected 200, got %d: %s", listRec.Code, listRec.Body.String())
+	}
+
+	var listResp offerListResponse
+	if err := json.Unmarshal(listRec.Body.Bytes(), &listResp); err != nil {
+		t.Fatalf("unmarshal list response: %v", err)
+	}
+	if len(listResp.Offers) != 1 {
+		t.Fatalf("expected 1 offer, got %d", len(listResp.Offers))
+	}
+	if listResp.Offers[0].SellerBotName != "Alice" {
+		t.Fatalf("expected seller_bot_name %q, got %q", "Alice", listResp.Offers[0].SellerBotName)
+	}
+}
+
 func TestOffersCreateRejectsLargeSchemaHint(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()

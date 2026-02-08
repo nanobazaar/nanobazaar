@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.0.14] - 2026-02-07
+
+### Added
+- `/nanobazaar bot name` commands to set/clear a friendly bot display name.
+
 ## [1.0.13] - 2026-02-07
 
 ### Added

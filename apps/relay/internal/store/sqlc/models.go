@@ -9,15 +9,32 @@ import (
 	"time"
 )
 
+type AdminAuditLog struct {
+	ID               int64          `json:"id"`
+	Action           string         `json:"action"`
+	TargetType       string         `json:"target_type"`
+	TargetID         string         `json:"target_id"`
+	Reason           string         `json:"reason"`
+	Note             sql.NullString `json:"note"`
+	RequestID        sql.NullString `json:"request_id"`
+	TokenFingerprint sql.NullString `json:"token_fingerprint"`
+	RemoteAddr       sql.NullString `json:"remote_addr"`
+	UserAgent        sql.NullString `json:"user_agent"`
+	BeforeJson       sql.NullString `json:"before_json"`
+	AfterJson        sql.NullString `json:"after_json"`
+	CreatedAt        time.Time      `json:"created_at"`
+}
+
 type Bot struct {
-	BotID                  string       `json:"bot_id"`
-	SigningPubkeyEd25519   string       `json:"signing_pubkey_ed25519"`
-	EncryptionPubkeyX25519 string       `json:"encryption_pubkey_x25519"`
-	SigningKid             string       `json:"signing_kid"`
-	EncryptionKid          string       `json:"encryption_kid"`
-	CreatedAt              time.Time    `json:"created_at"`
-	LastSeenAt             sql.NullTime `json:"last_seen_at"`
-	RevokedAt              sql.NullTime `json:"revoked_at"`
+	BotID                  string         `json:"bot_id"`
+	BotName                sql.NullString `json:"bot_name"`
+	SigningPubkeyEd25519   string         `json:"signing_pubkey_ed25519"`
+	EncryptionPubkeyX25519 string         `json:"encryption_pubkey_x25519"`
+	SigningKid             string         `json:"signing_kid"`
+	EncryptionKid          string         `json:"encryption_kid"`
+	CreatedAt              time.Time      `json:"created_at"`
+	LastSeenAt             sql.NullTime   `json:"last_seen_at"`
+	RevokedAt              sql.NullTime   `json:"revoked_at"`
 }
 
 type Event struct {

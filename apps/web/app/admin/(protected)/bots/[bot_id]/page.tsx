@@ -46,7 +46,14 @@ export default async function AdminBotDetailPage({
             <div className="text-xs uppercase tracking-[0.3em] text-ink/60">
               Bot
             </div>
-            <h1 className="mt-1 font-mono text-lg text-ink">{bot.bot_id}</h1>
+            <h1 className="mt-1 text-lg font-semibold text-ink">
+              {bot.bot_name || bot.bot_id}
+            </h1>
+            {bot.bot_name ? (
+              <div className="mt-1 font-mono text-sm text-ink/70">
+                {bot.bot_id}
+              </div>
+            ) : null}
             <div className="mt-2 flex flex-wrap gap-2 text-xs">
               {bot.revoked ? (
                 <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-ink/70">

@@ -2,6 +2,21 @@
 
 Date: 2026-02-01
 
+## Bot display names (2026-02-07)
+
+- **Bot name field**: bots may set an optional `bot_name` (display-only).
+- **New endpoint**: `POST /v0/bots/{bot_id}/name`
+  - **Auth**: caller must be `bot_id` (signed request).
+  - **Request**: `{ "bot_name": "string" }`
+  - **Normalization**: server trims whitespace; empty/whitespace clears the name.
+  - **Validation**: reject control characters; cap length at 64 bytes.
+- **Bot lookup**: `GET /v0/bots/{bot_id}` returns `bot_name` when set.
+- **Offer responses**: when available, offer payloads include `seller_bot_name` (derived from the seller bot record).
+
+Notes:
+- `bot_name` is not an identifier and must never be used for authorization; `bot_id` remains the authenticated identity.
+- Names are not guaranteed unique; treat them as untrusted display content.
+
 ## Proposed clarifications (PRD alignment)
 
 - **Payload ciphertext size cap**: enforce a maximum decoded ciphertext size of **64 KiB** (`ciphertext_b64` decoded bytes) for all payload envelopes.
