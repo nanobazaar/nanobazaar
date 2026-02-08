@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.0.1] - 2026-02-08
+
+### Changed
+- `nanobazaar watch` is now notifier-only: it wakes OpenClaw on relay wake events + a safety interval, but does not poll or ack.
+- Updated docs and guidance so OpenClaw's heartbeat `/nanobazaar poll` loop is the only consumer.
+
 ## [2.0.0] - 2026-02-08
 
 ### Changed

@@ -1235,11 +1235,11 @@ Commands:
                              Poll events and optionally ack
   poll ack --up-to-event-id <id>
                              Advance the server-side poll cursor (used for 410 resync)
-  watch [--stream-path /v0/stream] [--safety-poll-interval <seconds>]
+  watch [--stream-path /v0/stream] [--safety-wake-interval <seconds>]
         [--state-path <path>] [--openclaw-bin <bin>] [--event-text <text>]
-        [--mode now|next] [--no-openclaw] [--no-fetch-payloads]
-                             Maintain SSE connection; poll on wake + on safety interval.
-                             Triggers an OpenClaw wakeup when new events are persisted.
+        [--mode now|next] [--no-openclaw]
+                             Maintain SSE connection; wake OpenClaw on relay wake events + on a safety interval.
+                             Does not poll or ack (OpenClaw should run /nanobazaar poll).
 
 Global flags:
   --help                     Show this help
@@ -2987,14 +2987,15 @@ async function runWatch(argv) {
     throw new Error('Local fswatch wakeups are removed. Remove --fswatch-bin/--debounce-ms and retry.');
   }
 
-  const safetyIntervalSeconds = flags.safetyPollInterval
-    ? parsePositiveInt(flags.safetyPollInterval, '--safety-poll-interval')
-    : 180;
+  if (flags.ack !== undefined || flags.fetchPayloads !== undefined || flags.limit !== undefined || flags.output !== undefined || flags.printPolls !== undefined || flags.types !== undefined) {
+    throw new Error('watch no longer polls. Remove polling flags (--no-ack/--no-fetch-payloads/--limit/--types/--print-polls/--output) and retry.');
+  }
 
-  const printPolls = !!flags.printPolls;
-  const pollLimit = parseOptionalPositiveInt(flags.limit, '--limit')
-    ?? parseOptionalPositiveInt(config.poll_limit, 'NBR_POLL_LIMIT');
-  const pollTypes = flags.types || config.poll_types;
+  const safetyIntervalSeconds = flags.safetyWakeInterval
+    ? parsePositiveInt(flags.safetyWakeInterval, '--safety-wake-interval')
+    : flags.safetyPollInterval
+      ? parsePositiveInt(flags.safetyPollInterval, '--safety-poll-interval')
+      : 180;
 
   const openclawBin = String(flags.openclawBin || 'openclaw');
   const mode = String(flags.mode || 'now');
@@ -3005,22 +3006,18 @@ async function runWatch(argv) {
     relay_url: config.relay_url,
     state_path: statePath,
     stream_path: streamPath,
-    safety_poll_interval_seconds: safetyIntervalSeconds,
-    ack: flags.ack !== false,
-    poll_limit: pollLimit ?? null,
-    poll_types: pollTypes ?? null,
-    print_polls: printPolls,
+    safety_wake_interval_seconds: safetyIntervalSeconds,
     openclaw_enabled: openclawEnabled,
   });
 
-  let pollInFlight = false;
-  let pollQueued = false;
-  let queuedReason = null;
   let openclawMissing = false;
+  let wakeInFlight = false;
+  let wakeQueued = false;
+  let queuedReason = null;
 
   function triggerOpenclawWake(reason) {
     if (!openclawEnabled || openclawMissing) {
-      return;
+      return false;
     }
     if (debugLog) {
       debugLog('openclaw wake', {reason, openclaw_bin: openclawBin, mode, event_text: eventText});
@@ -3032,53 +3029,30 @@ async function runWatch(argv) {
       if (debugLog) {
         debugLog('openclaw wake failed', result.error && result.error.message ? result.error.message : String(result.error));
       }
+      return false;
     }
+    return true;
   }
 
-  async function runPollLoop(reason) {
+  async function runWakeLoop(reason) {
     queuedReason = reason;
-    pollQueued = true;
-    if (pollInFlight) {
+    wakeQueued = true;
+    if (wakeInFlight) {
       return;
     }
-    pollInFlight = true;
+    wakeInFlight = true;
     try {
-      while (pollQueued) {
-        pollQueued = false;
+      while (wakeQueued) {
+        wakeQueued = false;
         const label = queuedReason || reason;
         queuedReason = null;
-        try {
-          const {response, events, addedEvents, ackedId} = await pollOnce({
-            config,
-            state,
-            statePath,
-            keys,
-            identity,
-            since: undefined,
-            limit: pollLimit,
-            types: pollTypes,
-            ack: flags.ack !== false,
-            fetchPayloads: flags.fetchPayloads !== false,
-            quiet: true,
-            compact: !!flags.compact,
-            debugLog,
-          });
 
-          if (printPolls && response) {
-            printJson(response, !!flags.compact);
-          }
-
-          console.error(`[watch] poll ok (${label}): events=${events.length} added=${addedEvents} ack=${flags.ack === false ? 'disabled' : ackedId}`);
-          if (addedEvents > 0) {
-            triggerOpenclawWake(label);
-          }
-        } catch (err) {
-          console.error(`[watch] poll error (${label}): ${err && err.message ? err.message : String(err)}`);
-          // Keep running; polling is idempotent and can be retried on the next wake/safety interval.
-        }
+        // Best-effort: waking OpenClaw can be retried on the next wake/safety interval.
+        const didWake = triggerOpenclawWake(label);
+        console.error(`[watch] wake ${didWake ? 'ok' : 'skipped'} (${label})`);
       }
     } finally {
-      pollInFlight = false;
+      wakeInFlight = false;
     }
   }
 
@@ -3096,17 +3070,17 @@ async function runWatch(argv) {
   console.error(`[watch] relay=${config.relay_url}`);
   console.error(`[watch] state_path=${statePath}`);
   console.error(`[watch] stream_path=${streamPath}`);
-  console.error(`[watch] safety_poll_interval_seconds=${safetyIntervalSeconds}`);
+  console.error(`[watch] safety_wake_interval_seconds=${safetyIntervalSeconds}`);
 
   const safetyTimer = setInterval(() => {
     if (signal.aborted) {
       return;
     }
-    void runPollLoop('safety');
+    void runWakeLoop('safety');
   }, safetyIntervalSeconds * 1000);
 
-  // Kick off an initial poll so the watcher is useful even if wakeups are missed.
-  void runPollLoop('startup');
+  // Kick off an initial wake so the agent can poll even if wakeups are missed.
+  void runWakeLoop('startup');
 
   let attempt = 0;
   function isWakeEvent(evt) {
@@ -3160,7 +3134,7 @@ async function runWatch(argv) {
           });
           if (isWakeEvent(evt)) {
             debugLog('wake detected', {});
-            void runPollLoop('wake');
+            void runWakeLoop('wake');
           }
         },
       });
