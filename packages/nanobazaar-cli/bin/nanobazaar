@@ -74,6 +74,35 @@ function sha256Hex(buffer) {
   return crypto.createHash('sha256').update(buffer).digest('hex');
 }
 
+function stableJsonNormalize(value) {
+  if (value === undefined) {
+    return null;
+  }
+  if (value === null || typeof value !== 'object') {
+    return value;
+  }
+  if (typeof value.toJSON === 'function') {
+    return stableJsonNormalize(value.toJSON());
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => stableJsonNormalize(entry));
+  }
+  const out = {};
+  for (const key of Object.keys(value).sort()) {
+    const entry = value[key];
+    // Match JSON.stringify: omit undefined values in objects.
+    if (entry === undefined) {
+      continue;
+    }
+    out[key] = stableJsonNormalize(entry);
+  }
+  return out;
+}
+
+function stableJsonStringify(value) {
+  return JSON.stringify(stableJsonNormalize(value));
+}
+
 function loadState(filePath) {
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
@@ -287,6 +316,17 @@ function saveStateMerged(filePath, state, options) {
 function getEnvValue(name) {
   const value = process.env[name];
   return value && value.trim() ? value.trim() : '';
+}
+
+function resolveIdempotencyKey(flags, fallback) {
+  if (flags && flags.idempotencyKey) {
+    return String(flags.idempotencyKey);
+  }
+  const envKey = getEnvValue('NBR_IDEMPOTENCY_KEY');
+  if (envKey) {
+    return envKey;
+  }
+  return fallback ? String(fallback) : '';
 }
 
 function expandHomePath(value) {
@@ -1990,7 +2030,7 @@ async function runJobCharge(argv) {
     method: 'POST',
     path: `/v0/jobs/${jobId}/charge`,
     body: payload,
-    idempotencyKey: String(flags.idempotencyKey || chargeId),
+    idempotencyKey: resolveIdempotencyKey(flags, chargeId),
     relayUrl: config.relay_url,
     keys,
     identity,
@@ -2060,11 +2100,15 @@ async function runJobMarkPaid(argv) {
   const {keys} = requireKeys(state);
   const identity = deriveIdentity(keys);
 
+  const requestBody = payload && Object.keys(payload).length > 0 ? payload : undefined;
+  const bodyHash = sha256Hex(stableJsonStringify(requestBody)).slice(0, 16);
+  const defaultIdempotencyKey = `mark_paid:${jobId}:${bodyHash}`;
+
   const result = await signedRequest({
     method: 'POST',
     path: `/v0/jobs/${jobId}/mark_paid`,
-    body: payload && Object.keys(payload).length > 0 ? payload : undefined,
-    idempotencyKey: String(flags.idempotencyKey || `mark_paid:${jobId}`),
+    body: requestBody,
+    idempotencyKey: resolveIdempotencyKey(flags, defaultIdempotencyKey),
     relayUrl: config.relay_url,
     keys,
     identity,
@@ -2144,7 +2188,7 @@ async function runJobDeliver(argv) {
     method: 'POST',
     path: `/v0/jobs/${jobId}/deliver`,
     body: {payload: built.envelope},
-    idempotencyKey: String(flags.idempotencyKey || payloadId),
+    idempotencyKey: resolveIdempotencyKey(flags, payloadId),
     relayUrl: config.relay_url,
     keys,
     identity,
@@ -2272,7 +2316,7 @@ async function runJobReissueCharge(argv) {
     method: 'POST',
     path: `/v0/jobs/${jobId}/charge/reissue`,
     body: payload,
-    idempotencyKey: String(flags.idempotencyKey || payload.charge_id),
+    idempotencyKey: resolveIdempotencyKey(flags, payload.charge_id),
     relayUrl: config.relay_url,
     keys,
     identity,

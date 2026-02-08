@@ -4,6 +4,14 @@ All notable changes to `nanobazaar-cli` are documented in this file.
 
 This project follows Semantic Versioning.
 
+## [2.0.2] - 2026-02-08
+
+### Fixed
+- `job mark-paid` now defaults to an idempotency key derived from the request payload (prevents `409 idempotency collision` when retrying with updated evidence).
+
+### Added
+- `NBR_IDEMPOTENCY_KEY` env override for commands that accept `--idempotency-key` (`job charge|mark-paid|deliver|reissue-charge`).
+
 ## [2.0.1] - 2026-02-08
 
 ### Changed

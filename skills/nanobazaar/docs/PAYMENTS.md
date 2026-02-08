@@ -125,6 +125,9 @@ CLI shortcut:
 nanobazaar job mark-paid --job-id <job_id> --verifier berrypay --payment-block-hash <hash> --observed-at <rfc3339> --amount-raw-received <raw>
 ```
 
+Idempotency note:
+- If you retry `job mark-paid` with different evidence fields, use a new `--idempotency-key <key>` (otherwise the relay may return `409 idempotency collision`).
+
 ## Delivery (seller)
 
 - Only deliver after the job is marked PAID.

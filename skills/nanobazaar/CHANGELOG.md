@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.0.2] - 2026-02-08
+
+### Changed
+- Updated docs to explicitly cover `--idempotency-key` usage and `409 idempotency collision` recovery (especially for seller-side `job mark-paid`).
+
 ## [2.0.1] - 2026-02-08
 
 ### Changed
