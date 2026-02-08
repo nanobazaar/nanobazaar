@@ -1114,6 +1114,12 @@ Commands:
   config [--json]            Show derived config (env + state paths)
   setup [--no-install-berrypay] [--skip-register]
                              Generate keys, register bot, persist state
+  bot name set --name <name>
+                             Set the bot's public display name
+  bot name clear
+                             Clear the bot's public display name
+  bot name get [--bot-id <id>]
+                             Fetch a bot record (includes bot_name when set)
   wallet [--output <path>] [--no-qr]
                              Show BerryPay wallet address + QR
   search <query> [--tags a,b] [--seller <bot_id>] [--mine]
@@ -1212,6 +1218,10 @@ async function runStatus() {
   console.log(`Relay URL: ${config.relay_url}`);
   console.log(`State path: ${config.state_path}`);
   if (identity) {
+    const botName = state.bot_name ? String(state.bot_name).trim() : '';
+    if (botName) {
+      console.log(`Bot: ${botName}`);
+    }
     console.log(`Bot ID: ${identity.botId}`);
     console.log(`Signing kid: ${identity.signingKid}`);
     console.log(`Encryption kid: ${identity.encryptionKid}`);
@@ -1226,6 +1236,110 @@ async function runStatus() {
   console.log(`Known jobs: ${countRecords(state.known_jobs)}`);
   console.log(`Known payloads: ${countRecords(state.known_payloads)}`);
   console.log(`Event log entries: ${countRecords(state.event_log)}`);
+}
+
+async function runBotNameSet(argv) {
+  const {flags, positionals} = parseArgs(argv);
+  let nameValue = null;
+  if (flags.name !== undefined) {
+    if (flags.name === true) {
+      throw new Error('Missing value for --name.');
+    }
+    nameValue = flags.name;
+  } else if (positionals.length > 0) {
+    nameValue = positionals.join(' ');
+  } else {
+    throw new Error('Missing bot name. Provide --name or a positional name.');
+  }
+
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  const botName = String(nameValue).trim();
+  if (!botName) {
+    throw new Error('Bot name must be non-empty. Use: bot name clear');
+  }
+  const result = await signedRequest({
+    method: 'POST',
+    path: `/v0/bots/${identity.botId}/name`,
+    body: {bot_name: botName},
+    idempotencyKey: crypto.randomBytes(16).toString('hex'),
+    relayUrl: config.relay_url,
+    keys,
+    identity,
+  });
+
+  if (!result.response.ok) {
+    throw new Error(`Failed to set bot name (${result.response.status}): ${result.text || result.response.statusText}`);
+  }
+
+  state.bot_name = botName;
+  state.relay_url = config.relay_url;
+  state.bot_id = identity.botId;
+  state.signing_kid = identity.signingKid;
+  state.encryption_kid = identity.encryptionKid;
+  saveStateMerged(config.state_path, state);
+
+  printJson(result.data, !!flags.compact);
+}
+
+async function runBotNameClear(argv) {
+  const {flags} = parseArgs(argv);
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  const result = await signedRequest({
+    method: 'POST',
+    path: `/v0/bots/${identity.botId}/name`,
+    body: {bot_name: ''},
+    idempotencyKey: crypto.randomBytes(16).toString('hex'),
+    relayUrl: config.relay_url,
+    keys,
+    identity,
+  });
+
+  if (!result.response.ok) {
+    throw new Error(`Failed to clear bot name (${result.response.status}): ${result.text || result.response.statusText}`);
+  }
+
+  delete state.bot_name;
+  state.relay_url = config.relay_url;
+  state.bot_id = identity.botId;
+  state.signing_kid = identity.signingKid;
+  state.encryption_kid = identity.encryptionKid;
+  saveStateMerged(config.state_path, state);
+
+  printJson(result.data, !!flags.compact);
+}
+
+async function runBotNameGet(argv) {
+  const {flags, positionals} = parseArgs(argv);
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  const targetBotId = flags.botId || flags.bot || positionals[0] || identity.botId;
+  const bot = await fetchBot({botId: targetBotId, config, keys, identity});
+  if (targetBotId === identity.botId) {
+    const name = bot && bot.bot_name ? String(bot.bot_name).trim() : '';
+    if (name) {
+      state.bot_name = name;
+    } else {
+      delete state.bot_name;
+    }
+    state.relay_url = config.relay_url;
+    state.bot_id = identity.botId;
+    state.signing_kid = identity.signingKid;
+    state.encryption_kid = identity.encryptionKid;
+    saveStateMerged(config.state_path, state);
+  }
+
+  printJson(bot, !!flags.compact);
 }
 
 function runSetup(args) {
@@ -2959,6 +3073,26 @@ async function main() {
     case 'setup':
       runSetup(rest);
       return;
+    case 'bot': {
+      const {sub, argv: subArgv} = splitSubcommand(rest, ['name']);
+      if (sub === 'name') {
+        const {sub: nameSub, argv: nameArgv} = splitSubcommand(subArgv, ['set', 'get', 'clear']);
+        if (nameSub === 'set') {
+          await runBotNameSet(nameArgv);
+          return;
+        }
+        if (nameSub === 'get') {
+          await runBotNameGet(nameArgv);
+          return;
+        }
+        if (nameSub === 'clear') {
+          await runBotNameClear(nameArgv);
+          return;
+        }
+        throw new Error('Unknown bot name command. Use: bot name set|get|clear');
+      }
+      throw new Error('Unknown bot command. Use: bot name ...');
+    }
     case 'wallet':
       runWallet(rest);
       return;

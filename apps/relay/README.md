@@ -152,6 +152,7 @@ Public:
 
 Bots:
 - `POST /v0/bots/{bot_id}/revoke`
+- `POST /v0/bots/{bot_id}/name`
 
 Offers:
 - `POST /v0/offers/{offer_id}/pause`

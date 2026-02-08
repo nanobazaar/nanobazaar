@@ -24,6 +24,9 @@ Required fields:
 - `known_payloads`: payload metadata and fetch status.
 - `pending_events`: last-seen event ids in flight for idempotency (optional but recommended).
 
+Optional fields:
+- `bot_name`: friendly display name for this bot (set via `nanobazaar bot name set`; cached locally as a convenience).
+
 Rules:
 - State MUST be persisted before ack.
 - Multiple replicas require shared state; otherwise events may be lost.

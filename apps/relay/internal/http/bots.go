@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/go-chi/chi/v5"
 
@@ -44,8 +45,13 @@ type botRegistrationRequest struct {
 	EncryptionKid          string `json:"encryption_kid"`
 }
 
+type botNameRequest struct {
+	BotName *string `json:"bot_name"`
+}
+
 type botResponse struct {
 	BotID                  string     `json:"bot_id"`
+	BotName                string     `json:"bot_name,omitempty"`
 	SigningPubkeyEd25519   string     `json:"signing_pubkey_ed25519"`
 	EncryptionPubkeyX25519 string     `json:"encryption_pubkey_x25519"`
 	SigningKid             string     `json:"signing_kid"`
@@ -311,6 +317,60 @@ func (h *BotHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *BotHandler) SetName(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.Store == nil {
+		writeJSONError(w, http.StatusInternalServerError, "store unavailable")
+		return
+	}
+
+	botID := chi.URLParam(r, "bot_id")
+	if botID == "" {
+		writeJSONError(w, http.StatusBadRequest, "missing bot_id")
+		return
+	}
+
+	caller := r.Header.Get(headerBotID)
+	if caller == "" {
+		writeJSONError(w, http.StatusUnauthorized, "missing bot_id")
+		return
+	}
+	if caller != botID {
+		writeJSONError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+
+	var payload botNameRequest
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if payload.BotName == nil {
+		writeJSONError(w, http.StatusBadRequest, "missing bot_name")
+		return
+	}
+
+	name, err := normalizeBotName(*payload.BotName)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	updated, err := h.Store.UpdateBotName(r.Context(), sqlc.UpdateBotNameParams{
+		BotID:   botID,
+		BotName: name,
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSONError(w, http.StatusNotFound, "bot not found")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "bot update failed")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, botToResponse(updated))
+}
+
 func (h *BotHandler) now() time.Time {
 	if h.Clock == nil {
 		return time.Now()
@@ -353,6 +413,10 @@ func botKeysMatch(bot sqlc.Bot, signingKey, encryptionKey, signingKid, encryptio
 }
 
 func botToResponse(bot sqlc.Bot) botResponse {
+	botName := ""
+	if bot.BotName.Valid {
+		botName = bot.BotName.String
+	}
 	var lastSeen *time.Time
 	if bot.LastSeenAt.Valid {
 		t := bot.LastSeenAt.Time
@@ -367,6 +431,7 @@ func botToResponse(bot sqlc.Bot) botResponse {
 	}
 	return botResponse{
 		BotID:                  bot.BotID,
+		BotName:                botName,
 		SigningPubkeyEd25519:   bot.SigningPubkeyEd25519,
 		EncryptionPubkeyX25519: bot.EncryptionPubkeyX25519,
 		SigningKid:             bot.SigningKid,
@@ -383,4 +448,20 @@ func isConstraintError(err error) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), "UNIQUE constraint failed")
+}
+
+func normalizeBotName(value string) (sql.NullString, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return sql.NullString{}, nil
+	}
+	if len(trimmed) > 64 {
+		return sql.NullString{}, errors.New("bot_name too long (max 64 bytes)")
+	}
+	for _, r := range trimmed {
+		if unicode.IsControl(r) {
+			return sql.NullString{}, errors.New("bot_name contains control characters")
+		}
+	}
+	return sql.NullString{String: trimmed, Valid: true}, nil
 }

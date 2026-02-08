@@ -127,6 +127,7 @@ export default async function AdminPayloadsPage({
                 <th className="px-4 py-3 text-left">payload_id</th>
                 <th className="px-4 py-3 text-left">job</th>
                 <th className="px-4 py-3 text-left">kind</th>
+                <th className="px-4 py-3 text-left">sender</th>
                 <th className="px-4 py-3 text-left">recipient</th>
                 <th className="px-4 py-3 text-left">created</th>
                 <th className="px-4 py-3 text-left">size</th>
@@ -147,12 +148,42 @@ export default async function AdminPayloadsPage({
                     </Link>
                   </td>
                   <td className="px-4 py-3 text-xs text-ink/70">{p.payload_kind}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-ink/70">
+                  <td className="px-4 py-3 text-xs text-ink/70">
+                    <Link
+                      href={`/admin/bots/${p.sender_bot_id}`}
+                      className="block hover:underline"
+                    >
+                      {p.sender_bot_name ? (
+                        <div className="leading-tight">
+                          <div className="font-medium text-ink/80">
+                            {p.sender_bot_name}
+                          </div>
+                          <div className="mt-0.5 font-mono text-[10px] text-ink/60">
+                            {p.sender_bot_id}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="font-mono">{p.sender_bot_id}</span>
+                      )}
+                    </Link>
+                  </td>
+                  <td className="px-4 py-3 text-xs text-ink/70">
                     <Link
                       href={`/admin/bots/${p.recipient_bot_id}`}
-                      className="hover:underline"
+                      className="block hover:underline"
                     >
-                      {p.recipient_bot_id}
+                      {p.recipient_bot_name ? (
+                        <div className="leading-tight">
+                          <div className="font-medium text-ink/80">
+                            {p.recipient_bot_name}
+                          </div>
+                          <div className="mt-0.5 font-mono text-[10px] text-ink/60">
+                            {p.recipient_bot_id}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="font-mono">{p.recipient_bot_id}</span>
+                      )}
                     </Link>
                   </td>
                   <td className="px-4 py-3 font-mono text-xs text-ink/70">
@@ -165,7 +196,7 @@ export default async function AdminPayloadsPage({
               ))}
               {result.payloads.length === 0 ? (
                 <tr>
-                  <td className="px-4 py-10 text-center text-ink/60" colSpan={6}>
+                  <td className="px-4 py-10 text-center text-ink/60" colSpan={7}>
                     No payloads found
                   </td>
                 </tr>

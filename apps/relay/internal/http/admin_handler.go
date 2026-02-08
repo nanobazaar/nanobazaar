@@ -205,6 +205,7 @@ func (h *AdminHandler) MetricsSnapshot(w http.ResponseWriter, _ *http.Request) {
 
 type adminBotRow struct {
 	BotID      string `json:"bot_id"`
+	BotName    string `json:"bot_name,omitempty"`
 	CreatedAt  string `json:"created_at"`
 	LastSeenAt string `json:"last_seen_at,omitempty"`
 	RevokedAt  string `json:"revoked_at,omitempty"`
@@ -252,8 +253,9 @@ func (h *AdminHandler) ListBots(w http.ResponseWriter, r *http.Request) {
 	args := make([]any, 0, 8)
 
 	if q != "" {
-		where += " AND bot_id LIKE ?"
-		args = append(args, "%"+q+"%")
+		where += " AND (bot_id LIKE ? OR bot_name LIKE ?)"
+		like := "%" + q + "%"
+		args = append(args, like, like)
 	}
 	if revoked != nil {
 		if *revoked {
@@ -269,7 +271,7 @@ func (h *AdminHandler) ListBots(w http.ResponseWriter, r *http.Request) {
 	args = append(args, limit+1)
 
 	rows, err := h.Store.DB.QueryContext(r.Context(), `
-SELECT bot_id, created_at, last_seen_at, revoked_at
+SELECT bot_id, bot_name, created_at, last_seen_at, revoked_at
 FROM bots
 `+where+`
 ORDER BY created_at DESC, bot_id DESC
@@ -283,10 +285,11 @@ LIMIT ?`, args...)
 	resp := adminBotListResponse{Bots: make([]adminBotRow, 0, limit)}
 	for rows.Next() {
 		var botID string
+		var botName sql.NullString
 		var createdAt time.Time
 		var lastSeen sql.NullTime
 		var revokedAt sql.NullTime
-		if err := rows.Scan(&botID, &createdAt, &lastSeen, &revokedAt); err != nil {
+		if err := rows.Scan(&botID, &botName, &createdAt, &lastSeen, &revokedAt); err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "bot list failed")
 			return
 		}
@@ -294,6 +297,9 @@ LIMIT ?`, args...)
 			BotID:     botID,
 			CreatedAt: createdAt.UTC().Format(time.RFC3339Nano),
 			Revoked:   revokedAt.Valid,
+		}
+		if botName.Valid {
+			row.BotName = botName.String
 		}
 		if lastSeen.Valid {
 			row.LastSeenAt = lastSeen.Time.UTC().Format(time.RFC3339Nano)
@@ -507,6 +513,7 @@ func (h *AdminHandler) RevokeBot(w http.ResponseWriter, r *http.Request) {
 type adminOfferRow struct {
 	OfferID           string   `json:"offer_id"`
 	SellerBotID       string   `json:"seller_bot_id"`
+	SellerBotName     string   `json:"seller_bot_name,omitempty"`
 	Title             string   `json:"title"`
 	Description       string   `json:"description"`
 	Tags              []string `json:"tags"`
@@ -525,9 +532,10 @@ type adminOfferListResponse struct {
 }
 
 const selectAdminOffersQuery = `
-SELECT o.offer_id, o.seller_bot_id, o.title, o.description, o.tags_json, o.price_raw, o.turnaround_seconds, o.created_at, o.expires_at, o.status, o.cancelled_at, o.request_schema_hint,
+SELECT o.offer_id, o.seller_bot_id, b.bot_name, o.title, o.description, o.tags_json, o.price_raw, o.turnaround_seconds, o.created_at, o.expires_at, o.status, o.cancelled_at, o.request_schema_hint,
 	COALESCE(p.purchase_count, 0) AS purchase_count
 FROM offers o
+LEFT JOIN bots b ON b.bot_id = o.seller_bot_id
 LEFT JOIN (
 	SELECT offer_id, COUNT(1) AS purchase_count
 	FROM jobs
@@ -607,10 +615,12 @@ LIMIT ?`, args...)
 	now := h.now()
 	for rows.Next() {
 		var offer sqlc.Offer
+		var sellerBotName sql.NullString
 		var purchaseCount int64
 		if err := rows.Scan(
 			&offer.OfferID,
 			&offer.SellerBotID,
+			&sellerBotName,
 			&offer.Title,
 			&offer.Description,
 			&offer.TagsJson,
@@ -647,6 +657,9 @@ LIMIT ?`, args...)
 			CreatedAt:         offer.CreatedAt.UTC().Format(time.RFC3339Nano),
 			Status:            offer.Status,
 			PurchaseCount:     purchaseCount,
+		}
+		if sellerBotName.Valid {
+			row.SellerBotName = sellerBotName.String
 		}
 		if offer.ExpiresAt.Valid {
 			row.ExpiresAt = offer.ExpiresAt.Time.UTC().Format(time.RFC3339Nano)
@@ -685,6 +698,7 @@ LIMIT ?`, args...)
 type adminOfferDetailResponse struct {
 	OfferID           string   `json:"offer_id"`
 	SellerBotID       string   `json:"seller_bot_id"`
+	SellerBotName     string   `json:"seller_bot_name,omitempty"`
 	Title             string   `json:"title"`
 	Description       string   `json:"description"`
 	Tags              []string `json:"tags"`
@@ -734,6 +748,7 @@ func (h *AdminHandler) GetOffer(w http.ResponseWriter, r *http.Request) {
 	resp := adminOfferDetailResponse{
 		OfferID:           offer.OfferID,
 		SellerBotID:       offer.SellerBotID,
+		SellerBotName:     h.lookupBotName(r.Context(), offer.SellerBotID),
 		Title:             offer.Title,
 		Description:       offer.Description,
 		Tags:              tags,
@@ -898,6 +913,7 @@ func (h *AdminHandler) moderateOfferStatus(w http.ResponseWriter, r *http.Reques
 	}
 
 	detail := adminOfferDetailResponseFromOffer(updated)
+	detail.SellerBotName = h.lookupBotName(ctx, updated.SellerBotID)
 	writeJSON(w, http.StatusOK, adminOfferModerateResponse{Offer: detail, AuditID: auditID})
 }
 
@@ -905,7 +921,9 @@ type adminJobRow struct {
 	JobID             string `json:"job_id"`
 	OfferID           string `json:"offer_id"`
 	BuyerBotID        string `json:"buyer_bot_id"`
+	BuyerBotName      string `json:"buyer_bot_name,omitempty"`
 	SellerBotID       string `json:"seller_bot_id"`
+	SellerBotName     string `json:"seller_bot_name,omitempty"`
 	Status            string `json:"status"`
 	PriceRaw          string `json:"price_raw"`
 	TurnaroundSeconds int64  `json:"turnaround_seconds"`
@@ -977,27 +995,27 @@ func (h *AdminHandler) ListJobs(w http.ResponseWriter, r *http.Request) {
 	where := "WHERE 1=1"
 	args := make([]any, 0, 24)
 	if offerID != "" {
-		where += " AND offer_id = ?"
+		where += " AND j.offer_id = ?"
 		args = append(args, offerID)
 	}
 	if buyerBotID != "" {
-		where += " AND buyer_bot_id = ?"
+		where += " AND j.buyer_bot_id = ?"
 		args = append(args, buyerBotID)
 	}
 	if sellerBotID != "" {
-		where += " AND seller_bot_id = ?"
+		where += " AND j.seller_bot_id = ?"
 		args = append(args, sellerBotID)
 	}
 	if jobIDQuery != "" {
-		where += " AND job_id LIKE ?"
+		where += " AND j.job_id LIKE ?"
 		args = append(args, "%"+jobIDQuery+"%")
 	}
 	if createdSince != nil {
-		where += " AND created_at >= ?"
+		where += " AND j.created_at >= ?"
 		args = append(args, createdSince.UTC())
 	}
 	if len(statuses) > 0 {
-		where += fmt.Sprintf(" AND status IN (%s)", placeholders(len(statuses)))
+		where += fmt.Sprintf(" AND j.status IN (%s)", placeholders(len(statuses)))
 		for _, status := range statuses {
 			args = append(args, status)
 		}
@@ -1005,61 +1023,92 @@ func (h *AdminHandler) ListJobs(w http.ResponseWriter, r *http.Request) {
 	baseWhere := where
 	baseArgs := args
 
-	fetchBatch := func(ctx context.Context, batchCursorCreatedAt *time.Time, batchCursorJobID *string) ([]sqlc.Job, error) {
+	type jobWithNames struct {
+		Job           sqlc.Job
+		BuyerBotName  sql.NullString
+		SellerBotName sql.NullString
+	}
+
+	fetchBatch := func(ctx context.Context, batchCursorCreatedAt *time.Time, batchCursorJobID *string) ([]jobWithNames, error) {
 		where := baseWhere
 		args := append([]any{}, baseArgs...)
 		if batchCursorCreatedAt != nil && batchCursorJobID != nil {
-			where += " AND (created_at < ? OR (created_at = ? AND job_id < ?))"
+			where += " AND (j.created_at < ? OR (j.created_at = ? AND j.job_id < ?))"
 			args = append(args, batchCursorCreatedAt.UTC(), batchCursorCreatedAt.UTC(), *batchCursorJobID)
 		}
 		args = append(args, limit)
 
 		rows, err := h.Store.DB.QueryContext(ctx, `
-SELECT job_id, offer_id, buyer_bot_id, seller_bot_id, status, price_raw, turnaround_seconds, created_at, job_expires_at,
-	request_payload_id,
-	charge_id, charge_address, charge_amount_raw, charge_expires_at, charge_sig_ed25519,
-	paid_at, delivered_at, cancelled_at, expired_at,
-	payment_verifier, payment_block_hash, payment_observed_at, amount_raw_received
-FROM jobs
+SELECT
+	j.job_id,
+	j.offer_id,
+	j.buyer_bot_id,
+	buyer.bot_name,
+	j.seller_bot_id,
+	seller.bot_name,
+	j.status,
+	j.price_raw,
+	j.turnaround_seconds,
+	j.created_at,
+	j.job_expires_at,
+	j.request_payload_id,
+	j.charge_id,
+	j.charge_address,
+	j.charge_amount_raw,
+	j.charge_expires_at,
+	j.charge_sig_ed25519,
+	j.paid_at,
+	j.delivered_at,
+	j.cancelled_at,
+	j.expired_at,
+	j.payment_verifier,
+	j.payment_block_hash,
+	j.payment_observed_at,
+	j.amount_raw_received
+FROM jobs j
+LEFT JOIN bots buyer ON buyer.bot_id = j.buyer_bot_id
+LEFT JOIN bots seller ON seller.bot_id = j.seller_bot_id
 `+where+`
-ORDER BY created_at DESC, job_id DESC
+ORDER BY j.created_at DESC, j.job_id DESC
 LIMIT ?`, args...)
 		if err != nil {
 			return nil, err
 		}
 		defer rows.Close()
 
-		out := make([]sqlc.Job, 0, limit)
+		out := make([]jobWithNames, 0, limit)
 		for rows.Next() {
-			var job sqlc.Job
+			var item jobWithNames
 			if err := rows.Scan(
-				&job.JobID,
-				&job.OfferID,
-				&job.BuyerBotID,
-				&job.SellerBotID,
-				&job.Status,
-				&job.PriceRaw,
-				&job.TurnaroundSeconds,
-				&job.CreatedAt,
-				&job.JobExpiresAt,
-				&job.RequestPayloadID,
-				&job.ChargeID,
-				&job.ChargeAddress,
-				&job.ChargeAmountRaw,
-				&job.ChargeExpiresAt,
-				&job.ChargeSigEd25519,
-				&job.PaidAt,
-				&job.DeliveredAt,
-				&job.CancelledAt,
-				&job.ExpiredAt,
-				&job.PaymentVerifier,
-				&job.PaymentBlockHash,
-				&job.PaymentObservedAt,
-				&job.AmountRawReceived,
+				&item.Job.JobID,
+				&item.Job.OfferID,
+				&item.Job.BuyerBotID,
+				&item.BuyerBotName,
+				&item.Job.SellerBotID,
+				&item.SellerBotName,
+				&item.Job.Status,
+				&item.Job.PriceRaw,
+				&item.Job.TurnaroundSeconds,
+				&item.Job.CreatedAt,
+				&item.Job.JobExpiresAt,
+				&item.Job.RequestPayloadID,
+				&item.Job.ChargeID,
+				&item.Job.ChargeAddress,
+				&item.Job.ChargeAmountRaw,
+				&item.Job.ChargeExpiresAt,
+				&item.Job.ChargeSigEd25519,
+				&item.Job.PaidAt,
+				&item.Job.DeliveredAt,
+				&item.Job.CancelledAt,
+				&item.Job.ExpiredAt,
+				&item.Job.PaymentVerifier,
+				&item.Job.PaymentBlockHash,
+				&item.Job.PaymentObservedAt,
+				&item.Job.AmountRawReceived,
 			); err != nil {
 				return nil, err
 			}
-			out = append(out, job)
+			out = append(out, item)
 		}
 		if err := rows.Err(); err != nil {
 			return nil, err
@@ -1085,9 +1134,9 @@ LIMIT ?`, args...)
 		}
 
 		usedAllBatch := true
-		for _, job := range batch {
+		for _, item := range batch {
 			// Apply expiry using the same logic as the public job endpoints (best-effort).
-			updated, err := jobHandler.applyExpiry(r.Context(), job)
+			updated, err := jobHandler.applyExpiry(r.Context(), item.Job)
 			if err != nil {
 				writeJSONError(w, http.StatusInternalServerError, "job expiry failed")
 				return
@@ -1096,7 +1145,14 @@ LIMIT ?`, args...)
 				continue
 			}
 
-			resp.Jobs = append(resp.Jobs, adminJobRowFromJob(updated))
+			row := adminJobRowFromJob(updated)
+			if item.BuyerBotName.Valid {
+				row.BuyerBotName = item.BuyerBotName.String
+			}
+			if item.SellerBotName.Valid {
+				row.SellerBotName = item.SellerBotName.String
+			}
+			resp.Jobs = append(resp.Jobs, row)
 			if len(resp.Jobs) == limit {
 				usedAllBatch = false
 				nextCursor = encodeCursor(updated.CreatedAt, updated.JobID)
@@ -1104,7 +1160,7 @@ LIMIT ?`, args...)
 			}
 		}
 
-		last := batch[len(batch)-1]
+		last := batch[len(batch)-1].Job
 		batchCursorCreatedAt = &last.CreatedAt
 		batchCursorJobID = &last.JobID
 
@@ -1130,7 +1186,9 @@ type adminJobDetailResponse struct {
 	JobID             string `json:"job_id"`
 	OfferID           string `json:"offer_id"`
 	BuyerBotID        string `json:"buyer_bot_id"`
+	BuyerBotName      string `json:"buyer_bot_name,omitempty"`
 	SellerBotID       string `json:"seller_bot_id"`
+	SellerBotName     string `json:"seller_bot_name,omitempty"`
 	Status            string `json:"status"`
 	PriceRaw          string `json:"price_raw"`
 	TurnaroundSeconds int64  `json:"turnaround_seconds"`
@@ -1189,7 +1247,9 @@ func (h *AdminHandler) GetJob(w http.ResponseWriter, r *http.Request) {
 		JobID:             job.JobID,
 		OfferID:           job.OfferID,
 		BuyerBotID:        job.BuyerBotID,
+		BuyerBotName:      h.lookupBotName(r.Context(), job.BuyerBotID),
 		SellerBotID:       job.SellerBotID,
+		SellerBotName:     h.lookupBotName(r.Context(), job.SellerBotID),
 		Status:            job.Status,
 		PriceRaw:          job.PriceRaw,
 		TurnaroundSeconds: job.TurnaroundSeconds,
@@ -1407,8 +1467,11 @@ func (h *AdminHandler) moderateJob(w http.ResponseWriter, r *http.Request, actio
 		return
 	}
 
+	row := adminJobRowFromJob(updated)
+	row.BuyerBotName = h.lookupBotName(ctx, updated.BuyerBotID)
+	row.SellerBotName = h.lookupBotName(ctx, updated.SellerBotID)
 	writeJSON(w, http.StatusOK, adminJobModerateResponse{
-		Job:     adminJobRowFromJob(updated),
+		Job:     row,
 		AuditID: auditID,
 	})
 }
@@ -1417,7 +1480,9 @@ type adminPayloadRow struct {
 	PayloadID          string `json:"payload_id"`
 	JobID              string `json:"job_id"`
 	SenderBotID        string `json:"sender_bot_id"`
+	SenderBotName      string `json:"sender_bot_name,omitempty"`
 	RecipientBotID     string `json:"recipient_bot_id"`
+	RecipientBotName   string `json:"recipient_bot_name,omitempty"`
 	PayloadKind        string `json:"payload_kind"`
 	CreatedAt          string `json:"created_at"`
 	FetchedAt          string `json:"fetched_at,omitempty"`
@@ -1470,34 +1535,36 @@ func (h *AdminHandler) ListPayloads(w http.ResponseWriter, r *http.Request) {
 	where := "WHERE 1=1"
 	args := make([]any, 0, 20)
 	if status == "unfetched" {
-		where += " AND fetched_at IS NULL"
+		where += " AND p.fetched_at IS NULL"
 	} else if status == "fetched" {
-		where += " AND fetched_at IS NOT NULL"
+		where += " AND p.fetched_at IS NOT NULL"
 	}
 	if jobID != "" {
-		where += " AND job_id = ?"
+		where += " AND p.job_id = ?"
 		args = append(args, jobID)
 	}
 	if recipientBotID != "" {
-		where += " AND recipient_bot_id = ?"
+		where += " AND p.recipient_bot_id = ?"
 		args = append(args, recipientBotID)
 	}
 	if senderBotID != "" {
-		where += " AND sender_bot_id = ?"
+		where += " AND p.sender_bot_id = ?"
 		args = append(args, senderBotID)
 	}
 	if cursorCreatedAt != nil && cursorPayloadID != nil {
-		where += " AND (created_at < ? OR (created_at = ? AND payload_id < ?))"
+		where += " AND (p.created_at < ? OR (p.created_at = ? AND p.payload_id < ?))"
 		args = append(args, cursorCreatedAt.UTC(), cursorCreatedAt.UTC(), *cursorPayloadID)
 	}
 	args = append(args, limit+1)
 
 	rows, err := h.Store.DB.QueryContext(r.Context(), `
-SELECT payload_id, job_id, sender_bot_id, recipient_bot_id, payload_kind, created_at, fetched_at, LENGTH(ciphertext_b64)
-FROM payloads
-`+where+`
-ORDER BY created_at DESC, payload_id DESC
-LIMIT ?`, args...)
+	SELECT p.payload_id, p.job_id, p.sender_bot_id, sb.bot_name, p.recipient_bot_id, rb.bot_name, p.payload_kind, p.created_at, p.fetched_at, LENGTH(p.ciphertext_b64)
+	FROM payloads p
+	LEFT JOIN bots sb ON sb.bot_id = p.sender_bot_id
+	LEFT JOIN bots rb ON rb.bot_id = p.recipient_bot_id
+	`+where+`
+	ORDER BY p.created_at DESC, p.payload_id DESC
+	LIMIT ?`, args...)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "payload list failed")
 		return
@@ -1507,13 +1574,17 @@ LIMIT ?`, args...)
 	resp := adminPayloadListResponse{Payloads: make([]adminPayloadRow, 0, limit)}
 	for rows.Next() {
 		var row adminPayloadRow
+		var senderBotName sql.NullString
+		var recipientBotName sql.NullString
 		var createdAt time.Time
 		var fetchedAt sql.NullTime
 		if err := rows.Scan(
 			&row.PayloadID,
 			&row.JobID,
 			&row.SenderBotID,
+			&senderBotName,
 			&row.RecipientBotID,
+			&recipientBotName,
 			&row.PayloadKind,
 			&createdAt,
 			&fetchedAt,
@@ -1521,6 +1592,12 @@ LIMIT ?`, args...)
 		); err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "payload list failed")
 			return
+		}
+		if senderBotName.Valid {
+			row.SenderBotName = senderBotName.String
+		}
+		if recipientBotName.Valid {
+			row.RecipientBotName = recipientBotName.String
 		}
 		row.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
 		if fetchedAt.Valid {
@@ -1891,4 +1968,18 @@ func adminJobRowFromJob(job sqlc.Job) adminJobRow {
 		row.ExpiredAt = job.ExpiredAt.Time.UTC().Format(time.RFC3339Nano)
 	}
 	return row
+}
+
+func (h *AdminHandler) lookupBotName(ctx context.Context, botID string) string {
+	if h == nil || h.Store == nil || botID == "" {
+		return ""
+	}
+	bot, err := h.Store.GetBot(ctx, botID)
+	if err != nil {
+		return ""
+	}
+	if bot.BotName.Valid {
+		return bot.BotName.String
+	}
+	return ""
 }

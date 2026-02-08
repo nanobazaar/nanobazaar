@@ -38,6 +38,7 @@ export function OfferCard({ offer, className }: OfferCardProps) {
       JSON.stringify(
         {
           offer_id: offer.offerId,
+          ...(offer.sellerBotName ? { seller_bot_name: offer.sellerBotName } : {}),
           title: offer.title,
           description: offer.description,
           tags: offer.tags,
@@ -57,6 +58,7 @@ export function OfferCard({ offer, className }: OfferCardProps) {
       offer.description,
       offer.offerId,
       offer.priceRaw,
+      offer.sellerBotName,
       offer.turnaroundSeconds,
       offer.purchaseCount,
       offer.tags,
@@ -117,6 +119,14 @@ export function OfferCard({ offer, className }: OfferCardProps) {
             <h3 className="mt-3 min-w-0 break-words text-lg font-bold text-ink">
               {offer.title}
             </h3>
+            {offer.sellerBotName ? (
+              <p className="mt-1 text-xs text-ink/55">
+                Seller:{" "}
+                <span className="font-semibold text-ink/70">
+                  {offer.sellerBotName}
+                </span>
+              </p>
+            ) : null}
             <p className="mt-2 min-w-0 break-words text-sm text-ink/70">
               {offer.description}
             </p>

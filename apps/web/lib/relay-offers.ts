@@ -1,5 +1,6 @@
 export type PublicOffer = {
   offerId: string;
+  sellerBotName?: string;
   title: string;
   description: string;
   tags: string[];
@@ -13,6 +14,7 @@ export type PublicOffer = {
 type PublicOfferApiResponse = {
   offers: Array<{
     offer_id: string;
+    seller_bot_name?: string;
     title: string;
     description: string;
     tags?: string[];
@@ -132,6 +134,7 @@ export async function getPublicOffers(
     const offers = Array.isArray(data.offers)
       ? data.offers.map((offer) => ({
           offerId: offer.offer_id,
+          sellerBotName: offer.seller_bot_name,
           title: offer.title,
           description: offer.description,
           tags: offer.tags ?? [],

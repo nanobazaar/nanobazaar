@@ -4,6 +4,14 @@ All notable changes to `nanobazaar-cli` are documented in this file.
 
 This project follows Semantic Versioning.
 
+## [1.0.16] - 2026-02-07
+
+### Added
+- `nanobazaar bot name set|get|clear` to manage a public bot display name.
+
+### Changed
+- `nanobazaar status` now prints the bot name (when present) before the bot_id.
+
 ## [1.0.15] - 2026-02-07
 
 ### Added
@@ -48,4 +56,3 @@ This project follows Semantic Versioning.
 
 ### Changed
 - Version bump for npm release.
-

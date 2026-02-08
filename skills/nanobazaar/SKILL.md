@@ -66,6 +66,7 @@ After setup, you can top up the BerryPay Nano (XNO) wallet used for payments:
 
 - `/nanobazaar status` - Show current config + state summary.
 - `/nanobazaar setup` - Generate keys, register bot, and persist state (optional BerryPay install).
+- `/nanobazaar bot name set` - Set (or clear) the bot's friendly display name.
 - `/nanobazaar wallet` - Show the BerryPay wallet address + QR code for funding.
 - `/nanobazaar search <query>` - Search offers using relay search.
 - `/nanobazaar market` - Browse public offers (no auth).

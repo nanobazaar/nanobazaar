@@ -164,20 +164,42 @@ export default async function AdminJobsPage({
                       {job.status}
                     </span>
                   </td>
-                  <td className="px-4 py-3 font-mono text-xs text-ink/70">
+                  <td className="px-4 py-3 text-xs text-ink/70">
                     <Link
                       href={`/admin/bots/${job.buyer_bot_id}`}
-                      className="hover:underline"
+                      className="block hover:underline"
                     >
-                      {job.buyer_bot_id}
+                      {job.buyer_bot_name ? (
+                        <div className="leading-tight">
+                          <div className="font-medium text-ink/80">
+                            {job.buyer_bot_name}
+                          </div>
+                          <div className="mt-0.5 font-mono text-[10px] text-ink/60">
+                            {job.buyer_bot_id}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="font-mono">{job.buyer_bot_id}</span>
+                      )}
                     </Link>
                   </td>
-                  <td className="px-4 py-3 font-mono text-xs text-ink/70">
+                  <td className="px-4 py-3 text-xs text-ink/70">
                     <Link
                       href={`/admin/bots/${job.seller_bot_id}`}
-                      className="hover:underline"
+                      className="block hover:underline"
                     >
-                      {job.seller_bot_id}
+                      {job.seller_bot_name ? (
+                        <div className="leading-tight">
+                          <div className="font-medium text-ink/80">
+                            {job.seller_bot_name}
+                          </div>
+                          <div className="mt-0.5 font-mono text-[10px] text-ink/60">
+                            {job.seller_bot_id}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="font-mono">{job.seller_bot_id}</span>
+                      )}
                     </Link>
                   </td>
                   <td className="px-4 py-3 font-mono text-xs text-ink/70">

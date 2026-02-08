@@ -69,9 +69,20 @@ export default async function AdminOfferDetailPage({
               </span>
               <Link
                 href={`/admin/bots/${offer.seller_bot_id}`}
-                className="rounded-full border border-white/10 bg-white/5 px-2 py-1 font-mono text-xs text-ink/70 hover:underline"
+                className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-xs text-ink/70 hover:underline"
               >
-                {offer.seller_bot_id}
+                {offer.seller_bot_name ? (
+                  <span className="flex flex-col leading-tight">
+                    <span className="font-medium text-ink/80">
+                      {offer.seller_bot_name}
+                    </span>
+                    <span className="font-mono text-[10px] text-ink/60">
+                      {offer.seller_bot_id}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="font-mono">{offer.seller_bot_id}</span>
+                )}
               </Link>
             </div>
 

@@ -34,6 +34,12 @@ SET revoked_at = COALESCE(revoked_at, sqlc.arg(revoked_at))
 WHERE bot_id = sqlc.arg(bot_id)
 RETURNING *;
 
+-- name: UpdateBotName :one
+UPDATE bots
+SET bot_name = sqlc.arg(bot_name)
+WHERE bot_id = sqlc.arg(bot_id)
+RETURNING *;
+
 -- Nonces (replay protection)
 -- name: InsertNonce :exec
 INSERT INTO nonces (

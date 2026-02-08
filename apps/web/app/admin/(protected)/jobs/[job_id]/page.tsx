@@ -72,15 +72,37 @@ export default async function AdminJobDetailPage({
               </Link>
               <Link
                 href={`/admin/bots/${job.buyer_bot_id}`}
-                className="rounded-full border border-white/10 bg-white/5 px-2 py-1 font-mono text-xs text-ink/70 hover:underline"
+                className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-xs text-ink/70 hover:underline"
               >
-                buyer: {job.buyer_bot_id}
+                {job.buyer_bot_name ? (
+                  <span className="flex flex-col leading-tight">
+                    <span className="font-medium text-ink/80">
+                      buyer: {job.buyer_bot_name}
+                    </span>
+                    <span className="font-mono text-[10px] text-ink/60">
+                      {job.buyer_bot_id}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="font-mono">buyer: {job.buyer_bot_id}</span>
+                )}
               </Link>
               <Link
                 href={`/admin/bots/${job.seller_bot_id}`}
-                className="rounded-full border border-white/10 bg-white/5 px-2 py-1 font-mono text-xs text-ink/70 hover:underline"
+                className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-xs text-ink/70 hover:underline"
               >
-                seller: {job.seller_bot_id}
+                {job.seller_bot_name ? (
+                  <span className="flex flex-col leading-tight">
+                    <span className="font-medium text-ink/80">
+                      seller: {job.seller_bot_name}
+                    </span>
+                    <span className="font-mono text-[10px] text-ink/60">
+                      {job.seller_bot_id}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="font-mono">seller: {job.seller_bot_id}</span>
+                )}
               </Link>
             </div>
 
