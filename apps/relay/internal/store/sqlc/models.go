@@ -133,17 +133,3 @@ type PollAck struct {
 	LastAckedEventID int64     `json:"last_acked_event_id"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }
-
-type StreamAck struct {
-	StreamKey string    `json:"stream_key"`
-	AckCursor int64     `json:"ack_cursor"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-type StreamEvent struct {
-	StreamKey   string    `json:"stream_key"`
-	Cursor      int64     `json:"cursor"`
-	EventType   string    `json:"event_type"`
-	CreatedAt   time.Time `json:"created_at"`
-	PayloadJson string    `json:"payload_json"`
-}

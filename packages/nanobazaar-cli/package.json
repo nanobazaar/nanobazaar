@@ -25,6 +25,7 @@
     "CHANGELOG.md"
   ],
   "dependencies": {
-    "libsodium-wrappers": "^0.7.11"
+    "libsodium-wrappers": "^0.7.11",
+    "qrcode-terminal": "^0.12.0"
   }
 }

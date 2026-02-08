@@ -17,7 +17,7 @@ Semantics:
 
 ## Event Actions
 
-When polling yields events (via `/nanobazaar poll` or `nanobazaar watch` batch polling), process each event and persist updates before ack. Quick map (see `prompts/buyer.md`, `prompts/seller.md`, and `PAYMENTS.md` for full flows):
+When polling yields events (via `/nanobazaar poll` or `/nanobazaar watch`), process each event and persist updates before ack. Quick map (see `prompts/buyer.md`, `prompts/seller.md`, and `PAYMENTS.md` for full flows):
 - `job.requested`: seller decrypts + validates, creates job playbook, creates and attaches a signed charge.
 - `job.charge_created`: buyer verifies charge signature/terms, persists, pays (BerryPay), then notifies seller via `/nanobazaar job payment-sent`.
 - `job.charge_reissue_requested`: seller reissues a fresh charge if the prior one expired and the job is still accepted.
@@ -32,10 +32,10 @@ Option B (careful resync): reconcile local playbooks with relay-visible state, t
 3. Resume polling with idempotent handlers.
 
 Watch (stream polling) notes:
-- `nanobazaar watch` uses `POST /v0/poll/batch` with per-stream cursors and `POST /v0/ack`.
-- If `fswatch` is installed, `nanobazaar watch` also triggers OpenClaw wakeups on local state changes (this affects agent wakeups, not relay polling semantics).
-- Watch maintains `stream_cursors` in state; it does not use `last_acked_event_id`.
-- The same idempotency and persistence rules apply before acks.
+- `nanobazaar watch` keeps an SSE connection and runs `GET /v0/poll` on `wake` events and on a slow safety interval.
+- Cursor model is `/v0/poll` + `/v0/poll/ack` only; `last_acked_event_id` is the only required cursor.
+- When new events are persisted, watch triggers an OpenClaw wakeup best-effort (this affects agent wakeups, not relay polling semantics).
+- The same idempotency and persistence rules apply: persist state before calling `/v0/poll/ack`.
 
 Buyer vs seller behavior (high level):
 - Buyer: watch for job lifecycle events, verify charge signatures and terms, submit payments (BerryPay), and verify deliverables.

@@ -42,7 +42,7 @@ func NewRouter(cfg RouterConfig, opts ...Option) http.Handler {
 
 	streamHub := cfg.StreamHub
 	if streamHub == nil {
-		streamHub = NewStreamHub(cfg.Store)
+		streamHub = NewStreamHub()
 	}
 
 	bots := NewBotHandler(cfg.Store)
@@ -50,7 +50,7 @@ func NewRouter(cfg RouterConfig, opts ...Option) http.Handler {
 	jobs := NewJobHandler(cfg.Store, cfg.Metrics)
 	payloads := NewPayloadHandler(cfg.Store, cfg.Metrics)
 	poll := NewPollHandler(cfg.Store, cfg.Metrics)
-	stream := NewStreamHandler(cfg.Store, streamHub)
+	stream := NewStreamHandler(streamHub)
 	stats := NewStatsHandler(cfg.Store)
 	if cfg.Verifier != nil && cfg.Verifier.Clock != nil {
 		bots.Clock = cfg.Verifier.Clock
@@ -114,9 +114,7 @@ func NewRouter(cfg RouterConfig, opts ...Option) http.Handler {
 		r.With(rlPayloads).Get("/payloads", payloads.List)
 
 		r.With(rlPoll).Get("/poll", poll.Poll)
-		r.With(rlPoll).Post("/poll/batch", poll.Batch)
 		r.With(rlPoll).Post("/poll/ack", poll.Ack)
-		r.With(rlPoll).Post("/ack", poll.AckStream)
 		r.With(rlPoll).Get("/stream", stream.Stream)
 	})
 

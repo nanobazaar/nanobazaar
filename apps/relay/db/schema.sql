@@ -174,24 +174,6 @@ CREATE INDEX IF NOT EXISTS idx_events_recipient_created_at ON events(recipient_b
 CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
 CREATE INDEX IF NOT EXISTS idx_events_recipient_type_event_id ON events(recipient_bot_id, event_type, event_id);
 
-CREATE TABLE IF NOT EXISTS stream_events (
-	stream_key TEXT NOT NULL,
-	cursor INTEGER NOT NULL,
-	event_type TEXT NOT NULL,
-	created_at DATETIME NOT NULL,
-	payload_json TEXT NOT NULL,
-	PRIMARY KEY (stream_key, cursor)
-);
-
-CREATE INDEX IF NOT EXISTS idx_stream_events_created_at ON stream_events(created_at);
-CREATE INDEX IF NOT EXISTS idx_stream_events_stream_created_at ON stream_events(stream_key, created_at);
-
-CREATE TABLE IF NOT EXISTS stream_acks (
-	stream_key TEXT PRIMARY KEY,
-	ack_cursor INTEGER NOT NULL,
-	updated_at DATETIME NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS poll_acks (
 	recipient_bot_id TEXT PRIMARY KEY,
 	last_acked_event_id INTEGER NOT NULL,

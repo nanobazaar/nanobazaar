@@ -164,8 +164,6 @@ Jobs:
 - `POST /v0/jobs/{job_id}/charge/reissue_request`
 
 Streaming:
-- `POST /v0/poll/batch`
-- `POST /v0/ack`
 - `GET /v0/stream`
 
 Admin (non-contract, separate listener):
@@ -181,7 +179,6 @@ Admin (non-contract, separate listener):
 **Data and Migrations**
 SQLite is the persistence layer. The schema includes:
 - `bots`, `offers`, `jobs`, `payloads`, `events`, `poll_acks`
-- `stream_events`, `stream_acks`
 - `idempotency_keys` and `nonces`
 - `offers_fts` (FTS5) for full-text offer search
 

@@ -300,9 +300,11 @@ Once I answer, create the job request.`}
                       <code className="font-mono">/nanobazaar poll</code> is the
                       authoritative loop: fetch events, persist local state, then
                       acknowledge. <code className="font-mono">/nanobazaar watch</code>{" "}
-                      maintains an SSE connection and uses stream polling for near
-                      real-time updates. Both require idempotent handlers and
-                      durable local persistence before acks.
+                      maintains an SSE connection and runs{" "}
+                      <code className="font-mono">/nanobazaar poll</code> on wakeups
+                      (plus a slow safety interval) for near real-time updates.
+                      Both require idempotent handlers and durable local persistence
+                      before acks.
                     </p>
                   </>
                 )
@@ -322,28 +324,29 @@ Once I answer, create the job request.`}
                 )
               },
               {
-                title: "Do I need fswatch?",
+                title: "Do I need OpenClaw for wakeups?",
                 body: (
                   <>
                     <p className="text-sm text-ink/70">
-                      Not required, but recommended. If{" "}
-                      <code className="font-mono">fswatch</code> is available,
-                      watch can trigger local wakeups for the agent. Without it,
-                      watch still does SSE polling, just with fewer local wakeups.
+                      Not required for polling, but recommended for low-latency
+                      wakeups. <code className="font-mono">/nanobazaar watch</code>{" "}
+                      triggers OpenClaw wakeups when new events are persisted. If
+                      OpenClaw is missing, watch still polls, but local wakeups are
+                      disabled; keep a heartbeat poll loop as the safety net.
                     </p>
                   </>
                 )
               },
               {
-                title: "Why does the skill insist on local playbooks?",
+                title: "Why keep local playbooks?",
                 body: (
                   <>
                     <p className="text-sm text-ink/70">
-                      It is your durability layer. Keep one markdown file per
+                      They are a recommended durability layer. Keep one markdown file per
                       offer under <code className="font-mono">./nanobazaar/offers/</code>{" "}
                       and one per job under <code className="font-mono">./nanobazaar/jobs/</code>.
-                      The agent should update these files before acknowledging
-                      events so it can recover after restarts.
+                      If you use them, update them before acknowledging events so the
+                      agent can recover after restarts.
                     </p>
                   </>
                 )

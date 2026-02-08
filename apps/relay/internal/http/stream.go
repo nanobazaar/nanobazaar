@@ -2,18 +2,12 @@ package httpapi
 
 import (
 	"context"
-	"database/sql"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
-	"sort"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/nanobazaar/relay/internal/store"
 )
 
 // StreamNotifier is used to emit best-effort wakeups when new events are appended.
@@ -24,16 +18,13 @@ type StreamNotifier interface {
 
 // StreamHub is an in-memory registry for SSE subscriptions. It coalesces wakes and
 // emits them best-effort; /poll remains authoritative.
+//
+// Post-simplification: subscriptions are per-bot_id (no stream keys). Wakeups only
+// tell clients to poll.
 type StreamHub struct {
-	store *store.Store
-
 	mu      sync.RWMutex
-	streams map[string]map[*streamConn]struct{}
 	conns   map[*streamConn]struct{}
-	botConn map[string]int
-
-	cacheMu           sync.RWMutex
-	botSigningPubkeys map[string]string // bot_id -> signing_pubkey_ed25519 (b64url)
+	botConn map[string]map[*streamConn]struct{}
 }
 
 type StreamHubStats struct {
@@ -42,13 +33,10 @@ type StreamHubStats struct {
 	ActiveStreams int `json:"active_streams"`
 }
 
-func NewStreamHub(store *store.Store) *StreamHub {
+func NewStreamHub() *StreamHub {
 	return &StreamHub{
-		store:             store,
-		streams:           make(map[string]map[*streamConn]struct{}),
-		conns:             make(map[*streamConn]struct{}),
-		botConn:           make(map[string]int),
-		botSigningPubkeys: make(map[string]string),
+		conns:   make(map[*streamConn]struct{}),
+		botConn: make(map[string]map[*streamConn]struct{}),
 	}
 }
 
@@ -61,30 +49,24 @@ func (h *StreamHub) Stats() StreamHubStats {
 	return StreamHubStats{
 		ActiveConns:   len(h.conns),
 		ActiveBots:    len(h.botConn),
-		ActiveStreams: len(h.streams),
+		ActiveStreams: 0,
 	}
 }
 
-func (h *StreamHub) Register(conn *streamConn, streams []string) (int, int) {
+func (h *StreamHub) Register(conn *streamConn) (int, int) {
 	if h == nil || conn == nil {
 		return 0, 0
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	for _, stream := range streams {
-		if stream == "" {
-			continue
-		}
-		set := h.streams[stream]
-		if set == nil {
-			set = make(map[*streamConn]struct{})
-			h.streams[stream] = set
-		}
-		set[conn] = struct{}{}
-	}
 	h.conns[conn] = struct{}{}
 	if conn.botID != "" {
-		h.botConn[conn.botID] += 1
+		set := h.botConn[conn.botID]
+		if set == nil {
+			set = make(map[*streamConn]struct{})
+			h.botConn[conn.botID] = set
+		}
+		set[conn] = struct{}{}
 	}
 	return len(h.conns), len(h.botConn)
 }
@@ -95,103 +77,41 @@ func (h *StreamHub) Unregister(conn *streamConn) (int, int) {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	for stream := range conn.subscribed {
-		set := h.streams[stream]
-		if set == nil {
-			continue
-		}
-		delete(set, conn)
-		if len(set) == 0 {
-			delete(h.streams, stream)
-		}
-	}
 	delete(h.conns, conn)
 	if conn.botID != "" {
-		if count := h.botConn[conn.botID]; count <= 1 {
-			delete(h.botConn, conn.botID)
-		} else {
-			h.botConn[conn.botID] = count - 1
+		set := h.botConn[conn.botID]
+		if set != nil {
+			delete(set, conn)
+			if len(set) == 0 {
+				delete(h.botConn, conn.botID)
+			}
 		}
 	}
 	return len(h.conns), len(h.botConn)
-}
-
-func (h *StreamHub) NotifyStream(stream string) {
-	if h == nil || stream == "" {
-		return
-	}
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	for conn := range h.streams[stream] {
-		conn.markDirty(stream)
-	}
 }
 
 func (h *StreamHub) NotifyEvent(ctx context.Context, recipientBotID, eventType string, data map[string]any) {
 	if h == nil {
 		return
 	}
-
-	// Best-effort: if we know the signing pubkey for this bot (because the bot
-	// subscribed via SSE or used the default stream), also dirty the stable
-	// seller inbox stream. Avoid DB reads here because this can be called inside
-	// a write transaction.
 	if recipientBotID != "" {
-		h.cacheMu.RLock()
-		pub := h.botSigningPubkeys[recipientBotID]
-		h.cacheMu.RUnlock()
-		if pub != "" {
-			h.NotifyStream("seller:ed25519:" + pub)
+		h.mu.RLock()
+		defer h.mu.RUnlock()
+		for conn := range h.botConn[recipientBotID] {
+			conn.markDirty()
 		}
 	}
-
-	// If the event is job-related, dirty the per-job stream too.
-	if data != nil {
-		if jobID, ok := data["job_id"].(string); ok && jobID != "" {
-			h.NotifyStream("job:" + jobID)
-		}
-	}
-}
-
-func (h *StreamHub) sellerStreamForBotID(ctx context.Context, botID string) (string, error) {
-	if botID == "" {
-		return "", errors.New("missing bot id")
-	}
-	h.cacheMu.RLock()
-	cached := h.botSigningPubkeys[botID]
-	h.cacheMu.RUnlock()
-	if cached != "" {
-		return "seller:ed25519:" + cached, nil
-	}
-
-	if h.store == nil {
-		return "", errors.New("store unavailable")
-	}
-	bot, err := h.store.GetBot(ctx, botID)
-	if err != nil {
-		return "", err
-	}
-	if bot.SigningPubkeyEd25519 == "" {
-		return "", errors.New("missing signing pubkey")
-	}
-
-	h.cacheMu.Lock()
-	h.botSigningPubkeys[botID] = bot.SigningPubkeyEd25519
-	h.cacheMu.Unlock()
-	return "seller:ed25519:" + bot.SigningPubkeyEd25519, nil
 }
 
 type StreamHandler struct {
-	Store             *store.Store
 	Hub               *StreamHub
 	Clock             func() time.Time
 	FlushInterval     time.Duration
 	KeepaliveInterval time.Duration
 }
 
-func NewStreamHandler(store *store.Store, hub *StreamHub) *StreamHandler {
+func NewStreamHandler(hub *StreamHub) *StreamHandler {
 	return &StreamHandler{
-		Store:             store,
 		Hub:               hub,
 		Clock:             time.Now,
 		FlushInterval:     500 * time.Millisecond,
@@ -200,7 +120,7 @@ func NewStreamHandler(store *store.Store, hub *StreamHub) *StreamHandler {
 }
 
 func (h *StreamHandler) Stream(w http.ResponseWriter, r *http.Request) {
-	if h == nil || h.Store == nil || h.Hub == nil {
+	if h == nil || h.Hub == nil {
 		writeJSONError(w, http.StatusInternalServerError, "stream unavailable")
 		return
 	}
@@ -211,14 +131,8 @@ func (h *StreamHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	streamKeys, err := h.resolveAndAuthorizeStreams(r.Context(), caller, r.URL.Query().Get("streams"))
-	if err != nil {
-		var httpErr *streamHTTPError
-		if errors.As(err, &httpErr) {
-			writeJSONError(w, httpErr.Status, httpErr.Message)
-			return
-		}
-		writeJSONError(w, http.StatusBadRequest, err.Error())
+	if strings.TrimSpace(r.URL.Query().Get("streams")) != "" {
+		writeJSONError(w, http.StatusBadRequest, "streams query parameter is no longer supported")
 		return
 	}
 
@@ -232,13 +146,13 @@ func (h *StreamHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
 
-	conn := newStreamConn(streamKeys, caller)
-	activeConns, activeBots := h.Hub.Register(conn, streamKeys)
+	conn := newStreamConn(caller)
+	activeConns, activeBots := h.Hub.Register(conn)
 	remoteAddr := r.RemoteAddr
-	log.Printf("stream_connected bot_id=%s streams=%d active_conns=%d active_bots=%d remote_addr=%s", caller, len(streamKeys), activeConns, activeBots, remoteAddr)
+	log.Printf("stream_connected bot_id=%s active_conns=%d active_bots=%d remote_addr=%s", caller, activeConns, activeBots, remoteAddr)
 	defer func() {
 		activeConns, activeBots := h.Hub.Unregister(conn)
-		log.Printf("stream_disconnected bot_id=%s streams=%d active_conns=%d active_bots=%d remote_addr=%s", caller, len(streamKeys), activeConns, activeBots, remoteAddr)
+		log.Printf("stream_disconnected bot_id=%s active_conns=%d active_bots=%d remote_addr=%s", caller, activeConns, activeBots, remoteAddr)
 	}()
 
 	// Initial frame so clients know the connection is established.
@@ -268,15 +182,10 @@ func (h *StreamHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(fmt.Sprintf(": keepalive %d\n\n", now)))
 			flusher.Flush()
 		case <-flush.C:
-			dirty := conn.drainDirty()
-			if len(dirty) == 0 {
+			if !conn.drainDirty() {
 				continue
 			}
-			sort.Strings(dirty)
-			payload, _ := json.Marshal(map[string]any{
-				"streams": dirty,
-				"hint":    "poll",
-			})
+			payload := []byte(`{"hint":"poll"}`)
 			_, _ = w.Write([]byte("event: wake\n"))
 			_, _ = w.Write([]byte("data: "))
 			_, _ = w.Write(payload)
@@ -293,153 +202,35 @@ func (h *StreamHandler) now() time.Time {
 	return time.Now().UTC()
 }
 
-func (h *StreamHandler) resolveAndAuthorizeStreams(ctx context.Context, caller, raw string) ([]string, error) {
-	raw = strings.TrimSpace(raw)
-	streams := parseCSV(raw)
-	if len(streams) == 0 {
-		// Default to the stable seller inbox stream for the caller.
-		defaultStream, err := h.Hub.sellerStreamForBotID(ctx, caller)
-		if err != nil {
-			return nil, err
-		}
-		streams = []string{defaultStream}
-	}
-
-	normalized := make([]string, 0, len(streams))
-	seen := make(map[string]struct{}, len(streams))
-	for _, stream := range streams {
-		stream = strings.TrimSpace(stream)
-		if stream == "" {
-			continue
-		}
-		if _, ok := seen[stream]; ok {
-			continue
-		}
-		seen[stream] = struct{}{}
-
-		switch {
-		case strings.HasPrefix(stream, "seller:ed25519:"):
-			pub := strings.TrimPrefix(stream, "seller:ed25519:")
-			pub = strings.TrimSpace(pub)
-			pubBytes, err := decodeKey(pub, 32)
-			if err != nil {
-				return nil, &streamHTTPError{Status: http.StatusBadRequest, Message: "invalid seller stream"}
-			}
-			derived := botIDFromSigningKey(pubBytes)
-			if derived != caller {
-				return nil, &streamHTTPError{Status: http.StatusForbidden, Message: "forbidden"}
-			}
-			bot, err := h.Store.GetBot(ctx, caller)
-			if err != nil {
-				return nil, err
-			}
-			if bot.SigningPubkeyEd25519 != pub {
-				return nil, &streamHTTPError{Status: http.StatusBadRequest, Message: "seller stream mismatch"}
-			}
-			h.Hub.cacheMu.Lock()
-			h.Hub.botSigningPubkeys[caller] = pub
-			h.Hub.cacheMu.Unlock()
-			normalized = append(normalized, stream)
-		case strings.HasPrefix(stream, "job:"):
-			jobID := strings.TrimPrefix(stream, "job:")
-			jobID = strings.TrimSpace(jobID)
-			if jobID == "" {
-				return nil, &streamHTTPError{Status: http.StatusBadRequest, Message: "invalid job stream"}
-			}
-			job, err := h.Store.GetJob(ctx, jobID)
-			if err != nil {
-				if errors.Is(err, sql.ErrNoRows) {
-					return nil, &streamHTTPError{Status: http.StatusNotFound, Message: "job not found"}
-				}
-				return nil, err
-			}
-			if job.BuyerBotID != caller && job.SellerBotID != caller {
-				return nil, &streamHTTPError{Status: http.StatusForbidden, Message: "forbidden"}
-			}
-			normalized = append(normalized, "job:"+jobID)
-		default:
-			return nil, &streamHTTPError{Status: http.StatusBadRequest, Message: "unknown stream"}
-		}
-	}
-
-	if len(normalized) == 0 {
-		return nil, &streamHTTPError{Status: http.StatusBadRequest, Message: "missing streams"}
-	}
-	return normalized, nil
-}
-
-func parseCSV(value string) []string {
-	if strings.TrimSpace(value) == "" {
-		return nil
-	}
-	parts := strings.Split(value, ",")
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		out = append(out, part)
-	}
-	return out
-}
-
-type streamHTTPError struct {
-	Status  int
-	Message string
-}
-
-func (e *streamHTTPError) Error() string {
-	if e == nil {
-		return ""
-	}
-	return e.Message
-}
-
 type streamConn struct {
-	botID      string
-	subscribed map[string]struct{}
+	botID string
 
 	mu    sync.Mutex
-	dirty map[string]struct{}
+	dirty bool
 }
 
-func newStreamConn(streams []string, botID string) *streamConn {
-	subscribed := make(map[string]struct{}, len(streams))
-	for _, stream := range streams {
-		if stream != "" {
-			subscribed[stream] = struct{}{}
-		}
-	}
+func newStreamConn(botID string) *streamConn {
 	return &streamConn{
-		botID:      botID,
-		subscribed: subscribed,
-		dirty:      make(map[string]struct{}),
+		botID: botID,
 	}
 }
 
-func (c *streamConn) markDirty(stream string) {
-	if c == nil || stream == "" {
+func (c *streamConn) markDirty() {
+	if c == nil {
 		return
 	}
 	c.mu.Lock()
-	c.dirty[stream] = struct{}{}
+	c.dirty = true
 	c.mu.Unlock()
 }
 
-func (c *streamConn) drainDirty() []string {
+func (c *streamConn) drainDirty() bool {
 	if c == nil {
-		return nil
+		return false
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if len(c.dirty) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(c.dirty))
-	for stream := range c.dirty {
-		out = append(out, stream)
-	}
-	c.dirty = make(map[string]struct{})
-	return out
+	dirty := c.dirty
+	c.dirty = false
+	return dirty
 }

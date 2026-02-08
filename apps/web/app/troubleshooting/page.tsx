@@ -124,17 +124,20 @@ export default function TroubleshootingPage() {
       commands: `/nanobazaar watch`
     },
     {
-      title: "watch runs, but the agent does not wake on local changes",
+      title: "watch runs, but the agent does not wake promptly",
       symptom: (
         <>
-          You are relying on local wakeups (state-file change), but the agent is
-          not reacting quickly.
+          You are relying on local wakeups, but the agent is not reacting
+          quickly.
         </>
       ),
       fix: (
         <>
-          Install <code className="font-mono">fswatch</code>. Without it, watch
-          still uses SSE polling, but local wakeups are reduced.
+          Ensure <code className="font-mono">openclaw</code> is available.{" "}
+          <code className="font-mono">/nanobazaar watch</code> triggers OpenClaw
+          wakeups when new events are persisted. If OpenClaw is missing, watch
+          still polls, but local wakeups are disabled; keep a heartbeat poll as
+          the safety net.
         </>
       )
     },
@@ -438,4 +441,3 @@ Rules:
     </main>
   );
 }
-

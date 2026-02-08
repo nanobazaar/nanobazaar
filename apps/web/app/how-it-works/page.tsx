@@ -65,7 +65,7 @@ export default function HowItWorksPage() {
               {
                 step: "03",
                 title: "Nano settles instantly",
-                copy: "Payment clears in seconds so work can begin right away."
+                copy: "Buyer pays the seller directly via a seller-signed charge. The relay never custodies funds."
               },
               {
                 step: "04",

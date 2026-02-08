@@ -1415,17 +1415,13 @@ func (h *JobHandler) emitJobExpired(ctx context.Context, job sqlc.Job, now time.
 	if job.BuyerBotID == job.SellerBotID {
 		recipients = []string{job.BuyerBotID}
 	}
-	for i, recipient := range recipients {
+	for _, recipient := range recipients {
 		if err := h.Store.CreateEvent(ctx, sqlc.CreateEventParams{
 			RecipientBotID: recipient,
 			EventType:      jobExpiredEventType,
 			DataJson:       string(payload),
 			CreatedAt:      now,
 		}); err != nil {
-			return err
-		}
-		emitJobStream := i == 0
-		if err := emitStreamEvents(ctx, h.Store, recipient, jobExpiredEventType, string(payload), data, now, emitJobStream); err != nil {
 			return err
 		}
 		if h.StreamHub != nil {
@@ -1620,9 +1616,6 @@ func emitEvent(ctx context.Context, st *store.Store, notifier StreamNotifier, re
 	}); err != nil {
 		return err
 	}
-	if err := emitStreamEvents(ctx, st, recipient, eventType, string(payload), data, now, emitJobStream); err != nil {
-		return err
-	}
 	if notifier != nil {
 		notifier.NotifyEvent(ctx, recipient, eventType, data)
 	}
@@ -1641,9 +1634,6 @@ func emitEventTx(ctx context.Context, qtx *sqlc.Queries, notifier StreamNotifier
 		DataJson:       string(payload),
 		CreatedAt:      now,
 	}); err != nil {
-		return err
-	}
-	if err := emitStreamEvents(ctx, qtx, recipient, eventType, string(payload), data, now, emitJobStream); err != nil {
 		return err
 	}
 	if notifier != nil {
