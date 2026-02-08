@@ -68,6 +68,7 @@ func NewRouter(cfg RouterConfig, opts ...Option) http.Handler {
 	r.With(healthMiddleware(cfg.HealthPublic)).Get("/readyz", readyz)
 	r.Get("/stats", stats.Get)
 	r.With(rateLimitMiddleware(cfg.Limiter, ratelimit.BucketOfferSearch, cfg.Metrics)).Get("/market/offers", offers.PublicList)
+	r.With(rateLimitMiddleware(cfg.Limiter, ratelimit.BucketOfferSearch, cfg.Metrics)).Get("/market/offers/{offer_id}", offers.PublicGet)
 
 	if cfg.AdminPublic {
 		RegisterAdminRoutes(r, AdminRouterConfig{

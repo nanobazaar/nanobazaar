@@ -622,6 +622,73 @@ func (h *OfferHandler) PublicList(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *OfferHandler) PublicGet(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.Store == nil {
+		writeJSONError(w, http.StatusInternalServerError, "store unavailable")
+		return
+	}
+
+	offerID := chi.URLParam(r, "offer_id")
+	if offerID == "" {
+		writeJSONError(w, http.StatusBadRequest, "missing offer_id")
+		return
+	}
+
+	row := h.Store.DB.QueryRowContext(r.Context(), selectPublicOfferByIDQuery, offerID)
+	var offer sqlc.Offer
+	var sellerBotName sql.NullString
+	var purchaseCount int64
+	if err := row.Scan(
+		&offer.OfferID,
+		&offer.SellerBotID,
+		&sellerBotName,
+		&offer.Title,
+		&offer.Description,
+		&offer.TagsJson,
+		&offer.PriceRaw,
+		&offer.TurnaroundSeconds,
+		&offer.CreatedAt,
+		&offer.ExpiresAt,
+		&offer.Status,
+		&offer.CancelledAt,
+		&offer.RequestSchemaHint,
+		&purchaseCount,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSONError(w, http.StatusNotFound, "offer not found")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "offer lookup failed")
+		return
+	}
+
+	// Keep public endpoints consistent with list behavior: expire ACTIVE/PAUSED offers on read,
+	// then only return ACTIVE offers (404 for paused/expired/cancelled).
+	if h.markOfferExpired(h.now(), &offer) {
+		if err := h.persistExpiredOffers(r.Context(), []string{offer.OfferID}); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "offer expire failed")
+			return
+		}
+	}
+	if !offerStatusVisible(offer.Status, false) {
+		writeJSONError(w, http.StatusNotFound, "offer not found")
+		return
+	}
+
+	tags, err := h.loadOfferTags(r.Context(), offer)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "offer tags failed")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, publicOfferToResponse(offerEntry{
+		Offer:         offer,
+		SellerBotName: sellerBotName.String,
+		Tags:          tags,
+		PurchaseCount: int(purchaseCount),
+	}))
+}
+
 func (h *OfferHandler) insertOffer(ctx context.Context, offerID, sellerBotID string, payload offerCreateRequest, createdAt time.Time, expiresAt time.Time) error {
 	tx, err := h.Store.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -1465,6 +1532,20 @@ LEFT JOIN (
 ) p ON p.offer_id = o.offer_id
 WHERE (?1 = '' OR o.seller_bot_id = ?1)
 	AND (o.status = 'ACTIVE' OR (?2 = 1 AND o.status = 'PAUSED'))`
+
+const selectPublicOfferByIDQuery = `
+SELECT o.offer_id, o.seller_bot_id, b.bot_name, o.title, o.description, o.tags_json, o.price_raw, o.turnaround_seconds, o.created_at, o.expires_at, o.status, o.cancelled_at, o.request_schema_hint,
+	COALESCE(p.purchase_count, 0) AS purchase_count
+FROM offers o
+LEFT JOIN bots b ON b.bot_id = o.seller_bot_id
+LEFT JOIN (
+	SELECT offer_id, COUNT(1) AS purchase_count
+	FROM jobs
+	WHERE status IN ('PAID', 'DELIVERED')
+	GROUP BY offer_id
+) p ON p.offer_id = o.offer_id
+WHERE o.offer_id = ?1
+LIMIT 1`
 
 const selectOffersSearchQuery = `
 SELECT o.offer_id, o.seller_bot_id, b.bot_name, o.title, o.description, o.tags_json, o.price_raw, o.turnaround_seconds, o.created_at, o.expires_at, o.status, o.cancelled_at, o.request_schema_hint,

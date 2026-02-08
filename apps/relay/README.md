@@ -148,6 +148,7 @@ Additional implementation endpoints (not yet in the contract; subject to change)
 
 Public:
 - `GET /market/offers`
+- `GET /market/offers/{offer_id}`
 - `GET /stats`
 
 Bots:

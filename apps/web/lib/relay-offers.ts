@@ -11,19 +11,21 @@ export type PublicOffer = {
   requestSchemaHint?: string;
 };
 
-type PublicOfferApiResponse = {
-  offers: Array<{
-    offer_id: string;
-    seller_bot_name?: string;
-    title: string;
-    description: string;
-    tags?: string[];
-    price_raw: string;
-    turnaround_seconds: number;
-    purchase_count: number;
-    created_at: string;
-    request_schema_hint?: string;
-  }>;
+type PublicOfferApiOffer = {
+  offer_id: string;
+  seller_bot_name?: string;
+  title: string;
+  description: string;
+  tags?: string[];
+  price_raw: string;
+  turnaround_seconds: number;
+  purchase_count: number;
+  created_at: string;
+  request_schema_hint?: string;
+};
+
+type PublicOfferApiListResponse = {
+  offers: PublicOfferApiOffer[];
   next_cursor?: string;
 };
 
@@ -101,6 +103,21 @@ function resolveRelayBaseUrl(): string | null {
   return base.endsWith("/") ? base.slice(0, -1) : base;
 }
 
+function mapPublicOffer(offer: PublicOfferApiOffer): PublicOffer {
+  return {
+    offerId: offer.offer_id,
+    sellerBotName: offer.seller_bot_name,
+    title: offer.title,
+    description: offer.description,
+    tags: offer.tags ?? [],
+    priceRaw: offer.price_raw,
+    turnaroundSeconds: offer.turnaround_seconds,
+    purchaseCount: offer.purchase_count,
+    createdAt: offer.created_at,
+    requestSchemaHint: offer.request_schema_hint
+  };
+}
+
 export async function getPublicOffers(
   options: PublicOfferQuery = {}
 ): Promise<{ offers: PublicOffer[]; nextCursor?: string } | null> {
@@ -130,26 +147,38 @@ export async function getPublicOffers(
   try {
     const response = await fetch(url, { next: { revalidate: 60 } });
     if (!response.ok) return null;
-    const data = (await response.json()) as PublicOfferApiResponse;
+    const data = (await response.json()) as PublicOfferApiListResponse;
     const offers = Array.isArray(data.offers)
-      ? data.offers.map((offer) => ({
-          offerId: offer.offer_id,
-          sellerBotName: offer.seller_bot_name,
-          title: offer.title,
-          description: offer.description,
-          tags: offer.tags ?? [],
-          priceRaw: offer.price_raw,
-          turnaroundSeconds: offer.turnaround_seconds,
-          purchaseCount: offer.purchase_count,
-          createdAt: offer.created_at,
-          requestSchemaHint: offer.request_schema_hint
-        }))
+      ? data.offers.map((offer) => mapPublicOffer(offer))
       : [];
 
     return {
       offers,
       nextCursor: data.next_cursor
     };
+  } catch {
+    return null;
+  }
+}
+
+export async function getPublicOffer(offerId: string): Promise<PublicOffer | null> {
+  const baseUrl = resolveRelayBaseUrl();
+  if (!baseUrl) {
+    if (process.env.NODE_ENV === "development") {
+      return MOCK_PUBLIC_OFFERS.find((offer) => offer.offerId === offerId) ?? null;
+    }
+    return null;
+  }
+
+  const url = new URL(`/market/offers/${encodeURIComponent(offerId)}`, baseUrl);
+
+  try {
+    const response = await fetch(url, { next: { revalidate: 60 } });
+    if (response.status === 404) return null;
+    if (!response.ok) return null;
+    const data = (await response.json()) as PublicOfferApiOffer;
+    if (!data || typeof data !== "object") return null;
+    return mapPublicOffer(data);
   } catch {
     return null;
   }
