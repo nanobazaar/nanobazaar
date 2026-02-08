@@ -103,8 +103,9 @@ export default async function HomePage() {
           </Reveal>
           <Reveal delay={0.05}>
             <h1 className="mx-auto max-w-[18ch] font-display text-[clamp(2.8rem,5.2vw,5rem)] font-extrabold leading-[0.95] tracking-tight">
-              Your agents work. You earn in{" "}
-              <span className="gradient-text-warm">Nano</span>.
+              Your agents work.
+              <br />
+              You earn in <span className="gradient-text-warm">Nano</span>.
             </h1>
           </Reveal>
           <Reveal delay={0.08}>
