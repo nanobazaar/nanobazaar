@@ -1275,10 +1275,10 @@ Commands:
                              Poll events and optionally ack
   poll ack --up-to-event-id <id>
                              Advance the server-side poll cursor (used for 410 resync)
-  watch [--stream-path /v0/stream] [--safety-wake-interval <seconds>]
+  watch [--stream-path /v0/stream]
         [--state-path <path>] [--openclaw-bin <bin>] [--event-text <text>]
         [--mode now|next] [--no-openclaw]
-                             Maintain SSE connection; wake OpenClaw on relay wake events + on a safety interval.
+                             Maintain SSE connection; wake OpenClaw on relay wake events.
                              Does not poll or ack (OpenClaw should run /nanobazaar poll).
 
 Global flags:
@@ -3035,11 +3035,9 @@ async function runWatch(argv) {
     throw new Error('watch no longer polls. Remove polling flags (--no-ack/--no-fetch-payloads/--limit/--types/--print-polls/--output) and retry.');
   }
 
-  const safetyIntervalSeconds = flags.safetyWakeInterval
-    ? parsePositiveInt(flags.safetyWakeInterval, '--safety-wake-interval')
-    : flags.safetyPollInterval
-      ? parsePositiveInt(flags.safetyPollInterval, '--safety-poll-interval')
-      : 180;
+  if (flags.safetyWakeInterval !== undefined || flags.safetyPollInterval !== undefined) {
+    throw new Error('Safety wake interval has been removed. Remove --safety-wake-interval/--safety-poll-interval and retry.');
+  }
 
   const openclawBin = String(flags.openclawBin || 'openclaw');
   const mode = String(flags.mode || 'now');
@@ -3050,7 +3048,6 @@ async function runWatch(argv) {
     relay_url: config.relay_url,
     state_path: statePath,
     stream_path: streamPath,
-    safety_wake_interval_seconds: safetyIntervalSeconds,
     openclaw_enabled: openclawEnabled,
   });
 
@@ -3091,7 +3088,7 @@ async function runWatch(argv) {
         const label = queuedReason || reason;
         queuedReason = null;
 
-        // Best-effort: waking OpenClaw can be retried on the next wake/safety interval.
+        // Best-effort: waking OpenClaw can be retried on the next wake event.
         const didWake = triggerOpenclawWake(label);
         console.error(`[watch] wake ${didWake ? 'ok' : 'skipped'} (${label})`);
       }
@@ -3114,17 +3111,6 @@ async function runWatch(argv) {
   console.error(`[watch] relay=${config.relay_url}`);
   console.error(`[watch] state_path=${statePath}`);
   console.error(`[watch] stream_path=${streamPath}`);
-  console.error(`[watch] safety_wake_interval_seconds=${safetyIntervalSeconds}`);
-
-  const safetyTimer = setInterval(() => {
-    if (signal.aborted) {
-      return;
-    }
-    void runWakeLoop('safety');
-  }, safetyIntervalSeconds * 1000);
-
-  // Kick off an initial wake so the agent can poll even if wakeups are missed.
-  void runWakeLoop('startup');
 
   let attempt = 0;
   function isWakeEvent(evt) {
@@ -3201,7 +3187,6 @@ async function runWatch(argv) {
     }
   }
 
-  clearInterval(safetyTimer);
 }
 
 const DISPATCH_BOOL_FLAGS = new Set([
