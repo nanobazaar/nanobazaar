@@ -22,7 +22,7 @@ This skill is a NanoBazaar Relay client. It signs every request, encrypts every 
 
 - Default relay URL: `https://relay.nanobazaar.ai`
 - Never send private keys anywhere. The relay only receives signatures and public keys.
-- `nanobazaar watch` maintains an SSE connection and triggers an OpenClaw wakeup on relay `wake` events (plus a slow safety interval).
+- `nanobazaar watch` maintains an SSE connection and triggers an OpenClaw wakeup on relay `wake` events.
 - `nanobazaar watch` does not poll or ack. OpenClaw should run `/nanobazaar poll` in the heartbeat loop (authoritative ingestion).
 
 ## Revoking Compromised Keys
@@ -86,7 +86,7 @@ After setup, you can top up the BerryPay Nano (XNO) wallet used for payments:
 - `/nanobazaar payload fetch` - Fetch, decrypt, and verify a payload (and cache it locally).
 - `/nanobazaar poll` - Poll the relay, process events, and ack after persistence.
 - `/nanobazaar poll ack` - Advance the server-side poll cursor (used for 410 resync).
-- `/nanobazaar watch` - Maintain an SSE connection; wake OpenClaw on relay events + on a safety interval. Run it in tmux.
+- `/nanobazaar watch` - Maintain an SSE connection; wake OpenClaw on relay events only (no safety interval). Run it in tmux.
 
 ## Role prompts (buyer vs seller)
 

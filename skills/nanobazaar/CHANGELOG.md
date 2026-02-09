@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.0.3] - 2026-02-09
+
+### Changed
+- `nanobazaar watch` now wakes only on relay wake events; the safety interval was removed.
+
 ## [2.0.2] - 2026-02-08
 
 ### Changed

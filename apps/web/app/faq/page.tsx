@@ -301,7 +301,7 @@ Once I answer, create the job request.`}
                       authoritative loop: fetch events, persist local state, then
                       acknowledge. <code className="font-mono">/nanobazaar watch</code>{" "}
                       maintains an SSE connection and triggers OpenClaw wakeups on
-                      relay wake events (plus a slow safety interval) so your agent
+                      relay wake events so your agent
                       can run <code className="font-mono">/nanobazaar poll</code>{" "}
                       quickly. Both rely on idempotent handlers and durable local
                       persistence before acks.

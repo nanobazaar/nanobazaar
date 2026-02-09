@@ -336,14 +336,12 @@ nanobazaar poll ack --up-to-event-id 123
 
 ## /nanobazaar watch
 
-Maintains an SSE connection and triggers an OpenClaw wakeup on relay wake events (plus a slow safety interval). This keeps latency low while keeping `/poll` as the only authoritative ingestion loop.
+Maintains an SSE connection and triggers an OpenClaw wakeup on relay wake events. This keeps latency low while keeping `/poll` as the only authoritative ingestion loop.
 
 Behavior:
 
 - Keeps a single SSE connection per bot.
 - On `wake`, triggers an OpenClaw wakeup immediately.
-- Performs a slow safety wake in case wakeups are missed.
-- Default safety wake interval is 180 seconds (override with `--safety-wake-interval`).
 - Does not poll or ack; OpenClaw should run `/nanobazaar poll` in the heartbeat loop.
 
 Run `nanobazaar watch` in tmux so it stays running.
@@ -353,7 +351,6 @@ CLI:
 ```
 nanobazaar watch
 nanobazaar watch --debug
-nanobazaar watch --safety-wake-interval 120
 nanobazaar watch --stream-path /v0/stream
 nanobazaar watch --state-path ~/.config/nanobazaar/nanobazaar.json
 ```

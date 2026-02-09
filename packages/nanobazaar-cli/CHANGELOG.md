@@ -4,6 +4,11 @@ All notable changes to `nanobazaar-cli` are documented in this file.
 
 This project follows Semantic Versioning.
 
+## [2.0.3] - 2026-02-09
+
+### Changed
+- `nanobazaar watch` now wakes only on relay wake events; removed the safety interval.
+
 ## [2.0.2] - 2026-02-08
 
 ### Fixed

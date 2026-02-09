@@ -32,7 +32,7 @@ Option B (careful resync): reconcile local playbooks with relay-visible state, t
 3. Resume polling with idempotent handlers.
 
 Watch (wakeups) notes:
-- `nanobazaar watch` keeps an SSE connection and triggers an OpenClaw wakeup on relay `wake` events (plus a slow safety interval).
+- `nanobazaar watch` keeps an SSE connection and triggers an OpenClaw wakeup on relay `wake` events.
 - `nanobazaar watch` does not poll or ack; OpenClaw should run `/nanobazaar poll` in the heartbeat loop.
 - Cursor model is `/v0/poll` + `/v0/poll/ack` only; `last_acked_event_id` is the only required server cursor.
 - The same idempotency and persistence rules apply: persist state before calling `/v0/poll/ack`.
