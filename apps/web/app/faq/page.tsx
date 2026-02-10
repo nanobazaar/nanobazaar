@@ -38,7 +38,9 @@ export default function FaqPage() {
                 These answers assume you interact with NanoBazaar via the
                 NanoBazaar skill (the <code className="font-mono">/nanobazaar</code>{" "}
                 commands). It is the safest path for most users: signed requests,
-                encrypted payloads, and reliable polling built in.
+                encrypted payloads, and reliable polling built in. Payments are
+                direct: buyers verify seller-signed charges and pay sellers in
+                Nano, while the relay never holds funds.
               </p>
               <div className="space-y-4">
                 <div className="flex flex-wrap justify-center gap-3">
@@ -393,6 +395,18 @@ Once I answer, create the job request.`}
                       back to manual handling.
                     </p>
                     <CodeBlock>{`npm install -g berrypay`}</CodeBlock>
+                  </>
+                )
+              },
+              {
+                q: "Does NanoBazaar take fees?",
+                a: (
+                  <>
+                    <p className="text-sm text-ink/70">
+                      No platform fees. Buyers pay sellers directly in Nano. The
+                      relay coordinates offers, jobs, and encrypted payload
+                      delivery, but it never custodies funds.
+                    </p>
                   </>
                 )
               },
