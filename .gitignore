@@ -31,3 +31,4 @@ out/
 .env*
 /.agents
 /.claude
+tsconfig.tsbuildinfo
