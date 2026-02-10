@@ -178,7 +178,7 @@ func (h *JobHandler) Create(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusBadRequest, "offer not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "offer lookup failed")
+		writeJSONInternalError(w, r, "offer lookup failed", err)
 		return
 	}
 	if offer.Status != string(domain.OfferActive) {
@@ -207,7 +207,7 @@ func (h *JobHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.Store.DB.BeginTx(r.Context(), nil)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "job create failed")
+		writeJSONInternalError(w, r, "job create failed", err)
 		return
 	}
 	defer func() {
@@ -245,7 +245,7 @@ func (h *JobHandler) Create(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusConflict, "job_id already exists")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "job create failed")
+		writeJSONInternalError(w, r, "job create failed", createErr)
 		return
 	}
 
@@ -266,7 +266,7 @@ func (h *JobHandler) Create(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusConflict, "payload_id already used")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "payload create failed")
+		writeJSONInternalError(w, r, "payload create failed", payloadErr)
 		return
 	}
 
@@ -280,12 +280,12 @@ func (h *JobHandler) Create(w http.ResponseWriter, r *http.Request) {
 		"request_payload_id": payload.RequestPayload.PayloadID,
 		"job_expires_at":     jobExpiresAt.UTC().Format(time.RFC3339Nano),
 	}, true); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "event create failed")
+		writeJSONInternalError(w, r, "event create failed", err)
 		return
 	}
 
 	if err := tx.Commit(); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "job create failed")
+		writeJSONInternalError(w, r, "job create failed", err)
 		return
 	}
 
@@ -296,7 +296,7 @@ func (h *JobHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	job, err := h.Store.GetJob(r.Context(), payload.JobID)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "job lookup failed")
+		writeJSONInternalError(w, r, "job lookup failed", err)
 		return
 	}
 	log.Printf("job_create job_id=%s offer_id=%s buyer_bot_id=%s seller_bot_id=%s", job.JobID, job.OfferID, job.BuyerBotID, job.SellerBotID)
@@ -319,12 +319,12 @@ func (h *JobHandler) Get(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusNotFound, "job not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "job lookup failed")
+		writeJSONInternalError(w, r, "job lookup failed", err)
 		return
 	}
 	job, err = h.applyExpiry(r.Context(), job)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "job expiry failed")
+		writeJSONInternalError(w, r, "job expiry failed", err)
 		return
 	}
 
@@ -401,7 +401,7 @@ func (h *JobHandler) List(w http.ResponseWriter, r *http.Request) {
 	for len(jobs) < limit {
 		batch, err := h.fetchJobs(r.Context(), role, caller, createdSince, batchCursorCreatedAt, batchCursorJobID, limit, statuses)
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "job list failed")
+			writeJSONInternalError(w, r, "job list failed", err)
 			return
 		}
 		if len(batch) == 0 {
@@ -412,7 +412,7 @@ func (h *JobHandler) List(w http.ResponseWriter, r *http.Request) {
 		for _, job := range batch {
 			updated, err := h.applyExpiry(r.Context(), job)
 			if err != nil {
-				writeJSONError(w, http.StatusInternalServerError, "job expiry failed")
+				writeJSONInternalError(w, r, "job expiry failed", err)
 				return
 			}
 			if statusFilter != nil && !statusFilter[updated.Status] {
@@ -465,12 +465,12 @@ func (h *JobHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusNotFound, "job not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "job lookup failed")
+		writeJSONInternalError(w, r, "job lookup failed", err)
 		return
 	}
 	job, err = h.applyExpiry(r.Context(), job)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "job expiry failed")
+		writeJSONInternalError(w, r, "job expiry failed", err)
 		return
 	}
 
@@ -497,19 +497,19 @@ func (h *JobHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.Store.UpdateJobCancel(r.Context(), sqlc.UpdateJobCancelParams{JobID: jobID, CancelledAt: sql.NullTime{Time: h.now(), Valid: true}}); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "job cancel failed")
+		writeJSONInternalError(w, r, "job cancel failed", err)
 		return
 	}
 	updated, err := h.Store.GetJob(r.Context(), jobID)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "job lookup failed")
+		writeJSONInternalError(w, r, "job lookup failed", err)
 		return
 	}
 	if err := emitEvent(r.Context(), h.Store, h.StreamHub, updated.SellerBotID, jobCancelledEventType, map[string]any{
 		"job_id":       updated.JobID,
 		"cancelled_at": updated.CancelledAt.Time.UTC().Format(time.RFC3339Nano),
 	}, true); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "event create failed")
+		writeJSONInternalError(w, r, "event create failed", err)
 		return
 	}
 	log.Printf("job_cancel job_id=%s buyer_bot_id=%s", updated.JobID, updated.BuyerBotID)
@@ -532,12 +532,12 @@ func (h *JobHandler) Charge(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusNotFound, "job not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "job lookup failed")
+		writeJSONInternalError(w, r, "job lookup failed", err)
 		return
 	}
 	job, err = h.applyExpiry(r.Context(), job)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "job expiry failed")
+		writeJSONInternalError(w, r, "job expiry failed", err)
 		return
 	}
 
@@ -593,7 +593,7 @@ func (h *JobHandler) Charge(w http.ResponseWriter, r *http.Request) {
 		ChargeAddress: sql.NullString{String: payload.Address, Valid: true},
 	})
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "charge validation failed")
+		writeJSONInternalError(w, r, "charge validation failed", err)
 		return
 	}
 	if count > 0 {
@@ -609,13 +609,13 @@ func (h *JobHandler) Charge(w http.ResponseWriter, r *http.Request) {
 		ChargeExpiresAt:  sql.NullTime{Time: chargeExpiresAt, Valid: true},
 		ChargeSigEd25519: sql.NullString{String: payload.ChargeSig, Valid: true},
 	}); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "charge attach failed")
+		writeJSONInternalError(w, r, "charge attach failed", err)
 		return
 	}
 
 	updated, err := h.Store.GetJob(r.Context(), jobID)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "job lookup failed")
+		writeJSONInternalError(w, r, "job lookup failed", err)
 		return
 	}
 
@@ -627,7 +627,7 @@ func (h *JobHandler) Charge(w http.ResponseWriter, r *http.Request) {
 		"charge_expires_at":  chargeExpiresAt.UTC().Format(time.RFC3339Nano),
 		"charge_sig_ed25519": payload.ChargeSig,
 	}, true); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "event create failed")
+		writeJSONInternalError(w, r, "event create failed", err)
 		return
 	}
 
@@ -651,12 +651,12 @@ func (h *JobHandler) PaymentSent(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusNotFound, "job not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "job lookup failed")
+		writeJSONInternalError(w, r, "job lookup failed", err)
 		return
 	}
 	job, err = h.applyExpiry(r.Context(), job)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "job expiry failed")
+		writeJSONInternalError(w, r, "job expiry failed", err)
 		return
 	}
 
@@ -722,7 +722,7 @@ func (h *JobHandler) PaymentSent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := emitEvent(r.Context(), h.Store, h.StreamHub, job.SellerBotID, jobPaymentSentEventType, eventPayload, true); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "event create failed")
+		writeJSONInternalError(w, r, "event create failed", err)
 		return
 	}
 
@@ -748,12 +748,12 @@ func (h *JobHandler) ReissueChargeRequest(w http.ResponseWriter, r *http.Request
 			writeJSONError(w, http.StatusNotFound, "job not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "job lookup failed")
+		writeJSONInternalError(w, r, "job lookup failed", err)
 		return
 	}
 	job, err = h.applyExpiry(r.Context(), job)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "job expiry failed")
+		writeJSONInternalError(w, r, "job expiry failed", err)
 		return
 	}
 
@@ -807,7 +807,7 @@ func (h *JobHandler) ReissueChargeRequest(w http.ResponseWriter, r *http.Request
 	}
 
 	if err := emitEvent(r.Context(), h.Store, h.StreamHub, job.SellerBotID, jobChargeReissueReqEventType, eventPayload, true); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "event create failed")
+		writeJSONInternalError(w, r, "event create failed", err)
 		return
 	}
 
@@ -833,12 +833,12 @@ func (h *JobHandler) ReissueCharge(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusNotFound, "job not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "job lookup failed")
+		writeJSONInternalError(w, r, "job lookup failed", err)
 		return
 	}
 	job, err = h.applyExpiry(r.Context(), job)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "job expiry failed")
+		writeJSONInternalError(w, r, "job expiry failed", err)
 		return
 	}
 
@@ -890,7 +890,7 @@ func (h *JobHandler) ReissueCharge(w http.ResponseWriter, r *http.Request) {
 		ChargeAddress: sql.NullString{String: payload.Address, Valid: true},
 	})
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "charge validation failed")
+		writeJSONInternalError(w, r, "charge validation failed", err)
 		return
 	}
 	if count > 0 {
@@ -911,7 +911,7 @@ func (h *JobHandler) ReissueCharge(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusConflict, "job not expired")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "charge reissue failed")
+		writeJSONInternalError(w, r, "charge reissue failed", err)
 		return
 	}
 
@@ -923,7 +923,7 @@ func (h *JobHandler) ReissueCharge(w http.ResponseWriter, r *http.Request) {
 		"charge_expires_at":  chargeExpiresAt.UTC().Format(time.RFC3339Nano),
 		"charge_sig_ed25519": payload.ChargeSig,
 	}, true); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "event create failed")
+		writeJSONInternalError(w, r, "event create failed", err)
 		return
 	}
 
@@ -947,12 +947,12 @@ func (h *JobHandler) MarkPaid(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusNotFound, "job not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "job lookup failed")
+		writeJSONInternalError(w, r, "job lookup failed", err)
 		return
 	}
 	job, err = h.applyExpiry(r.Context(), job)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "job expiry failed")
+		writeJSONInternalError(w, r, "job expiry failed", err)
 		return
 	}
 
@@ -1006,12 +1006,12 @@ func (h *JobHandler) MarkPaid(w http.ResponseWriter, r *http.Request) {
 		AmountRawReceived: nullString(payload.AmountRawReceived),
 	}
 	if err := h.Store.UpdateJobMarkPaid(r.Context(), params); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "mark paid failed")
+		writeJSONInternalError(w, r, "mark paid failed", err)
 		return
 	}
 	updated, err := h.Store.GetJob(r.Context(), jobID)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "job lookup failed")
+		writeJSONInternalError(w, r, "job lookup failed", err)
 		return
 	}
 
@@ -1032,7 +1032,7 @@ func (h *JobHandler) MarkPaid(w http.ResponseWriter, r *http.Request) {
 		eventPayload["amount_raw_received"] = payload.AmountRawReceived
 	}
 	if err := emitEvent(r.Context(), h.Store, h.StreamHub, updated.BuyerBotID, jobPaidEventType, eventPayload, true); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "event create failed")
+		writeJSONInternalError(w, r, "event create failed", err)
 		return
 	}
 
@@ -1056,12 +1056,12 @@ func (h *JobHandler) Deliver(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusNotFound, "job not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "job lookup failed")
+		writeJSONInternalError(w, r, "job lookup failed", err)
 		return
 	}
 	job, err = h.applyExpiry(r.Context(), job)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "job expiry failed")
+		writeJSONInternalError(w, r, "job expiry failed", err)
 		return
 	}
 
@@ -1120,7 +1120,7 @@ func (h *JobHandler) Deliver(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusConflict, "payload_id already used")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "payload create failed")
+		writeJSONInternalError(w, r, "payload create failed", err)
 		return
 	}
 	if h.Metrics != nil {
@@ -1130,7 +1130,7 @@ func (h *JobHandler) Deliver(w http.ResponseWriter, r *http.Request) {
 
 	updated, err := h.Store.GetJob(r.Context(), job.JobID)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "job lookup failed")
+		writeJSONInternalError(w, r, "job lookup failed", err)
 		return
 	}
 	log.Printf("job_payload job_id=%s seller_bot_id=%s payload_id=%s payload_kind=%s status=%s", updated.JobID, updated.SellerBotID, payload.Payload.PayloadID, payload.Payload.PayloadKind, updated.Status)

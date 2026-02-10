@@ -97,11 +97,11 @@ func (h *AdminHandler) Overview(w http.ResponseWriter, r *http.Request) {
 
 	// Bots.
 	if err := h.Store.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM bots WHERE revoked_at IS NULL`).Scan(&resp.Bots.Active); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "overview failed")
+		writeJSONInternalError(w, r, "overview failed", err)
 		return
 	}
 	if err := h.Store.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM bots WHERE revoked_at IS NOT NULL`).Scan(&resp.Bots.Revoked); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "overview failed")
+		writeJSONInternalError(w, r, "overview failed", err)
 		return
 	}
 	resp.Bots.Total = resp.Bots.Active + resp.Bots.Revoked
@@ -109,7 +109,7 @@ func (h *AdminHandler) Overview(w http.ResponseWriter, r *http.Request) {
 	// Offers by status.
 	offerRows, err := h.Store.DB.QueryContext(ctx, `SELECT status, COUNT(1) FROM offers GROUP BY status`)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "overview failed")
+		writeJSONInternalError(w, r, "overview failed", err)
 		return
 	}
 	for offerRows.Next() {
@@ -117,14 +117,14 @@ func (h *AdminHandler) Overview(w http.ResponseWriter, r *http.Request) {
 		var count int64
 		if err := offerRows.Scan(&status, &count); err != nil {
 			_ = offerRows.Close()
-			writeJSONError(w, http.StatusInternalServerError, "overview failed")
+			writeJSONInternalError(w, r, "overview failed", err)
 			return
 		}
 		resp.OffersByStatus[status] = count
 	}
 	if err := offerRows.Err(); err != nil {
 		_ = offerRows.Close()
-		writeJSONError(w, http.StatusInternalServerError, "overview failed")
+		writeJSONInternalError(w, r, "overview failed", err)
 		return
 	}
 	_ = offerRows.Close()
@@ -132,7 +132,7 @@ func (h *AdminHandler) Overview(w http.ResponseWriter, r *http.Request) {
 	// Jobs by status.
 	jobRows, err := h.Store.DB.QueryContext(ctx, `SELECT status, COUNT(1) FROM jobs GROUP BY status`)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "overview failed")
+		writeJSONInternalError(w, r, "overview failed", err)
 		return
 	}
 	for jobRows.Next() {
@@ -140,35 +140,35 @@ func (h *AdminHandler) Overview(w http.ResponseWriter, r *http.Request) {
 		var count int64
 		if err := jobRows.Scan(&status, &count); err != nil {
 			_ = jobRows.Close()
-			writeJSONError(w, http.StatusInternalServerError, "overview failed")
+			writeJSONInternalError(w, r, "overview failed", err)
 			return
 		}
 		resp.JobsByStatus[status] = count
 	}
 	if err := jobRows.Err(); err != nil {
 		_ = jobRows.Close()
-		writeJSONError(w, http.StatusInternalServerError, "overview failed")
+		writeJSONInternalError(w, r, "overview failed", err)
 		return
 	}
 	_ = jobRows.Close()
 
 	// Payloads.
 	if err := h.Store.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM payloads`).Scan(&resp.Payloads.Total); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "overview failed")
+		writeJSONInternalError(w, r, "overview failed", err)
 		return
 	}
 	if err := h.Store.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM payloads WHERE fetched_at IS NULL`).Scan(&resp.Payloads.Pending); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "overview failed")
+		writeJSONInternalError(w, r, "overview failed", err)
 		return
 	}
 	if err := h.Store.DB.QueryRowContext(ctx, `SELECT COALESCE(SUM(LENGTH(ciphertext_b64)), 0) FROM payloads`).Scan(&resp.Payloads.StoredBytes); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "overview failed")
+		writeJSONInternalError(w, r, "overview failed", err)
 		return
 	}
 
 	// Events.
 	if err := h.Store.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM events`).Scan(&resp.EventsTotal); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "overview failed")
+		writeJSONInternalError(w, r, "overview failed", err)
 		return
 	}
 
@@ -183,11 +183,11 @@ func (h *AdminHandler) Overview(w http.ResponseWriter, r *http.Request) {
 	// Needs attention.
 	staleCutoff := now.Add(-1 * time.Hour)
 	if err := h.Store.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM jobs WHERE status = 'REQUESTED' AND created_at < ?1`, staleCutoff).Scan(&resp.NeedsAttention.RequestedStale); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "overview failed")
+		writeJSONInternalError(w, r, "overview failed", err)
 		return
 	}
 	if err := h.Store.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM jobs WHERE status = 'CHARGE_CREATED' AND charge_expires_at IS NOT NULL AND charge_expires_at < ?1`, now).Scan(&resp.NeedsAttention.ChargeExpired); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "overview failed")
+		writeJSONInternalError(w, r, "overview failed", err)
 		return
 	}
 	resp.NeedsAttention.PayloadPending = resp.Payloads.Pending
@@ -277,7 +277,7 @@ FROM bots
 ORDER BY created_at DESC, bot_id DESC
 LIMIT ?`, args...)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "bot list failed")
+		writeJSONInternalError(w, r, "bot list failed", err)
 		return
 	}
 	defer rows.Close()
@@ -290,7 +290,7 @@ LIMIT ?`, args...)
 		var lastSeen sql.NullTime
 		var revokedAt sql.NullTime
 		if err := rows.Scan(&botID, &botName, &createdAt, &lastSeen, &revokedAt); err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "bot list failed")
+			writeJSONInternalError(w, r, "bot list failed", err)
 			return
 		}
 		row := adminBotRow{
@@ -310,7 +310,7 @@ LIMIT ?`, args...)
 		resp.Bots = append(resp.Bots, row)
 	}
 	if err := rows.Err(); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "bot list failed")
+		writeJSONInternalError(w, r, "bot list failed", err)
 		return
 	}
 
@@ -353,7 +353,7 @@ func (h *AdminHandler) GetBot(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusNotFound, "bot not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "bot lookup failed")
+		writeJSONInternalError(w, r, "bot lookup failed", err)
 		return
 	}
 
@@ -396,7 +396,7 @@ func (h *AdminHandler) RevokeBot(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.Store.DB.BeginTx(ctx, nil)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "bot revoke failed")
+		writeJSONInternalError(w, r, "bot revoke failed", err)
 		return
 	}
 	defer func() {
@@ -410,7 +410,7 @@ func (h *AdminHandler) RevokeBot(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusNotFound, "bot not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "bot lookup failed")
+		writeJSONInternalError(w, r, "bot lookup failed", err)
 		return
 	}
 
@@ -419,7 +419,7 @@ func (h *AdminHandler) RevokeBot(w http.ResponseWriter, r *http.Request) {
 		RevokedAt: sql.NullTime{Time: now, Valid: true},
 	})
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "bot revoke failed")
+		writeJSONInternalError(w, r, "bot revoke failed", err)
 		return
 	}
 	if !updated.RevokedAt.Valid {
@@ -435,7 +435,7 @@ func (h *AdminHandler) RevokeBot(w http.ResponseWriter, r *http.Request) {
 		CancelledAt: cancelledAt,
 	})
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "bot revoke failed")
+		writeJSONInternalError(w, r, "bot revoke failed", err)
 		return
 	}
 	for _, offer := range offers {
@@ -445,7 +445,7 @@ func (h *AdminHandler) RevokeBot(w http.ResponseWriter, r *http.Request) {
 			"cancelled_by": "admin",
 			"reason":       action.Reason,
 		}, true); err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "event create failed")
+			writeJSONInternalError(w, r, "event create failed", err)
 			return
 		}
 	}
@@ -455,7 +455,7 @@ func (h *AdminHandler) RevokeBot(w http.ResponseWriter, r *http.Request) {
 		CancelledAt: cancelledAt,
 	})
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "bot revoke failed")
+		writeJSONInternalError(w, r, "bot revoke failed", err)
 		return
 	}
 	for _, job := range jobs {
@@ -472,7 +472,7 @@ func (h *AdminHandler) RevokeBot(w http.ResponseWriter, r *http.Request) {
 		for i, recipient := range recipients {
 			emitJobStream := i == 0
 			if err := emitEventTx(ctx, qtx, h.StreamHub, recipient, jobCancelledEventType, payload, emitJobStream); err != nil {
-				writeJSONError(w, http.StatusInternalServerError, "event create failed")
+				writeJSONInternalError(w, r, "event create failed", err)
 				return
 			}
 		}
@@ -493,12 +493,12 @@ func (h *AdminHandler) RevokeBot(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:        now,
 	})
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "audit failed")
+		writeJSONInternalError(w, r, "audit failed", err)
 		return
 	}
 
 	if err := tx.Commit(); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "bot revoke failed")
+		writeJSONInternalError(w, r, "bot revoke failed", err)
 		return
 	}
 
@@ -605,7 +605,7 @@ func (h *AdminHandler) ListOffers(w http.ResponseWriter, r *http.Request) {
 ORDER BY o.created_at DESC, o.offer_id DESC
 LIMIT ?`, args...)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "offer list failed")
+		writeJSONInternalError(w, r, "offer list failed", err)
 		return
 	}
 	defer rows.Close()
@@ -633,7 +633,7 @@ LIMIT ?`, args...)
 			&offer.RequestSchemaHint,
 			&purchaseCount,
 		); err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "offer list failed")
+			writeJSONInternalError(w, r, "offer list failed", err)
 			return
 		}
 
@@ -670,7 +670,7 @@ LIMIT ?`, args...)
 		resp.Offers = append(resp.Offers, row)
 	}
 	if err := rows.Err(); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "offer list failed")
+		writeJSONInternalError(w, r, "offer list failed", err)
 		return
 	}
 
@@ -729,7 +729,7 @@ func (h *AdminHandler) GetOffer(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusNotFound, "offer not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "offer lookup failed")
+		writeJSONInternalError(w, r, "offer lookup failed", err)
 		return
 	}
 
@@ -810,7 +810,7 @@ func (h *AdminHandler) moderateOfferStatus(w http.ResponseWriter, r *http.Reques
 
 	tx, err := h.Store.DB.BeginTx(ctx, nil)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "offer update failed")
+		writeJSONInternalError(w, r, "offer update failed", err)
 		return
 	}
 	defer func() { _ = tx.Rollback() }()
@@ -822,7 +822,7 @@ func (h *AdminHandler) moderateOfferStatus(w http.ResponseWriter, r *http.Reques
 			writeJSONError(w, http.StatusNotFound, "offer not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "offer lookup failed")
+		writeJSONInternalError(w, r, "offer lookup failed", err)
 		return
 	}
 
@@ -844,7 +844,7 @@ func (h *AdminHandler) moderateOfferStatus(w http.ResponseWriter, r *http.Reques
 		}
 		if beforeOffer.Status == "ACTIVE" {
 			if err := qtx.UpdateOfferPause(ctx, offerID); err != nil {
-				writeJSONError(w, http.StatusInternalServerError, "offer pause failed")
+				writeJSONInternalError(w, r, "offer pause failed", err)
 				return
 			}
 		}
@@ -859,7 +859,7 @@ func (h *AdminHandler) moderateOfferStatus(w http.ResponseWriter, r *http.Reques
 		}
 		if beforeOffer.Status == "PAUSED" {
 			if err := qtx.UpdateOfferResume(ctx, offerID); err != nil {
-				writeJSONError(w, http.StatusInternalServerError, "offer resume failed")
+				writeJSONInternalError(w, r, "offer resume failed", err)
 				return
 			}
 		}
@@ -873,7 +873,7 @@ func (h *AdminHandler) moderateOfferStatus(w http.ResponseWriter, r *http.Reques
 				OfferID:     offerID,
 				CancelledAt: sql.NullTime{Time: now, Valid: true},
 			}); err != nil {
-				writeJSONError(w, http.StatusInternalServerError, "offer cancel failed")
+				writeJSONInternalError(w, r, "offer cancel failed", err)
 				return
 			}
 		}
@@ -884,7 +884,7 @@ func (h *AdminHandler) moderateOfferStatus(w http.ResponseWriter, r *http.Reques
 
 	updated, err := qtx.GetOffer(ctx, offerID)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "offer lookup failed")
+		writeJSONInternalError(w, r, "offer lookup failed", err)
 		return
 	}
 
@@ -903,12 +903,12 @@ func (h *AdminHandler) moderateOfferStatus(w http.ResponseWriter, r *http.Reques
 		CreatedAt:        now,
 	})
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "audit failed")
+		writeJSONInternalError(w, r, "audit failed", err)
 		return
 	}
 
 	if err := tx.Commit(); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "offer update failed")
+		writeJSONInternalError(w, r, "offer update failed", err)
 		return
 	}
 
@@ -1126,7 +1126,7 @@ LIMIT ?`, args...)
 	for len(resp.Jobs) < limit {
 		batch, err := fetchBatch(r.Context(), batchCursorCreatedAt, batchCursorJobID)
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "job list failed")
+			writeJSONInternalError(w, r, "job list failed", err)
 			return
 		}
 		if len(batch) == 0 {
@@ -1138,7 +1138,7 @@ LIMIT ?`, args...)
 			// Apply expiry using the same logic as the public job endpoints (best-effort).
 			updated, err := jobHandler.applyExpiry(r.Context(), item.Job)
 			if err != nil {
-				writeJSONError(w, http.StatusInternalServerError, "job expiry failed")
+				writeJSONInternalError(w, r, "job expiry failed", err)
 				return
 			}
 			if statusFilter != nil && !statusFilter[updated.Status] {
@@ -1232,14 +1232,14 @@ func (h *AdminHandler) GetJob(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusNotFound, "job not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "job lookup failed")
+		writeJSONInternalError(w, r, "job lookup failed", err)
 		return
 	}
 
 	jobHandler := &JobHandler{Store: h.Store, StreamHub: h.StreamHub, Clock: h.Clock}
 	job, err = jobHandler.applyExpiry(r.Context(), job)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "job expiry failed")
+		writeJSONInternalError(w, r, "job expiry failed", err)
 		return
 	}
 
@@ -1338,7 +1338,7 @@ func (h *AdminHandler) moderateJob(w http.ResponseWriter, r *http.Request, actio
 
 	tx, err := h.Store.DB.BeginTx(ctx, nil)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "job update failed")
+		writeJSONInternalError(w, r, "job update failed", err)
 		return
 	}
 	defer func() { _ = tx.Rollback() }()
@@ -1350,7 +1350,7 @@ func (h *AdminHandler) moderateJob(w http.ResponseWriter, r *http.Request, actio
 			writeJSONError(w, http.StatusNotFound, "job not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "job lookup failed")
+		writeJSONInternalError(w, r, "job lookup failed", err)
 		return
 	}
 
@@ -1374,7 +1374,7 @@ func (h *AdminHandler) moderateJob(w http.ResponseWriter, r *http.Request, actio
 				return
 			}
 			if _, err := tx.ExecContext(ctx, `UPDATE jobs SET status = 'CANCELLED', cancelled_at = ?1 WHERE job_id = ?2 AND status IN ('REQUESTED', 'CHARGE_CREATED')`, sql.NullTime{Time: now, Valid: true}, jobID); err != nil {
-				writeJSONError(w, http.StatusInternalServerError, "job cancel failed")
+				writeJSONInternalError(w, r, "job cancel failed", err)
 				return
 			}
 		}
@@ -1387,7 +1387,7 @@ func (h *AdminHandler) moderateJob(w http.ResponseWriter, r *http.Request, actio
 			return
 		default:
 			if err := qtx.UpdateJobExpire(ctx, sqlc.UpdateJobExpireParams{JobID: jobID, ExpiredAt: sql.NullTime{Time: now, Valid: true}}); err != nil {
-				writeJSONError(w, http.StatusInternalServerError, "job expire failed")
+				writeJSONInternalError(w, r, "job expire failed", err)
 				return
 			}
 		}
@@ -1398,7 +1398,7 @@ func (h *AdminHandler) moderateJob(w http.ResponseWriter, r *http.Request, actio
 
 	updated, err := qtx.GetJob(ctx, jobID)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "job lookup failed")
+		writeJSONInternalError(w, r, "job lookup failed", err)
 		return
 	}
 
@@ -1417,7 +1417,7 @@ func (h *AdminHandler) moderateJob(w http.ResponseWriter, r *http.Request, actio
 		for i, recipient := range recipients {
 			emitJobStream := i == 0
 			if err := emitEventTx(ctx, qtx, h.StreamHub, recipient, jobCancelledEventType, payload, emitJobStream); err != nil {
-				writeJSONError(w, http.StatusInternalServerError, "event create failed")
+				writeJSONInternalError(w, r, "event create failed", err)
 				return
 			}
 		}
@@ -1437,7 +1437,7 @@ func (h *AdminHandler) moderateJob(w http.ResponseWriter, r *http.Request, actio
 		for i, recipient := range recipients {
 			emitJobStream := i == 0
 			if err := emitEventTx(ctx, qtx, h.StreamHub, recipient, jobExpiredEventType, payload, emitJobStream); err != nil {
-				writeJSONError(w, http.StatusInternalServerError, "event create failed")
+				writeJSONInternalError(w, r, "event create failed", err)
 				return
 			}
 		}
@@ -1458,12 +1458,12 @@ func (h *AdminHandler) moderateJob(w http.ResponseWriter, r *http.Request, actio
 		CreatedAt:        now,
 	})
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "audit failed")
+		writeJSONInternalError(w, r, "audit failed", err)
 		return
 	}
 
 	if err := tx.Commit(); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "job update failed")
+		writeJSONInternalError(w, r, "job update failed", err)
 		return
 	}
 
@@ -1566,7 +1566,7 @@ func (h *AdminHandler) ListPayloads(w http.ResponseWriter, r *http.Request) {
 	ORDER BY p.created_at DESC, p.payload_id DESC
 	LIMIT ?`, args...)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "payload list failed")
+		writeJSONInternalError(w, r, "payload list failed", err)
 		return
 	}
 	defer rows.Close()
@@ -1590,7 +1590,7 @@ func (h *AdminHandler) ListPayloads(w http.ResponseWriter, r *http.Request) {
 			&fetchedAt,
 			&row.CiphertextB64Bytes,
 		); err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "payload list failed")
+			writeJSONInternalError(w, r, "payload list failed", err)
 			return
 		}
 		if senderBotName.Valid {
@@ -1606,7 +1606,7 @@ func (h *AdminHandler) ListPayloads(w http.ResponseWriter, r *http.Request) {
 		resp.Payloads = append(resp.Payloads, row)
 	}
 	if err := rows.Err(); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "payload list failed")
+		writeJSONInternalError(w, r, "payload list failed", err)
 		return
 	}
 
@@ -1697,7 +1697,7 @@ ORDER BY event_id ASC
 LIMIT ?2`, sinceID, limit)
 	}
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "event list failed")
+		writeJSONInternalError(w, r, "event list failed", err)
 		return
 	}
 	defer rows.Close()
@@ -1708,7 +1708,7 @@ LIMIT ?2`, sinceID, limit)
 		var dataJSON string
 		var createdAt time.Time
 		if err := rows.Scan(&row.EventID, &row.RecipientBotID, &row.EventType, &dataJSON, &createdAt); err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "event list failed")
+			writeJSONInternalError(w, r, "event list failed", err)
 			return
 		}
 		row.Data = json.RawMessage(dataJSON)
@@ -1716,7 +1716,7 @@ LIMIT ?2`, sinceID, limit)
 		resp.Events = append(resp.Events, row)
 	}
 	if err := rows.Err(); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "event list failed")
+		writeJSONInternalError(w, r, "event list failed", err)
 		return
 	}
 
@@ -1777,7 +1777,7 @@ func (h *AdminHandler) ListAudit(w http.ResponseWriter, r *http.Request) {
 
 	rows, next, err := h.Store.ListAdminAudit(r.Context(), limit, cursor, targetType, targetID)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "audit list failed")
+		writeJSONInternalError(w, r, "audit list failed", err)
 		return
 	}
 

@@ -152,12 +152,12 @@ func (h *OfferHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	offerID, err := newOfferID(now)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "offer_id generation failed")
+		writeJSONInternalError(w, r, "offer_id generation failed", err)
 		return
 	}
 
 	if err := h.insertOffer(r.Context(), offerID, sellerBotID, normalized, now, *expiresAt); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "offer create failed")
+		writeJSONInternalError(w, r, "offer create failed", err)
 		return
 	}
 
@@ -194,18 +194,18 @@ func (h *OfferHandler) Get(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusNotFound, "offer not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "offer lookup failed")
+		writeJSONInternalError(w, r, "offer lookup failed", err)
 		return
 	}
 
 	if err := h.expireOfferIfNeeded(r.Context(), &offer); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "offer expire failed")
+		writeJSONInternalError(w, r, "offer expire failed", err)
 		return
 	}
 
 	tags, err := h.loadOfferTags(r.Context(), offer)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "offer tags failed")
+		writeJSONInternalError(w, r, "offer tags failed", err)
 		return
 	}
 
@@ -229,7 +229,7 @@ func (h *OfferHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusNotFound, "offer not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "offer lookup failed")
+		writeJSONInternalError(w, r, "offer lookup failed", err)
 		return
 	}
 
@@ -244,7 +244,7 @@ func (h *OfferHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.expireOfferIfNeeded(r.Context(), &offer); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "offer expire failed")
+		writeJSONInternalError(w, r, "offer expire failed", err)
 		return
 	}
 
@@ -252,7 +252,7 @@ func (h *OfferHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 	case string(domain.OfferCancelled):
 		tags, err := h.loadOfferTags(r.Context(), offer)
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "offer tags failed")
+			writeJSONInternalError(w, r, "offer tags failed", err)
 			return
 		}
 		writeJSON(w, http.StatusOK, offerToResponse(offer, tags, h.lookupBotName(r.Context(), offer.SellerBotID)))
@@ -267,18 +267,18 @@ func (h *OfferHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 		CancelledAt: sql.NullTime{Time: now, Valid: true},
 		OfferID:     offerID,
 	}); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "offer cancel failed")
+		writeJSONInternalError(w, r, "offer cancel failed", err)
 		return
 	}
 
 	offer, err = h.Store.GetOffer(r.Context(), offerID)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "offer lookup failed")
+		writeJSONInternalError(w, r, "offer lookup failed", err)
 		return
 	}
 	tags, err := h.loadOfferTags(r.Context(), offer)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "offer tags failed")
+		writeJSONInternalError(w, r, "offer tags failed", err)
 		return
 	}
 	log.Printf("offer_cancel offer_id=%s seller_bot_id=%s", offer.OfferID, offer.SellerBotID)
@@ -302,7 +302,7 @@ func (h *OfferHandler) Pause(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusNotFound, "offer not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "offer lookup failed")
+		writeJSONInternalError(w, r, "offer lookup failed", err)
 		return
 	}
 
@@ -317,7 +317,7 @@ func (h *OfferHandler) Pause(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.expireOfferIfNeeded(r.Context(), &offer); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "offer expire failed")
+		writeJSONInternalError(w, r, "offer expire failed", err)
 		return
 	}
 
@@ -331,7 +331,7 @@ func (h *OfferHandler) Pause(w http.ResponseWriter, r *http.Request) {
 	case string(domain.OfferPaused):
 		tags, err := h.loadOfferTags(r.Context(), offer)
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "offer tags failed")
+			writeJSONInternalError(w, r, "offer tags failed", err)
 			return
 		}
 		writeJSON(w, http.StatusOK, offerToResponse(offer, tags, h.lookupBotName(r.Context(), offer.SellerBotID)))
@@ -339,18 +339,18 @@ func (h *OfferHandler) Pause(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.Store.UpdateOfferPause(r.Context(), offer.OfferID); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "offer pause failed")
+		writeJSONInternalError(w, r, "offer pause failed", err)
 		return
 	}
 
 	offer, err = h.Store.GetOffer(r.Context(), offerID)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "offer lookup failed")
+		writeJSONInternalError(w, r, "offer lookup failed", err)
 		return
 	}
 	tags, err := h.loadOfferTags(r.Context(), offer)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "offer tags failed")
+		writeJSONInternalError(w, r, "offer tags failed", err)
 		return
 	}
 	log.Printf("offer_pause offer_id=%s seller_bot_id=%s", offer.OfferID, offer.SellerBotID)
@@ -374,7 +374,7 @@ func (h *OfferHandler) Resume(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusNotFound, "offer not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "offer lookup failed")
+		writeJSONInternalError(w, r, "offer lookup failed", err)
 		return
 	}
 
@@ -389,7 +389,7 @@ func (h *OfferHandler) Resume(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.expireOfferIfNeeded(r.Context(), &offer); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "offer expire failed")
+		writeJSONInternalError(w, r, "offer expire failed", err)
 		return
 	}
 
@@ -403,7 +403,7 @@ func (h *OfferHandler) Resume(w http.ResponseWriter, r *http.Request) {
 	case string(domain.OfferActive):
 		tags, err := h.loadOfferTags(r.Context(), offer)
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "offer tags failed")
+			writeJSONInternalError(w, r, "offer tags failed", err)
 			return
 		}
 		writeJSON(w, http.StatusOK, offerToResponse(offer, tags, h.lookupBotName(r.Context(), offer.SellerBotID)))
@@ -411,18 +411,18 @@ func (h *OfferHandler) Resume(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.Store.UpdateOfferResume(r.Context(), offer.OfferID); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "offer resume failed")
+		writeJSONInternalError(w, r, "offer resume failed", err)
 		return
 	}
 
 	offer, err = h.Store.GetOffer(r.Context(), offerID)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "offer lookup failed")
+		writeJSONInternalError(w, r, "offer lookup failed", err)
 		return
 	}
 	tags, err := h.loadOfferTags(r.Context(), offer)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "offer tags failed")
+		writeJSONInternalError(w, r, "offer tags failed", err)
 		return
 	}
 	log.Printf("offer_resume offer_id=%s seller_bot_id=%s", offer.OfferID, offer.SellerBotID)
@@ -496,7 +496,7 @@ func (h *OfferHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	entries, err := h.loadOfferEntries(r.Context(), sellerBotID, query, filterTags, includePaused)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "offer list failed")
+		writeJSONInternalError(w, r, "offer list failed", err)
 		return
 	}
 
@@ -518,7 +518,7 @@ func (h *OfferHandler) List(w http.ResponseWriter, r *http.Request) {
 	if len(entries) > limit {
 		next, err := encodeOfferCursor(cursorFromEntry(entries[limit-1], sortParam, query))
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "cursor encode failed")
+			writeJSONInternalError(w, r, "cursor encode failed", err)
 			return
 		}
 		nextCursor = next
@@ -582,7 +582,7 @@ func (h *OfferHandler) PublicList(w http.ResponseWriter, r *http.Request) {
 
 	entries, err := h.loadOfferEntries(r.Context(), sellerBotID, query, filterTags, false)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "offer list failed")
+		writeJSONInternalError(w, r, "offer list failed", err)
 		return
 	}
 
@@ -604,7 +604,7 @@ func (h *OfferHandler) PublicList(w http.ResponseWriter, r *http.Request) {
 	if len(entries) > limit {
 		next, err := encodeOfferCursor(cursorFromEntry(entries[limit-1], sortParam, query))
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "cursor encode failed")
+			writeJSONInternalError(w, r, "cursor encode failed", err)
 			return
 		}
 		nextCursor = next
@@ -658,7 +658,7 @@ func (h *OfferHandler) PublicGet(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusNotFound, "offer not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "offer lookup failed")
+		writeJSONInternalError(w, r, "offer lookup failed", err)
 		return
 	}
 
@@ -666,7 +666,7 @@ func (h *OfferHandler) PublicGet(w http.ResponseWriter, r *http.Request) {
 	// then only return ACTIVE offers (404 for paused/expired/cancelled).
 	if h.markOfferExpired(h.now(), &offer) {
 		if err := h.persistExpiredOffers(r.Context(), []string{offer.OfferID}); err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "offer expire failed")
+			writeJSONInternalError(w, r, "offer expire failed", err)
 			return
 		}
 	}
@@ -677,7 +677,7 @@ func (h *OfferHandler) PublicGet(w http.ResponseWriter, r *http.Request) {
 
 	tags, err := h.loadOfferTags(r.Context(), offer)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "offer tags failed")
+		writeJSONInternalError(w, r, "offer tags failed", err)
 		return
 	}
 
