@@ -87,7 +87,7 @@ func (h *PayloadHandler) Get(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusNotFound, "payload not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "payload lookup failed")
+		writeJSONInternalError(w, r, "payload lookup failed", err)
 		return
 	}
 	if recipient != caller {
@@ -101,7 +101,7 @@ func (h *PayloadHandler) Get(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusNotFound, "payload not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "payload lookup failed")
+		writeJSONInternalError(w, r, "payload lookup failed", err)
 		return
 	}
 	wasFetched := payload.FetchedAt.Valid
@@ -112,7 +112,7 @@ func (h *PayloadHandler) Get(w http.ResponseWriter, r *http.Request) {
 		RecipientBotID: caller,
 		FetchedAt:      sql.NullTime{Time: now, Valid: true},
 	}); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "payload update failed")
+		writeJSONInternalError(w, r, "payload update failed", err)
 		return
 	}
 	if h.Metrics != nil && !wasFetched {
@@ -177,7 +177,7 @@ func (h *PayloadHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	rows, nextCursor, err := h.fetchPayloadMetadata(r.Context(), caller, status, jobID, cursor, limit)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "payload list failed")
+		writeJSONInternalError(w, r, "payload list failed", err)
 		return
 	}
 

@@ -134,7 +134,7 @@ func (h *BotHandler) Register(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, sql.ErrNoRows):
 		// proceed
 	default:
-		writeJSONError(w, http.StatusInternalServerError, "bot lookup failed")
+		writeJSONInternalError(w, r, "bot lookup failed", err)
 		return
 	}
 
@@ -150,12 +150,12 @@ func (h *BotHandler) Register(w http.ResponseWriter, r *http.Request) {
 	})
 	if createErr != nil {
 		if !isConstraintError(createErr) {
-			writeJSONError(w, http.StatusInternalServerError, "bot create failed")
+			writeJSONInternalError(w, r, "bot create failed", createErr)
 			return
 		}
 		existing, err = h.Store.GetBot(r.Context(), botID)
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "bot lookup failed")
+			writeJSONInternalError(w, r, "bot lookup failed", err)
 			return
 		}
 		if !botKeysMatch(existing, signingKeyCanonical, encryptionKeyCanonical, expectedSigningKid, expectedEncryptionKid) {
@@ -195,7 +195,7 @@ func (h *BotHandler) Get(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusNotFound, "bot not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "bot lookup failed")
+		writeJSONInternalError(w, r, "bot lookup failed", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, botToResponse(bot))
@@ -364,7 +364,7 @@ func (h *BotHandler) SetName(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusNotFound, "bot not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "bot update failed")
+		writeJSONInternalError(w, r, "bot update failed", err)
 		return
 	}
 

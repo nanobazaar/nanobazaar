@@ -81,7 +81,7 @@ func (h *PollHandler) Poll(w http.ResponseWriter, r *http.Request) {
 	ack, err := h.Store.GetPollAck(r.Context(), caller)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
-			writeJSONError(w, http.StatusInternalServerError, "poll ack lookup failed")
+			writeJSONInternalError(w, r, "poll ack lookup failed", err)
 			return
 		}
 	} else {
@@ -95,7 +95,7 @@ func (h *PollHandler) Poll(w http.ResponseWriter, r *http.Request) {
 
 	minEventID, err := h.getMinEventID(r.Context(), caller)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "poll min lookup failed")
+		writeJSONInternalError(w, r, "poll min lookup failed", err)
 		return
 	}
 	if minEventID > 0 && cursor < minEventID-1 {
@@ -115,7 +115,7 @@ func (h *PollHandler) Poll(w http.ResponseWriter, r *http.Request) {
 	types := parseEventTypes(r.URL.Query().Get("types"))
 	events, newestEventTime, err := h.fetchEvents(r.Context(), caller, cursor, limit, types)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "poll failed")
+		writeJSONInternalError(w, r, "poll failed", err)
 		return
 	}
 	if h.Metrics != nil && newestEventTime != nil {
@@ -155,7 +155,7 @@ func (h *PollHandler) Ack(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		current = ack.LastAckedEventID
 	} else if !errors.Is(err, sql.ErrNoRows) {
-		writeJSONError(w, http.StatusInternalServerError, "poll ack lookup failed")
+		writeJSONInternalError(w, r, "poll ack lookup failed", err)
 		return
 	}
 
@@ -169,7 +169,7 @@ func (h *PollHandler) Ack(w http.ResponseWriter, r *http.Request) {
 		LastAckedEventID: current,
 		UpdatedAt:        now,
 	}); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "poll ack update failed")
+		writeJSONInternalError(w, r, "poll ack update failed", err)
 		return
 	}
 

@@ -17,6 +17,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5/middleware"
+
 	"github.com/nanobazaar/relay/internal/metrics"
 	"github.com/nanobazaar/relay/internal/store/sqlc"
 )
@@ -121,6 +123,7 @@ func Middleware(v *Verifier) func(http.Handler) http.Handler {
 			case errors.Is(err, sql.ErrNoRows):
 				// proceed
 			default:
+				logInternalError(r, "idempotency_lookup_failed", http.StatusInternalServerError, err)
 				writeError(w, &HTTPError{Status: http.StatusInternalServerError, Message: "idempotency lookup failed"})
 				return
 			}
@@ -139,6 +142,7 @@ func Middleware(v *Verifier) func(http.Handler) http.Handler {
 				ResponseHeaders: string(headersJSON),
 				CreatedAt:       v.now(),
 			}); err != nil {
+				logInternalError(r, "idempotency_insert_failed", http.StatusInternalServerError, err)
 				writeError(w, &HTTPError{Status: http.StatusInternalServerError, Message: "idempotency insert failed"})
 				return
 			}
@@ -188,6 +192,7 @@ func (v *Verifier) verifyRequest(r *http.Request, bodyBytes []byte, bodyHash str
 
 	count, err := v.Store.CountNonce(r.Context(), sqlc.CountNonceParams{BotID: botID, Nonce: nonce})
 	if err != nil {
+		logInternalError(r, "nonce_lookup_failed", http.StatusInternalServerError, err)
 		return &HTTPError{Status: http.StatusInternalServerError, Message: "nonce lookup failed"}
 	}
 	if count > 0 {
@@ -195,6 +200,7 @@ func (v *Verifier) verifyRequest(r *http.Request, bodyBytes []byte, bodyHash str
 	}
 
 	if err := v.Store.InsertNonce(r.Context(), sqlc.InsertNonceParams{BotID: botID, Nonce: nonce, CreatedAt: v.now()}); err != nil {
+		logInternalError(r, "nonce_insert_failed", http.StatusInternalServerError, err)
 		return &HTTPError{Status: http.StatusInternalServerError, Message: "nonce insert failed"}
 	}
 
@@ -225,6 +231,7 @@ func (v *Verifier) resolveSigningKey(r *http.Request, bodyBytes []byte) (ed25519
 				case errors.Is(err, sql.ErrNoRows):
 					// allow new registration
 				default:
+					logInternalError(r, "bot_lookup_failed", http.StatusInternalServerError, err)
 					return nil, &HTTPError{Status: http.StatusInternalServerError, Message: "bot lookup failed"}
 				}
 			}
@@ -244,6 +251,7 @@ func (v *Verifier) resolveSigningKey(r *http.Request, bodyBytes []byte) (ed25519
 			}
 			return nil, &HTTPError{Status: http.StatusUnauthorized, Message: "unknown bot"}
 		}
+		logInternalError(r, "bot_lookup_failed", http.StatusInternalServerError, err)
 		return nil, &HTTPError{Status: http.StatusInternalServerError, Message: "bot lookup failed"}
 	}
 	if bot.RevokedAt.Valid && !isRevokeEndpoint(r) {
@@ -453,4 +461,33 @@ func logAuthFailure(r *http.Request, reason string) {
 	botID := r.Header.Get(headerBotID)
 	path := canonicalPath(r)
 	log.Printf("auth_failed reason=%s bot_id=%s method=%s path=%s remote_addr=%s", reason, botID, r.Method, path, r.RemoteAddr)
+}
+
+// internalErrorLogf exists for testability; do not call directly.
+var internalErrorLogf = log.Printf
+
+func logInternalError(r *http.Request, action string, status int, err error) {
+	if r == nil || err == nil {
+		return
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return
+	}
+	if status == 0 {
+		status = http.StatusInternalServerError
+	}
+	botID := strings.TrimSpace(r.Header.Get(headerBotID))
+	path := canonicalPath(r)
+	reqID := middleware.GetReqID(r.Context())
+	internalErrorLogf(
+		"internal_error action=%s status=%d method=%s path=%s bot_id=%s request_id=%s remote_addr=%s err=%v",
+		action,
+		status,
+		r.Method,
+		path,
+		botID,
+		reqID,
+		r.RemoteAddr,
+		err,
+	)
 }

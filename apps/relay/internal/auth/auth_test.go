@@ -10,11 +10,16 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/nanobazaar/relay/internal/store/sqlc"
 )
@@ -119,6 +124,19 @@ func (f *fakeStore) DeleteIdempotencyBefore(_ context.Context, cutoff time.Time)
 		}
 	}
 	return nil
+}
+
+type errorStore struct {
+	*fakeStore
+
+	countNonceErr error
+}
+
+func (e *errorStore) CountNonce(ctx context.Context, arg sqlc.CountNonceParams) (int64, error) {
+	if e.countNonceErr != nil {
+		return 0, e.countNonceErr
+	}
+	return e.fakeStore.CountNonce(ctx, arg)
 }
 
 func TestAuthValidSignature(t *testing.T) {
@@ -390,5 +408,69 @@ func TestBotsRegistrationUsesBodyKey(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+}
+
+func TestAuthLogsInternalErrorOnNonceLookupFailure(t *testing.T) {
+	store := &errorStore{
+		fakeStore:     newFakeStore(),
+		countNonceErr: errors.New("db down"),
+	}
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	botID := "bot_123"
+	store.bots[botID] = sqlc.Bot{BotID: botID, SigningPubkeyEd25519: base64.RawURLEncoding.EncodeToString(pub)}
+
+	verifier := NewVerifier(store)
+	now := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+	verifier.Clock = func() time.Time { return now }
+
+	req := signedRequest(t, priv, botID, http.MethodGet, "/v0/bots/abc", "", []byte(`{}`), now, "nonce-1")
+	req.RemoteAddr = "1.2.3.4:5678"
+	req = req.WithContext(context.WithValue(req.Context(), middleware.RequestIDKey, "req-123"))
+
+	prev := internalErrorLogf
+	t.Cleanup(func() { internalErrorLogf = prev })
+
+	var got string
+	internalErrorLogf = func(format string, args ...any) {
+		got = fmt.Sprintf(format, args...)
+	}
+
+	rec := httptest.NewRecorder()
+	Middleware(verifier)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", rec.Code)
+	}
+	if got == "" {
+		t.Fatalf("expected internal_error log line, got empty")
+	}
+	if !strings.Contains(got, "action=nonce_lookup_failed") {
+		t.Fatalf("expected nonce_lookup_failed action, got %q", got)
+	}
+	if !strings.Contains(got, "request_id=req-123") {
+		t.Fatalf("expected request_id, got %q", got)
+	}
+	if !strings.Contains(got, "err=db down") {
+		t.Fatalf("expected err, got %q", got)
+	}
+}
+
+func TestLogInternalError_SkipsContextCanceled(t *testing.T) {
+	prev := internalErrorLogf
+	t.Cleanup(func() { internalErrorLogf = prev })
+
+	called := false
+	internalErrorLogf = func(string, ...any) { called = true }
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.test/v0/bots/abc", nil)
+	logInternalError(req, "test_action", http.StatusInternalServerError, context.Canceled)
+	if called {
+		t.Fatalf("expected no log for context.Canceled")
 	}
 }

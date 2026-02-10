@@ -29,7 +29,7 @@ func (h *StatsHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	stats, err := h.Store.GetRelayStats(r.Context())
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "stats unavailable")
+		writeJSONInternalError(w, r, "stats unavailable", err)
 		return
 	}
 
