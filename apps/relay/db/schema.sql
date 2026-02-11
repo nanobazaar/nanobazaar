@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS offers (
 	status TEXT NOT NULL CHECK (status IN ('ACTIVE', 'PAUSED', 'CANCELLED', 'EXPIRED')),
 	cancelled_at DATETIME,
 	request_schema_hint TEXT,
+	updated_at DATETIME,
 	FOREIGN KEY (seller_bot_id) REFERENCES bots(bot_id)
 );
 

@@ -52,6 +52,16 @@ type offerCreateRequest struct {
 	RequestSchemaHint string     `json:"request_schema_hint"`
 }
 
+type offerUpdateRequest struct {
+	Title             *string    `json:"title"`
+	Description       *string    `json:"description"`
+	Tags              *[]string  `json:"tags"`
+	PriceRaw          *string    `json:"price_raw"`
+	TurnaroundSeconds *int64     `json:"turnaround_seconds"`
+	ExpiresAt         *time.Time `json:"expires_at"`
+	RequestSchemaHint *string    `json:"request_schema_hint"`
+}
+
 type offerResponse struct {
 	OfferID           string     `json:"offer_id"`
 	SellerBotID       string     `json:"seller_bot_id"`
@@ -65,6 +75,7 @@ type offerResponse struct {
 	ExpiresAt         *time.Time `json:"expires_at,omitempty"`
 	Status            string     `json:"status"`
 	CancelledAt       *time.Time `json:"cancelled_at,omitempty"`
+	UpdatedAt         *time.Time `json:"updated_at,omitempty"`
 }
 
 type offerListResponse struct {
@@ -426,6 +437,171 @@ func (h *OfferHandler) Resume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("offer_resume offer_id=%s seller_bot_id=%s", offer.OfferID, offer.SellerBotID)
+	writeJSON(w, http.StatusOK, offerToResponse(offer, tags, h.lookupBotName(r.Context(), offer.SellerBotID)))
+}
+
+func (h *OfferHandler) Update(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.Store == nil {
+		writeJSONError(w, http.StatusInternalServerError, "store unavailable")
+		return
+	}
+	offerID := chi.URLParam(r, "offer_id")
+	if offerID == "" {
+		writeJSONError(w, http.StatusBadRequest, "missing offer_id")
+		return
+	}
+
+	var payload offerUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+
+	offer, err := h.Store.GetOffer(r.Context(), offerID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSONError(w, http.StatusNotFound, "offer not found")
+			return
+		}
+		writeJSONInternalError(w, r, "offer lookup failed", err)
+		return
+	}
+
+	caller := r.Header.Get(headerBotID)
+	if caller == "" {
+		writeJSONError(w, http.StatusUnauthorized, "missing bot_id")
+		return
+	}
+	if caller != offer.SellerBotID {
+		writeJSONError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+
+	if offer.Status != string(domain.OfferPaused) {
+		writeJSONError(w, http.StatusConflict, "offer must be PAUSED to update")
+		return
+	}
+
+	// Merge: use existing values for fields not provided in the request.
+	merged := offerCreateRequest{
+		Title:             offer.Title,
+		Description:       offer.Description,
+		PriceRaw:          offer.PriceRaw,
+		TurnaroundSeconds: offer.TurnaroundSeconds,
+	}
+	if offer.RequestSchemaHint.Valid {
+		merged.RequestSchemaHint = offer.RequestSchemaHint.String
+	}
+	if offer.ExpiresAt.Valid {
+		t := offer.ExpiresAt.Time
+		merged.ExpiresAt = &t
+	}
+	existingTags, err := h.loadOfferTags(r.Context(), offer)
+	if err != nil {
+		writeJSONInternalError(w, r, "offer tags failed", err)
+		return
+	}
+	merged.Tags = existingTags
+
+	if payload.Title != nil {
+		merged.Title = *payload.Title
+	}
+	if payload.Description != nil {
+		merged.Description = *payload.Description
+	}
+	if payload.Tags != nil {
+		merged.Tags = *payload.Tags
+	}
+	if payload.PriceRaw != nil {
+		merged.PriceRaw = *payload.PriceRaw
+	}
+	if payload.TurnaroundSeconds != nil {
+		merged.TurnaroundSeconds = *payload.TurnaroundSeconds
+	}
+	if payload.ExpiresAt != nil {
+		merged.ExpiresAt = payload.ExpiresAt
+	}
+	if payload.RequestSchemaHint != nil {
+		merged.RequestSchemaHint = *payload.RequestSchemaHint
+	}
+
+	normalized, err := normalizeOfferCreate(merged)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	now := h.now()
+	expiresAt := normalized.ExpiresAt
+	if expiresAt != nil && expiresAt.Before(now) {
+		writeJSONError(w, http.StatusBadRequest, "expires_at in past")
+		return
+	}
+	if expiresAt != nil && expiresAt.Sub(now) > offerMaxTTL {
+		writeJSONError(w, http.StatusBadRequest, "expires_at exceeds max ttl")
+		return
+	}
+
+	expiresAtSQL := sql.NullTime{}
+	if expiresAt != nil {
+		expiresAtSQL = sql.NullTime{Time: *expiresAt, Valid: true}
+	}
+
+	tx, err := h.Store.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeJSONInternalError(w, r, "offer update tx failed", err)
+		return
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	q := h.Store.Queries.WithTx(tx)
+	if err := q.UpdateOfferFields(r.Context(), sqlc.UpdateOfferFieldsParams{
+		Title:             normalized.Title,
+		Description:       normalized.Description,
+		TagsJson:          mustJSON(normalized.Tags),
+		PriceRaw:          normalized.PriceRaw,
+		TurnaroundSeconds: normalized.TurnaroundSeconds,
+		ExpiresAt:         expiresAtSQL,
+		RequestSchemaHint: sql.NullString{String: normalized.RequestSchemaHint, Valid: normalized.RequestSchemaHint != ""},
+		UpdatedAt:         sql.NullTime{Time: now, Valid: true},
+		OfferID:           offerID,
+	}); err != nil {
+		writeJSONInternalError(w, r, "offer update failed", err)
+		return
+	}
+
+	if err := q.DeleteOfferTagsByOffer(r.Context(), offerID); err != nil {
+		writeJSONInternalError(w, r, "offer tags delete failed", err)
+		return
+	}
+	for _, tag := range normalized.Tags {
+		if err := q.InsertOfferTag(r.Context(), sqlc.InsertOfferTagParams{
+			OfferID: offerID,
+			Tag:     tag,
+		}); err != nil {
+			writeJSONInternalError(w, r, "offer tag insert failed", err)
+			return
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		writeJSONInternalError(w, r, "offer update commit failed", err)
+		return
+	}
+
+	offer, err = h.Store.GetOffer(r.Context(), offerID)
+	if err != nil {
+		writeJSONInternalError(w, r, "offer lookup failed", err)
+		return
+	}
+	tags, err := h.loadOfferTags(r.Context(), offer)
+	if err != nil {
+		writeJSONInternalError(w, r, "offer tags failed", err)
+		return
+	}
+	log.Printf("offer_update offer_id=%s seller_bot_id=%s", offer.OfferID, offer.SellerBotID)
 	writeJSON(w, http.StatusOK, offerToResponse(offer, tags, h.lookupBotName(r.Context(), offer.SellerBotID)))
 }
 
@@ -1020,6 +1196,11 @@ func offerToResponse(offer sqlc.Offer, tags []string, sellerBotName string) offe
 		t := offer.CancelledAt.Time
 		cancelledAt = &t
 	}
+	var updatedAt *time.Time
+	if offer.UpdatedAt.Valid {
+		t := offer.UpdatedAt.Time
+		updatedAt = &t
+	}
 	return offerResponse{
 		OfferID:           offer.OfferID,
 		SellerBotID:       offer.SellerBotID,
@@ -1033,6 +1214,7 @@ func offerToResponse(offer sqlc.Offer, tags []string, sellerBotName string) offe
 		ExpiresAt:         expiresAt,
 		Status:            offer.Status,
 		CancelledAt:       cancelledAt,
+		UpdatedAt:         updatedAt,
 	}
 }
 

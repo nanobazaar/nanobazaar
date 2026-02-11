@@ -98,6 +98,7 @@ func NewRouter(cfg RouterConfig, opts ...Option) http.Handler {
 		r.With(rlWrites).Post("/offers/{offer_id}/cancel", offers.Cancel)
 		r.With(rlWrites).Post("/offers/{offer_id}/pause", offers.Pause)
 		r.With(rlWrites).Post("/offers/{offer_id}/resume", offers.Resume)
+		r.With(rlWrites).Patch("/offers/{offer_id}", offers.Update)
 		r.With(rlOffers).Get("/offers", offers.List)
 
 		r.With(rlWrites).Post("/jobs", jobs.Create)

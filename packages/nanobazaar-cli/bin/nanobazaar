@@ -1247,8 +1247,16 @@ Commands:
                              Browse public offers (no auth)
   offer create [--json <json|@file>] [--title ... --description ... --tag ...]
                              Create a fixed-price offer
+  offer update --offer-id <id> [--title ...] [--description ...] [--tag ...]
+               [--price-raw ...] [--turnaround-seconds ...] [--expires-at ...]
+               [--request-schema-hint ...] [--json <json|@file>]
+                             Update a paused offer (partial updates supported)
   offer cancel --offer-id <id>
                              Cancel an offer
+  offer pause --offer-id <id>
+                             Pause an active offer
+  offer resume --offer-id <id>
+                             Resume a paused offer
   job create [--json <json|@file>] [--offer-id ... --request-body ...]
                              Create a job request
   job charge --job-id <id> [--address <addr>] [--amount-raw <raw>] [--charge-expires-at <rfc3339>]
@@ -1678,6 +1686,152 @@ async function runOfferCancel(argv) {
 
   if (!result.response.ok) {
     throw new Error(`Offer cancel failed (${result.response.status}): ${result.text || result.response.statusText}`);
+  }
+
+  if (result.data && result.data.offer_id) {
+    state.known_offers = ensureMap(state.known_offers, 'offer_id');
+    state.known_offers[result.data.offer_id] = result.data;
+  }
+  state.relay_url = config.relay_url;
+  state.bot_id = identity.botId;
+  state.signing_kid = identity.signingKid;
+  state.encryption_kid = identity.encryptionKid;
+  saveStateMerged(config.state_path, state);
+
+  printJson(result.data, !!flags.compact);
+}
+
+async function runOfferUpdate(argv) {
+  const {flags} = parseArgs(argv);
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  const offerId = flags.offerId || flags.offer;
+  if (!offerId) {
+    throw new Error('Missing offer id. Provide --offer-id.');
+  }
+
+  let payload;
+  if (flags.json) {
+    payload = readJsonInput(flags.json, '--json');
+  } else {
+    payload = {};
+    if (flags.title !== undefined) {
+      payload.title = String(flags.title);
+    }
+    if (flags.description !== undefined) {
+      payload.description = String(flags.description);
+    }
+    const tags = collectTags(flags);
+    if (tags.length > 0) {
+      payload.tags = tags;
+    }
+    if (flags.priceRaw !== undefined || flags.price !== undefined) {
+      payload.price_raw = String(flags.priceRaw || flags.price);
+    }
+    if (flags.turnaroundSeconds !== undefined || flags.turnaround !== undefined) {
+      payload.turnaround_seconds = Number(flags.turnaroundSeconds || flags.turnaround);
+    }
+    if (flags.expiresAt !== undefined) {
+      payload.expires_at = String(flags.expiresAt);
+    }
+    if (flags.requestSchemaHint !== undefined) {
+      payload.request_schema_hint = readTextInput(String(flags.requestSchemaHint), '--request-schema-hint');
+    }
+    if (Object.keys(payload).length === 0) {
+      throw new Error('No fields to update. Provide at least one of --title, --description, --tag, --price-raw, --turnaround-seconds, --expires-at, --request-schema-hint, or --json.');
+    }
+  }
+
+  const result = await signedRequest({
+    method: 'PATCH',
+    path: `/v0/offers/${offerId}`,
+    body: payload,
+    relayUrl: config.relay_url,
+    keys,
+    identity,
+  });
+
+  if (!result.response.ok) {
+    throw new Error(`Offer update failed (${result.response.status}): ${result.text || result.response.statusText}`);
+  }
+
+  if (result.data && result.data.offer_id) {
+    state.known_offers = ensureMap(state.known_offers, 'offer_id');
+    state.known_offers[result.data.offer_id] = result.data;
+  }
+  state.relay_url = config.relay_url;
+  state.bot_id = identity.botId;
+  state.signing_kid = identity.signingKid;
+  state.encryption_kid = identity.encryptionKid;
+  saveStateMerged(config.state_path, state);
+
+  printJson(result.data, !!flags.compact);
+}
+
+async function runOfferPause(argv) {
+  const {flags, positionals} = parseArgs(argv);
+  const offerId = flags.offerId || flags.offer || positionals[0];
+  if (!offerId) {
+    throw new Error('Missing offer id. Provide --offer-id or a positional offer id.');
+  }
+
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  const result = await signedRequest({
+    method: 'POST',
+    path: `/v0/offers/${offerId}/pause`,
+    idempotencyKey: crypto.randomBytes(16).toString('hex'),
+    relayUrl: config.relay_url,
+    keys,
+    identity,
+  });
+
+  if (!result.response.ok) {
+    throw new Error(`Offer pause failed (${result.response.status}): ${result.text || result.response.statusText}`);
+  }
+
+  if (result.data && result.data.offer_id) {
+    state.known_offers = ensureMap(state.known_offers, 'offer_id');
+    state.known_offers[result.data.offer_id] = result.data;
+  }
+  state.relay_url = config.relay_url;
+  state.bot_id = identity.botId;
+  state.signing_kid = identity.signingKid;
+  state.encryption_kid = identity.encryptionKid;
+  saveStateMerged(config.state_path, state);
+
+  printJson(result.data, !!flags.compact);
+}
+
+async function runOfferResume(argv) {
+  const {flags, positionals} = parseArgs(argv);
+  const offerId = flags.offerId || flags.offer || positionals[0];
+  if (!offerId) {
+    throw new Error('Missing offer id. Provide --offer-id or a positional offer id.');
+  }
+
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+
+  const result = await signedRequest({
+    method: 'POST',
+    path: `/v0/offers/${offerId}/resume`,
+    idempotencyKey: crypto.randomBytes(16).toString('hex'),
+    relayUrl: config.relay_url,
+    keys,
+    identity,
+  });
+
+  if (!result.response.ok) {
+    throw new Error(`Offer resume failed (${result.response.status}): ${result.text || result.response.statusText}`);
   }
 
   if (result.data && result.data.offer_id) {
@@ -3348,16 +3502,28 @@ async function main() {
       await runMarket(rest);
       return;
     case 'offer': {
-      const {sub, argv: subArgv} = splitSubcommand(rest, ['create', 'cancel']);
+      const {sub, argv: subArgv} = splitSubcommand(rest, ['create', 'update', 'cancel', 'pause', 'resume']);
       if (sub === 'create') {
         await runOfferCreate(subArgv);
+        return;
+      }
+      if (sub === 'update') {
+        await runOfferUpdate(subArgv);
         return;
       }
       if (sub === 'cancel') {
         await runOfferCancel(subArgv);
         return;
       }
-      throw new Error('Unknown offer command. Use: offer create|cancel');
+      if (sub === 'pause') {
+        await runOfferPause(subArgv);
+        return;
+      }
+      if (sub === 'resume') {
+        await runOfferResume(subArgv);
+        return;
+      }
+      throw new Error('Unknown offer command. Use: offer create|update|cancel|pause|resume');
     }
     case 'job': {
       const {sub, argv: subArgv} = splitSubcommand(rest, [

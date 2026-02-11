@@ -491,7 +491,7 @@ func (q *Queries) GetMinEventID(ctx context.Context, recipientBotID string) (int
 }
 
 const getOffer = `-- name: GetOffer :one
-SELECT offer_id, seller_bot_id, title, description, tags_json, price_raw, turnaround_seconds, created_at, expires_at, status, cancelled_at, request_schema_hint FROM offers WHERE offer_id = ?1
+SELECT offer_id, seller_bot_id, title, description, tags_json, price_raw, turnaround_seconds, created_at, expires_at, status, cancelled_at, request_schema_hint, updated_at FROM offers WHERE offer_id = ?1
 `
 
 func (q *Queries) GetOffer(ctx context.Context, offerID string) (Offer, error) {
@@ -510,6 +510,7 @@ func (q *Queries) GetOffer(ctx context.Context, offerID string) (Offer, error) {
 		&i.Status,
 		&i.CancelledAt,
 		&i.RequestSchemaHint,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -1279,7 +1280,7 @@ func (q *Queries) ListOfferTags(ctx context.Context, offerID string) ([]string, 
 }
 
 const listOffersNewest = `-- name: ListOffersNewest :many
-SELECT offer_id, seller_bot_id, title, description, tags_json, price_raw, turnaround_seconds, created_at, expires_at, status, cancelled_at, request_schema_hint FROM offers
+SELECT offer_id, seller_bot_id, title, description, tags_json, price_raw, turnaround_seconds, created_at, expires_at, status, cancelled_at, request_schema_hint, updated_at FROM offers
 WHERE (?1 = '' OR seller_bot_id = ?1)
 	AND (?2 = '' OR status = ?2)
 	AND (?3 = '' OR title LIKE '%' || ?3 || '%' OR description LIKE '%' || ?3 || '%')
@@ -1321,6 +1322,7 @@ func (q *Queries) ListOffersNewest(ctx context.Context, arg ListOffersNewestPara
 			&i.Status,
 			&i.CancelledAt,
 			&i.RequestSchemaHint,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1336,7 +1338,7 @@ func (q *Queries) ListOffersNewest(ctx context.Context, arg ListOffersNewestPara
 }
 
 const listOffersNewestAfter = `-- name: ListOffersNewestAfter :many
-SELECT offer_id, seller_bot_id, title, description, tags_json, price_raw, turnaround_seconds, created_at, expires_at, status, cancelled_at, request_schema_hint FROM offers
+SELECT offer_id, seller_bot_id, title, description, tags_json, price_raw, turnaround_seconds, created_at, expires_at, status, cancelled_at, request_schema_hint, updated_at FROM offers
 WHERE (?1 = '' OR seller_bot_id = ?1)
 	AND (?2 = '' OR status = ?2)
 	AND (?3 = '' OR title LIKE '%' || ?3 || '%' OR description LIKE '%' || ?3 || '%')
@@ -1386,6 +1388,7 @@ func (q *Queries) ListOffersNewestAfter(ctx context.Context, arg ListOffersNewes
 			&i.Status,
 			&i.CancelledAt,
 			&i.RequestSchemaHint,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -2065,5 +2068,55 @@ type UpsertPollAckParams struct {
 
 func (q *Queries) UpsertPollAck(ctx context.Context, arg UpsertPollAckParams) error {
 	_, err := q.exec(ctx, q.upsertPollAckStmt, upsertPollAck, arg.RecipientBotID, arg.LastAckedEventID, arg.UpdatedAt)
+	return err
+}
+
+const updateOfferFields = `-- name: UpdateOfferFields :exec
+UPDATE offers
+SET title = ?1,
+    description = ?2,
+    tags_json = ?3,
+    price_raw = ?4,
+    turnaround_seconds = ?5,
+    expires_at = ?6,
+    request_schema_hint = ?7,
+    updated_at = ?8
+WHERE offer_id = ?9
+    AND status = 'PAUSED'
+`
+
+type UpdateOfferFieldsParams struct {
+	Title             string         `json:"title"`
+	Description       string         `json:"description"`
+	TagsJson          string         `json:"tags_json"`
+	PriceRaw          string         `json:"price_raw"`
+	TurnaroundSeconds int64          `json:"turnaround_seconds"`
+	ExpiresAt         sql.NullTime   `json:"expires_at"`
+	RequestSchemaHint sql.NullString `json:"request_schema_hint"`
+	UpdatedAt         sql.NullTime   `json:"updated_at"`
+	OfferID           string         `json:"offer_id"`
+}
+
+func (q *Queries) UpdateOfferFields(ctx context.Context, arg UpdateOfferFieldsParams) error {
+	_, err := q.db.ExecContext(ctx, updateOfferFields,
+		arg.Title,
+		arg.Description,
+		arg.TagsJson,
+		arg.PriceRaw,
+		arg.TurnaroundSeconds,
+		arg.ExpiresAt,
+		arg.RequestSchemaHint,
+		arg.UpdatedAt,
+		arg.OfferID,
+	)
+	return err
+}
+
+const deleteOfferTagsByOffer = `-- name: DeleteOfferTagsByOffer :exec
+DELETE FROM offer_tags WHERE offer_id = ?1
+`
+
+func (q *Queries) DeleteOfferTagsByOffer(ctx context.Context, offerID string) error {
+	_, err := q.db.ExecContext(ctx, deleteOfferTagsByOffer, offerID)
 	return err
 }

@@ -130,6 +130,33 @@ paths:
           $ref: '#/components/responses/Error404'
         '401':
           $ref: '#/components/responses/Error401'
+    patch:
+      summary: Update offer (must be PAUSED)
+      parameters:
+        - $ref: '#/components/parameters/OfferIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OfferUpdateRequest'
+      responses:
+        '200':
+          description: Offer updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Offer'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
   /v0/offers/{offer_id}/cancel:
     post:
       summary: Cancel offer
@@ -609,6 +636,31 @@ components:
         request_schema_hint:
           type: string
       required: [title, description, tags, price_raw, turnaround_seconds]
+    OfferUpdateRequest:
+      type: object
+      description: Partial update request. Only provided fields are updated.
+      properties:
+        title:
+          type: string
+          maxLength: 80
+        description:
+          type: string
+          maxLength: 800
+        tags:
+          type: array
+          items:
+            type: string
+            maxLength: 24
+          maxItems: 8
+        price_raw:
+          type: string
+        turnaround_seconds:
+          type: integer
+        expires_at:
+          type: string
+          format: date-time
+        request_schema_hint:
+          type: string
     Offer:
       type: object
       properties:
@@ -636,8 +688,11 @@ components:
           format: date-time
         status:
           type: string
-          enum: [ACTIVE, CANCELLED, EXPIRED]
+          enum: [ACTIVE, PAUSED, CANCELLED, EXPIRED]
         cancelled_at:
+          type: string
+          format: date-time
+        updated_at:
           type: string
           format: date-time
       required: [offer_id, seller_bot_id, title, description, tags, price_raw, turnaround_seconds, created_at, status]

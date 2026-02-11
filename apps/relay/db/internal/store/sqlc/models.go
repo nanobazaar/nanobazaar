@@ -83,6 +83,7 @@ type Offer struct {
 	Status            string         `json:"status"`
 	CancelledAt       sql.NullTime   `json:"cancelled_at"`
 	RequestSchemaHint sql.NullString `json:"request_schema_hint"`
+	UpdatedAt         sql.NullTime   `json:"updated_at"`
 }
 
 type OfferTag struct {

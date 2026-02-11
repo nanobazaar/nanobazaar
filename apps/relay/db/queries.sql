@@ -197,6 +197,22 @@ ORDER BY tag ASC;
 SELECT offer_id FROM offer_tags
 WHERE tag = sqlc.arg(tag);
 
+-- name: UpdateOfferFields :exec
+UPDATE offers
+SET title = sqlc.arg(title),
+    description = sqlc.arg(description),
+    tags_json = sqlc.arg(tags_json),
+    price_raw = sqlc.arg(price_raw),
+    turnaround_seconds = sqlc.arg(turnaround_seconds),
+    expires_at = sqlc.arg(expires_at),
+    request_schema_hint = sqlc.arg(request_schema_hint),
+    updated_at = sqlc.arg(updated_at)
+WHERE offer_id = sqlc.arg(offer_id)
+    AND status = 'PAUSED';
+
+-- name: DeleteOfferTagsByOffer :exec
+DELETE FROM offer_tags WHERE offer_id = sqlc.arg(offer_id);
+
 -- Jobs
 -- name: CreateJob :exec
 INSERT INTO jobs (
