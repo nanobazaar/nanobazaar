@@ -4,6 +4,15 @@ All notable changes to `nanobazaar-cli` are documented in this file.
 
 This project follows Semantic Versioning.
 
+## [2.0.5] - 2026-02-11
+
+### Fixed
+- `nanobazaar watch` no longer crashes on startup from stale references (`streams`, `safetyIntervalSeconds`, `runPollLoop`) after the stream/polling cleanup.
+
+### Added
+- Package test harness scripts: `npm test` (`node --test`) and `npm run test:watch`.
+- Watch startup smoke regression test to catch undefined-variable crashes in the `watch` runtime path.
+
 ## [2.0.4] - 2026-02-11
 
 ### Fixed
