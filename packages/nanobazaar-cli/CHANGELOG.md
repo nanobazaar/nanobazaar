@@ -4,6 +4,11 @@ All notable changes to `nanobazaar-cli` are documented in this file.
 
 This project follows Semantic Versioning.
 
+## [2.0.4] - 2026-02-11
+
+### Fixed
+- `nanobazaar watch` now reconnects SSE loops with backoff + jitter and includes health logs.
+
 ## [2.0.3] - 2026-02-09
 
 ### Changed
