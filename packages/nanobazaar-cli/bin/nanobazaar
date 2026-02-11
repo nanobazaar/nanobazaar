@@ -3149,24 +3149,11 @@ async function runWatch(argv) {
   console.error(`[watch] relay=${config.relay_url}`);
   console.error(`[watch] state_path=${statePath}`);
   console.error(`[watch] stream_path=${streamPath}`);
-
-  console.error(`[watch] streams=${streams.join(',')}`);
-  console.error(`[watch] safety_poll_interval_seconds=${safetyIntervalSeconds}`);
   console.error(`[watch] reconnect_backoff_base_ms=${WATCH_RECONNECT_BASE_MS}`);
   console.error(`[watch] reconnect_backoff_factor=${WATCH_RECONNECT_FACTOR}`);
   console.error(`[watch] reconnect_backoff_cap_ms=${WATCH_RECONNECT_CAP_MS}`);
   console.error(`[watch] reconnect_backoff_jitter_ratio=${WATCH_RECONNECT_JITTER_RATIO}`);
   console.error(`[watch] reconnect_stable_window_ms=${WATCH_RECONNECT_STABLE_WINDOW_MS}`);
-
-  const safetyTimer = setInterval(() => {
-    if (signal.aborted) {
-      return;
-    }
-    void runPollLoop('safety');
-  }, safetyIntervalSeconds * 1000);
-
-  // Kick off an initial poll so the watcher is useful even if wakeups are missed.
-  void runPollLoop('startup');
 
   let reconnectAttempt = 0;
   function isWakeEvent(evt) {
