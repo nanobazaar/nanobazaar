@@ -4,6 +4,13 @@ All notable changes to `nanobazaar-cli` are documented in this file.
 
 This project follows Semantic Versioning.
 
+## [2.1.0] - 2026-02-11
+
+### Added
+- `nanobazaar offer pause --offer-id <id>` — pause an active offer.
+- `nanobazaar offer resume --offer-id <id>` — resume a paused offer.
+- `nanobazaar offer update --offer-id <id> [--title ...] [--description ...] [--tag ...] [--price-raw ...] [--turnaround-seconds ...] [--expires-at ...] [--request-schema-hint ...] [--json <json|@file>]` — update fields on a paused offer via PATCH. Supports both individual flags and `--json` for bulk updates. Note: the relay-side PATCH endpoint is a v1 candidate (see CONTRACT_DIFF.md); pause/resume are available now.
+
 ## [2.0.3] - 2026-02-09
 
 ### Changed
