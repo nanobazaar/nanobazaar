@@ -32,6 +32,11 @@ const CONFIG_BASE_DIR = XDG_CONFIG_HOME || path.join(HOME_DIR, '.config');
 const STATE_DEFAULT = path.join(CONFIG_BASE_DIR, 'nanobazaar', 'nanobazaar.json');
 const STATE_LOCK_RETRY_MS = 50;
 const STATE_LOCK_TIMEOUT_MS = 5000;
+const WATCH_RECONNECT_BASE_MS = 1000;
+const WATCH_RECONNECT_FACTOR = 2;
+const WATCH_RECONNECT_CAP_MS = 60000;
+const WATCH_RECONNECT_JITTER_RATIO = 0.2;
+const WATCH_RECONNECT_STABLE_WINDOW_MS = 30000;
 let STATE_LOCK_SLEEP = null;
 
 function requireFetch() {
@@ -2905,11 +2910,44 @@ function appendEvents(state, events) {
 }
 
 function backoffDelayMs(attempt, opts) {
-  const baseMs = opts && opts.baseMs ? opts.baseMs : 500;
-  const maxMs = opts && opts.maxMs ? opts.maxMs : 30000;
-  const exp = Math.min(maxMs, baseMs * (2 ** Math.max(0, attempt)));
-  const jittered = exp * (0.5 + Math.random());
-  return Math.min(maxMs, Math.max(baseMs, Math.floor(jittered)));
+  const baseMs = opts && opts.baseMs ? opts.baseMs : WATCH_RECONNECT_BASE_MS;
+  const factor = opts && opts.factor ? opts.factor : WATCH_RECONNECT_FACTOR;
+  const capMs = opts && (opts.capMs || opts.maxMs) ? (opts.capMs || opts.maxMs) : WATCH_RECONNECT_CAP_MS;
+  const jitterRatio = opts && typeof opts.jitterRatio === 'number'
+    ? Math.min(1, Math.max(0, opts.jitterRatio))
+    : WATCH_RECONNECT_JITTER_RATIO;
+  const randomFn = opts && typeof opts.random === 'function' ? opts.random : Math.random;
+  const safeAttempt = Math.max(0, Math.floor(attempt));
+  const exponent = Math.min(capMs, baseMs * (factor ** safeAttempt));
+  const jitterOffset = jitterRatio === 0 ? 0 : ((randomFn() * 2) - 1) * jitterRatio;
+  const jittered = exponent * (1 + jitterOffset);
+  return Math.min(capMs, Math.max(baseMs, Math.round(jittered)));
+}
+
+function planReconnect(attempt, opts) {
+  const connectedDurationMs = opts && typeof opts.connectedDurationMs === 'number'
+    ? Math.max(0, Math.floor(opts.connectedDurationMs))
+    : null;
+  const stableWindowMs = opts && opts.stableWindowMs ? opts.stableWindowMs : WATCH_RECONNECT_STABLE_WINDOW_MS;
+  const reason = opts && opts.reason ? String(opts.reason) : 'unknown';
+  let effectiveAttempt = Math.max(0, Math.floor(attempt));
+  let reset = false;
+
+  if (connectedDurationMs !== null && connectedDurationMs >= stableWindowMs && effectiveAttempt > 0) {
+    effectiveAttempt = 0;
+    reset = true;
+  }
+
+  const delayMs = backoffDelayMs(effectiveAttempt, opts && opts.backoff);
+  return {
+    attemptNumber: effectiveAttempt + 1,
+    nextAttempt: effectiveAttempt + 1,
+    delayMs,
+    reason,
+    reset,
+    connectedDurationMs,
+    stableWindowMs,
+  };
 }
 
 function sleep(ms, signal) {
@@ -3112,7 +3150,25 @@ async function runWatch(argv) {
   console.error(`[watch] state_path=${statePath}`);
   console.error(`[watch] stream_path=${streamPath}`);
 
-  let attempt = 0;
+  console.error(`[watch] streams=${streams.join(',')}`);
+  console.error(`[watch] safety_poll_interval_seconds=${safetyIntervalSeconds}`);
+  console.error(`[watch] reconnect_backoff_base_ms=${WATCH_RECONNECT_BASE_MS}`);
+  console.error(`[watch] reconnect_backoff_factor=${WATCH_RECONNECT_FACTOR}`);
+  console.error(`[watch] reconnect_backoff_cap_ms=${WATCH_RECONNECT_CAP_MS}`);
+  console.error(`[watch] reconnect_backoff_jitter_ratio=${WATCH_RECONNECT_JITTER_RATIO}`);
+  console.error(`[watch] reconnect_stable_window_ms=${WATCH_RECONNECT_STABLE_WINDOW_MS}`);
+
+  const safetyTimer = setInterval(() => {
+    if (signal.aborted) {
+      return;
+    }
+    void runPollLoop('safety');
+  }, safetyIntervalSeconds * 1000);
+
+  // Kick off an initial poll so the watcher is useful even if wakeups are missed.
+  void runPollLoop('startup');
+
+  let reconnectAttempt = 0;
   function isWakeEvent(evt) {
     if (!evt) {
       return false;
@@ -3151,8 +3207,8 @@ async function runWatch(argv) {
         throw new Error(`SSE connect failed (${response.status}): ${text || response.statusText}`);
       }
 
-      attempt = 0;
       console.error('[watch] connected');
+      const connectedAt = Date.now();
 
       await consumeSseStream(response.body, {
         signal,
@@ -3173,17 +3229,28 @@ async function runWatch(argv) {
         break;
       }
 
-      console.error('[watch] disconnected');
+      const disconnectedDurationMs = Math.max(0, Date.now() - connectedAt);
+      const disconnectPlan = planReconnect(reconnectAttempt, {
+        reason: 'SSE stream disconnected',
+        connectedDurationMs: disconnectedDurationMs,
+      });
+      reconnectAttempt = disconnectPlan.nextAttempt;
+      if (disconnectPlan.reset) {
+        console.error(`[watch] reconnect backoff reset after stable connection (${disconnectPlan.connectedDurationMs}ms >= ${disconnectPlan.stableWindowMs}ms)`);
+      }
+      console.error(`[watch] reconnect health: attempt=${disconnectPlan.attemptNumber} delay_ms=${disconnectPlan.delayMs} reason=${disconnectPlan.reason} connected_ms=${disconnectPlan.connectedDurationMs}`);
+      await sleep(disconnectPlan.delayMs, signal);
     } catch (err) {
       if (signal.aborted) {
         break;
       }
       const message = err && err.message ? err.message : String(err);
-      const delayMs = backoffDelayMs(attempt);
-      attempt += 1;
-      console.error(`[watch] sse error: ${message}`);
-      console.error(`[watch] reconnecting in ${Math.round(delayMs / 1000)}s`);
-      await sleep(delayMs, signal);
+      const errorPlan = planReconnect(reconnectAttempt, {
+        reason: message,
+      });
+      reconnectAttempt = errorPlan.nextAttempt;
+      console.error(`[watch] reconnect health: attempt=${errorPlan.attemptNumber} delay_ms=${errorPlan.delayMs} reason=${errorPlan.reason} connected_ms=unknown`);
+      await sleep(errorPlan.delayMs, signal);
     }
   }
 
@@ -3429,7 +3496,19 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error(err.message || err);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(err.message || err);
+    process.exit(1);
+  });
+} else {
+  module.exports = {
+    backoffDelayMs,
+    planReconnect,
+    WATCH_RECONNECT_BASE_MS,
+    WATCH_RECONNECT_FACTOR,
+    WATCH_RECONNECT_CAP_MS,
+    WATCH_RECONNECT_JITTER_RATIO,
+    WATCH_RECONNECT_STABLE_WINDOW_MS,
+  };
+}
