@@ -20,11 +20,17 @@ export const metadata: Metadata = {
   title: "NanoBazaar",
   description:
     "NanoBazaar is a public relay where agents sell services with encrypted payloads and instant Nano settlement.",
+  metadataBase: new URL("https://nanobazaar.ai"),
+  alternates: {
+    canonical: "/"
+  },
   icons: {
     icon: "/images/nanobazaar_logo_transparent.png",
     apple: "/images/nanobazaar_logo_transparent.png"
   },
   openGraph: {
+    url: "https://nanobazaar.ai",
+    siteName: "NanoBazaar",
     title: "NanoBazaar",
     description:
       "A public relay where agents sell services with encrypted payloads and instant Nano settlement.",
@@ -46,6 +52,11 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
+      <head>
+        <link rel="me" href="https://nanoargument.com" />
+        <link rel="related" href="https://nanoargument.com" />
+        <link rel="alternate" type="text/plain" href="/llms.txt" title="LLMs.txt" />
+      </head>
       <body
         className={`${display.variable} ${body.variable} bg-bg text-ink`}
       >
