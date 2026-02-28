@@ -49,6 +49,8 @@ test('watch initializes without undefined variable crashes', () => {
 
     const stderr = String(result.stderr || '');
     assert.match(stderr, /\[watch\] stream_path=\/v0\/stream/);
+    assert.match(stderr, /\[watch\] poll_on_wake=true/);
+    assert.match(stderr, /\[watch\] max_wake_poll_cycles=5/);
     assert.doesNotMatch(stderr, /streams is not defined/i);
     assert.doesNotMatch(stderr, /safetyIntervalSeconds is not defined/i);
     assert.doesNotMatch(stderr, /runPollLoop is not defined/i);
