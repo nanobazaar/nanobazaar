@@ -4,6 +4,12 @@ All notable changes to `nanobazaar-cli` are documented in this file.
 
 This project follows Semantic Versioning.
 
+## [Unreleased]
+
+### Changed
+- `nanobazaar watch` now polls on wake by default (`--poll-on-wake`) and drains multiple poll cycles (`--max-wake-poll-cycles`, default `5`) before triggering OpenClaw wakeup.
+- Added `--no-poll-on-wake` to keep wake behavior notifier-only when explicitly desired.
+
 ## [2.0.5] - 2026-02-11
 
 ### Fixed

@@ -1283,8 +1283,9 @@ Commands:
   watch [--stream-path /v0/stream]
         [--state-path <path>] [--openclaw-bin <bin>] [--event-text <text>]
         [--mode now|next] [--no-openclaw]
-                             Maintain SSE connection; wake OpenClaw on relay wake events.
-                             Does not poll or ack (OpenClaw should run /nanobazaar poll).
+        [--poll-on-wake|--no-poll-on-wake] [--max-wake-poll-cycles <n>]
+                             Maintain SSE connection; on relay wake events, optionally poll until drained,
+                             then wake OpenClaw.
 
 Global flags:
   --help                     Show this help
@@ -3070,7 +3071,7 @@ async function runWatch(argv) {
   }
 
   if (flags.ack !== undefined || flags.fetchPayloads !== undefined || flags.limit !== undefined || flags.output !== undefined || flags.printPolls !== undefined || flags.types !== undefined) {
-    throw new Error('watch no longer polls. Remove polling flags (--no-ack/--no-fetch-payloads/--limit/--types/--print-polls/--output) and retry.');
+    throw new Error('watch manages polling internally on wake. Remove polling flags (--no-ack/--no-fetch-payloads/--limit/--types/--print-polls/--output) and retry.');
   }
 
   if (flags.safetyWakeInterval !== undefined || flags.safetyPollInterval !== undefined) {
@@ -3081,12 +3082,19 @@ async function runWatch(argv) {
   const mode = String(flags.mode || 'now');
   const eventText = String(flags.eventText || 'NanoBazaar: new events');
   const openclawEnabled = flags.openclaw !== false;
+  const pollOnWake = flags.pollOnWake !== false;
+  const maxWakePollCyclesRaw = Number(flags.maxWakePollCycles || 5);
+  const maxWakePollCycles = Number.isFinite(maxWakePollCyclesRaw)
+    ? Math.max(1, Math.floor(maxWakePollCyclesRaw))
+    : 5;
 
   debugLog('init', {
     relay_url: config.relay_url,
     state_path: statePath,
     stream_path: streamPath,
     openclaw_enabled: openclawEnabled,
+    poll_on_wake: pollOnWake,
+    max_wake_poll_cycles: maxWakePollCycles,
   });
 
   let openclawMissing = false;
@@ -3113,6 +3121,25 @@ async function runWatch(argv) {
     return true;
   }
 
+  async function pollOnWakeUntilDrained(reason) {
+    if (!pollOnWake) {
+      return;
+    }
+
+    let totalEvents = 0;
+    for (let cycle = 1; cycle <= maxWakePollCycles; cycle += 1) {
+      const {events, ackedId} = await runPoll([], {quiet: true});
+      const count = Array.isArray(events) ? events.length : 0;
+      totalEvents += count;
+      console.error(`[watch] poll wake=${reason} cycle=${cycle} events=${count} acked=${ackedId !== undefined ? ackedId : 'n/a'}`);
+      if (count === 0) {
+        return;
+      }
+    }
+
+    console.error(`[watch] poll wake=${reason} reached max cycles (${maxWakePollCycles}); events may remain. total_events=${totalEvents}`);
+  }
+
   async function runWakeLoop(reason) {
     queuedReason = reason;
     wakeQueued = true;
@@ -3125,6 +3152,16 @@ async function runWatch(argv) {
         wakeQueued = false;
         const label = queuedReason || reason;
         queuedReason = null;
+
+        try {
+          await pollOnWakeUntilDrained(label);
+        } catch (err) {
+          const message = err && err.message ? err.message : String(err);
+          console.error(`[watch] poll failed (${label}): ${message}`);
+          if (debugLog) {
+            debugLog('poll on wake failed', {reason: label, error: message});
+          }
+        }
 
         // Best-effort: waking OpenClaw can be retried on the next wake event.
         const didWake = triggerOpenclawWake(label);
@@ -3149,6 +3186,8 @@ async function runWatch(argv) {
   console.error(`[watch] relay=${config.relay_url}`);
   console.error(`[watch] state_path=${statePath}`);
   console.error(`[watch] stream_path=${streamPath}`);
+  console.error(`[watch] poll_on_wake=${pollOnWake}`);
+  console.error(`[watch] max_wake_poll_cycles=${maxWakePollCycles}`);
   console.error(`[watch] reconnect_backoff_base_ms=${WATCH_RECONNECT_BASE_MS}`);
   console.error(`[watch] reconnect_backoff_factor=${WATCH_RECONNECT_FACTOR}`);
   console.error(`[watch] reconnect_backoff_cap_ms=${WATCH_RECONNECT_CAP_MS}`);
