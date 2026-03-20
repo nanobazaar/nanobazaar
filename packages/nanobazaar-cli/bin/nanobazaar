@@ -884,6 +884,413 @@ function writeJsonFile(filePath, data, compact) {
   ensurePrivateFile(filePath);
 }
 
+function writeTextFile(filePath, text) {
+  fs.mkdirSync(path.dirname(filePath), {recursive: true});
+  fs.writeFileSync(filePath, String(text));
+  ensurePrivateFile(filePath);
+}
+
+const PLAYBOOK_ROOT_DIRNAME = 'nanobazaar';
+const PLAYBOOK_NOTES_HEADING = '## Operator Notes';
+
+function resolvePlaybookRoot(workspaceDir) {
+  const base = workspaceDir ? path.resolve(String(workspaceDir)) : process.cwd();
+  return path.join(base, PLAYBOOK_ROOT_DIRNAME);
+}
+
+function resolveOfferPlaybookPath(offerId, workspaceDir) {
+  const safe = safeIdPart(offerId) || `offer_${sha256Hex(String(offerId || ''))}`;
+  return path.join(resolvePlaybookRoot(workspaceDir), 'offers', `${safe}.md`);
+}
+
+function resolveJobPlaybookPath(jobId, workspaceDir) {
+  const safe = safeIdPart(jobId) || `job_${sha256Hex(String(jobId || ''))}`;
+  return path.join(resolvePlaybookRoot(workspaceDir), 'jobs', `${safe}.md`);
+}
+
+function normalizeArray(value) {
+  if (Array.isArray(value)) {
+    return value.filter((entry) => entry !== undefined && entry !== null && String(entry).trim() !== '');
+  }
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return [];
+  }
+  return [value];
+}
+
+function formatValue(value) {
+  if (value === undefined || value === null || value === '') {
+    return '(unknown)';
+  }
+  if (typeof value === 'object') {
+    return stableJsonStringify(value);
+  }
+  return String(value);
+}
+
+function formatMultilineValue(value) {
+  const text = value === undefined || value === null ? '' : String(value);
+  if (!text) {
+    return '  (none)';
+  }
+  return text.split(/\r?\n/).map((line) => `  ${line}`).join('\n');
+}
+
+function formatBulletList(values, emptyValue) {
+  const list = normalizeArray(values);
+  if (list.length === 0) {
+    return `- ${emptyValue}`;
+  }
+  return list.map((value) => `- ${formatValue(value)}`).join('\n');
+}
+
+function extractOperatorNotes(existingText) {
+  if (!existingText) {
+    return '';
+  }
+  const marker = `\n${PLAYBOOK_NOTES_HEADING}\n`;
+  const exactIndex = existingText.indexOf(marker);
+  if (exactIndex >= 0) {
+    return existingText.slice(exactIndex + marker.length).trim();
+  }
+  if (existingText.startsWith(`${PLAYBOOK_NOTES_HEADING}\n`)) {
+    return existingText.slice(PLAYBOOK_NOTES_HEADING.length + 1).trim();
+  }
+  return '';
+}
+
+function readExistingOperatorNotes(filePath) {
+  try {
+    return extractOperatorNotes(fs.readFileSync(filePath, 'utf8'));
+  } catch (_) {
+    return '';
+  }
+}
+
+function appendStatusTimeline(list, entry) {
+  const next = Array.isArray(list) ? list.slice() : [];
+  const text = String(entry || '').trim();
+  if (!text) {
+    return next;
+  }
+  if (next[next.length - 1] === text) {
+    return next;
+  }
+  next.push(text);
+  return next;
+}
+
+function deriveJobPlaybookFields(job) {
+  const charge = isPlainObject(job && job.charge) ? job.charge : {};
+  const paymentEvidence = isPlainObject(job && job.payment_evidence) ? job.payment_evidence : {};
+  const payloadRefs = normalizeArray(job && job.delivery_artifacts);
+  return {
+    job_id: job && job.job_id ? String(job.job_id) : '',
+    offer_id: job && job.offer_id ? String(job.offer_id) : '',
+    buyer_bot_id: job && job.buyer_bot_id ? String(job.buyer_bot_id) : '',
+    seller_bot_id: job && job.seller_bot_id ? String(job.seller_bot_id) : '',
+    price_raw: job && job.price_raw ? String(job.price_raw) : '',
+    price_xno: rawToXnoString(job && job.price_raw),
+    request_payload_summary: job && job.request_payload_summary ? String(job.request_payload_summary) : '',
+    charge_id: charge.charge_id || job.charge_id || '',
+    charge_address: charge.address || job.charge_address || '',
+    charge_amount_raw: charge.amount_raw || job.charge_amount_raw || '',
+    charge_expires_at: charge.charge_expires_at || job.charge_expires_at || '',
+    payment_sent_at: job && job.payment_sent_at ? String(job.payment_sent_at) : '',
+    payment_verified_at: job && job.payment_verified_at ? String(job.payment_verified_at) : (job && job.paid_at ? String(job.paid_at) : ''),
+    delivery_payload_format: job && job.delivery_payload_format ? String(job.delivery_payload_format) : '',
+    delivery_artifacts: payloadRefs,
+    payment_status: job && job.payment_status ? String(job.payment_status) : '',
+    payment_evidence: Object.keys(paymentEvidence).length > 0 ? paymentEvidence : null,
+    status_timeline: normalizeArray(job && job.status_timeline),
+    last_updated_at: job && job.last_updated_at ? String(job.last_updated_at) : new Date().toISOString(),
+  };
+}
+
+function formatOfferPlaybook(offer, notes) {
+  const tags = normalizeArray(offer && offer.tags);
+  const lines = [
+    `# Offer ${formatValue(offer && offer.offer_id)}`,
+    '',
+    `offer_id: ${formatValue(offer && offer.offer_id)}`,
+    `title: ${formatValue(offer && offer.title)}`,
+    `status: ${formatValue(offer && offer.status)}`,
+    `tags: ${tags.length > 0 ? tags.join(', ') : '(none)'}`,
+    `price_raw: ${formatValue(offer && offer.price_raw)}`,
+    `price_xno: ${formatValue(rawToXnoString(offer && offer.price_raw))}`,
+    `request_schema_hint:`,
+    formatMultilineValue(offer && offer.request_schema_hint),
+    `fulfillment_steps:`,
+    '- TODO: define the exact fulfillment workflow for this offer.',
+    `delivery_payload_format:`,
+    '- TODO: document the deliverable payload shape and required fields.',
+    `tooling_commands_or_links:`,
+    '- TODO: add any scripts, commands, or references needed for fulfillment.',
+    `last_updated_at: ${formatValue(offer && offer.last_updated_at)}`,
+    '',
+    PLAYBOOK_NOTES_HEADING,
+    notes || 'Add manual fulfillment notes here. This section is preserved across CLI updates.',
+    '',
+  ];
+  return `${lines.join('\n')}`;
+}
+
+function formatJobPlaybook(job, notes) {
+  const fields = deriveJobPlaybookFields(job);
+  const lines = [
+    `# Job ${formatValue(fields.job_id)}`,
+    '',
+    `job_id: ${formatValue(fields.job_id)}`,
+    `offer_id: ${formatValue(fields.offer_id)}`,
+    `buyer_bot_id: ${formatValue(fields.buyer_bot_id)}`,
+    `seller_bot_id: ${formatValue(fields.seller_bot_id)}`,
+    `price_raw: ${formatValue(fields.price_raw)}`,
+    `price_xno: ${formatValue(fields.price_xno)}`,
+    `request_payload_summary:`,
+    formatMultilineValue(fields.request_payload_summary),
+    `charge_id: ${formatValue(fields.charge_id)}`,
+    `charge_address: ${formatValue(fields.charge_address)}`,
+    `charge_amount_raw: ${formatValue(fields.charge_amount_raw)}`,
+    `charge_expires_at: ${formatValue(fields.charge_expires_at)}`,
+    `payment_sent_at: ${formatValue(fields.payment_sent_at)}`,
+    `payment_verified_at: ${formatValue(fields.payment_verified_at)}`,
+    `payment_status: ${formatValue(fields.payment_status)}`,
+    `delivery_payload_format: ${formatValue(fields.delivery_payload_format)}`,
+    `delivery_artifacts:`,
+    formatBulletList(fields.delivery_artifacts, '(none)'),
+    `status_timeline:`,
+    formatBulletList(fields.status_timeline, '(none)'),
+    `payment_evidence:`,
+    fields.payment_evidence ? formatMultilineValue(stableJsonStringify(fields.payment_evidence)) : '  (none)',
+    `last_updated_at: ${formatValue(fields.last_updated_at)}`,
+    '',
+    PLAYBOOK_NOTES_HEADING,
+    notes || 'Add manual fulfillment notes here. This section is preserved across CLI updates.',
+    '',
+  ];
+  return `${lines.join('\n')}`;
+}
+
+function writeOfferPlaybook({offer, workspaceDir}) {
+  if (!offer || !offer.offer_id) {
+    return null;
+  }
+  const playbookPath = resolveOfferPlaybookPath(offer.offer_id, workspaceDir);
+  const notes = readExistingOperatorNotes(playbookPath);
+  writeTextFile(playbookPath, formatOfferPlaybook(offer, notes));
+  return playbookPath;
+}
+
+function writeJobPlaybook({job, workspaceDir}) {
+  if (!job || !job.job_id) {
+    return null;
+  }
+  const playbookPath = resolveJobPlaybookPath(job.job_id, workspaceDir);
+  const notes = readExistingOperatorNotes(playbookPath);
+  writeTextFile(playbookPath, formatJobPlaybook(job, notes));
+  return playbookPath;
+}
+
+function summarizeRequestPayload({state, jobId}) {
+  if (!state || !jobId) {
+    return '';
+  }
+  const payloadId = (() => {
+    const payloadMap = ensureMap(state.known_payloads || {}, 'payload_id');
+    for (const entry of Object.values(payloadMap)) {
+      if (entry && entry.job_id === jobId && entry.payload_kind === 'request' && entry.cached_path) {
+        return entry.payload_id;
+      }
+    }
+    return null;
+  })();
+  if (!payloadId) {
+    return '';
+  }
+  const payloadMeta = ensureMap(state.known_payloads || {}, 'payload_id')[payloadId];
+  if (!payloadMeta || !payloadMeta.cached_path || !fs.existsSync(payloadMeta.cached_path)) {
+    return `request payload cached as ${payloadId}`;
+  }
+  try {
+    const payload = readJsonFile(payloadMeta.cached_path, 'cached payload');
+    if (payload && payload.body !== undefined) {
+      return previewString(typeof payload.body === 'string' ? payload.body : stableJsonStringify(payload.body), 500);
+    }
+  } catch (_) {
+    // ignore cache parse errors; fallback below
+  }
+  return `request payload cached as ${payloadId}`;
+}
+
+function upsertKnownOffer(state, offer) {
+  if (!offer || !offer.offer_id) {
+    return null;
+  }
+  state.known_offers = ensureMap(state.known_offers, 'offer_id');
+  const current = state.known_offers[offer.offer_id];
+  state.known_offers[offer.offer_id] = Object.assign({}, current || {}, offer);
+  return state.known_offers[offer.offer_id];
+}
+
+function upsertKnownJob(state, job) {
+  if (!job || !job.job_id) {
+    return null;
+  }
+  state.known_jobs = ensureMap(state.known_jobs, 'job_id');
+  const current = state.known_jobs[job.job_id];
+  const merged = Object.assign({}, current || {}, job);
+  if (current && Array.isArray(current.status_timeline) && !Array.isArray(job.status_timeline)) {
+    merged.status_timeline = current.status_timeline.slice();
+  }
+  state.known_jobs[job.job_id] = merged;
+  return merged;
+}
+
+function applyEventToKnownState(state, event, options) {
+  const opts = options || {};
+  const eventType = extractEventType(event);
+  const data = extractEventData(event);
+  const now = opts.now || new Date().toISOString();
+  if (!eventType) {
+    return {job: null, offer: null};
+  }
+
+  if (eventType === 'offer.cancelled' && data.offer_id) {
+    const offer = upsertKnownOffer(state, {
+      offer_id: String(data.offer_id),
+      status: 'CANCELLED',
+      cancelled_at: data.cancelled_at ? String(data.cancelled_at) : now,
+      last_updated_at: now,
+    });
+    return {job: null, offer};
+  }
+
+  if (!data.job_id) {
+    return {job: null, offer: null};
+  }
+
+  const jobId = String(data.job_id);
+  const job = upsertKnownJob(state, {job_id: jobId, last_updated_at: now});
+  if (!job.status_timeline) {
+    job.status_timeline = [];
+  }
+
+  switch (eventType) {
+    case 'job.requested':
+      Object.assign(job, {
+        offer_id: data.offer_id ? String(data.offer_id) : job.offer_id,
+        buyer_bot_id: data.buyer_bot_id ? String(data.buyer_bot_id) : job.buyer_bot_id,
+        seller_bot_id: data.seller_bot_id ? String(data.seller_bot_id) : job.seller_bot_id,
+        price_raw: data.price_raw ? String(data.price_raw) : job.price_raw,
+        turnaround_seconds: data.turnaround_seconds !== undefined ? Number(data.turnaround_seconds) : job.turnaround_seconds,
+        job_expires_at: data.job_expires_at ? String(data.job_expires_at) : job.job_expires_at,
+        request_payload_id: data.request_payload_id ? String(data.request_payload_id) : job.request_payload_id,
+        status: 'REQUESTED',
+      });
+      job.request_payload_summary = job.request_payload_summary || summarizeRequestPayload({state, jobId});
+      job.status_timeline = appendStatusTimeline(job.status_timeline, `${now} requested`);
+      break;
+    case 'job.charge_created':
+      Object.assign(job, {
+        status: 'CHARGE_CREATED',
+        charge: {
+          charge_id: data.charge_id ? String(data.charge_id) : '',
+          address: data.address ? String(data.address) : '',
+          amount_raw: data.amount_raw ? String(data.amount_raw) : '',
+          charge_expires_at: data.charge_expires_at ? String(data.charge_expires_at) : '',
+          charge_sig_ed25519: data.charge_sig_ed25519 ? String(data.charge_sig_ed25519) : '',
+        },
+      });
+      job.status_timeline = appendStatusTimeline(job.status_timeline, `${now} charge created`);
+      break;
+    case 'job.payment_sent':
+      job.payment_sent_at = data.sent_at ? String(data.sent_at) : now;
+      job.payment_status = 'PENDING';
+      job.status_timeline = appendStatusTimeline(job.status_timeline, `${now} payment sent`);
+      break;
+    case 'job.charge_reissue_requested':
+      job.status_timeline = appendStatusTimeline(job.status_timeline, `${now} charge reissue requested`);
+      break;
+    case 'job.paid':
+      job.status = 'PAID';
+      job.payment_status = 'CONFIRMED';
+      job.paid_at = data.paid_at ? String(data.paid_at) : now;
+      job.payment_verified_at = job.paid_at;
+      job.payment_evidence = {
+        verifier: data.verifier ? String(data.verifier) : '',
+        payment_block_hash: data.payment_block_hash ? String(data.payment_block_hash) : '',
+        observed_at: data.observed_at ? String(data.observed_at) : job.paid_at,
+        amount_raw_received: data.amount_raw_received ? String(data.amount_raw_received) : '',
+      };
+      job.status_timeline = appendStatusTimeline(job.status_timeline, `${now} paid`);
+      break;
+    case 'job.payload_available': {
+      const payloadId = data.payload_id ? String(data.payload_id) : '';
+      if (payloadId) {
+        job.delivery_artifacts = normalizeArray(job.delivery_artifacts);
+        if (!job.delivery_artifacts.includes(payloadId)) {
+          job.delivery_artifacts.push(payloadId);
+        }
+      }
+      if (data.payload_kind) {
+        job.delivery_payload_format = String(data.payload_kind);
+      }
+      job.status = data.payload_kind === 'deliverable' ? 'DELIVERED' : job.status;
+      job.status_timeline = appendStatusTimeline(job.status_timeline, `${now} payload available${payloadId ? ` (${payloadId})` : ''}`);
+      break;
+    }
+    case 'job.cancelled':
+      job.status = 'CANCELLED';
+      job.status_timeline = appendStatusTimeline(job.status_timeline, `${now} cancelled`);
+      break;
+    case 'job.expired':
+      job.status = 'EXPIRED';
+      job.status_timeline = appendStatusTimeline(job.status_timeline, `${now} expired`);
+      break;
+    default:
+      break;
+  }
+
+  job.last_updated_at = now;
+  return {job, offer: null};
+}
+
+function syncOperatorPlaybooks({state, statePath, workspaceDir, offerIds, jobIds}) {
+  const resolvedWorkspaceDir = workspaceDir || process.cwd();
+  const offerMap = ensureMap(state && state.known_offers ? state.known_offers : {}, 'offer_id');
+  const jobMap = ensureMap(state && state.known_jobs ? state.known_jobs : {}, 'job_id');
+  const written = {offers: [], jobs: []};
+
+  for (const offerId of new Set(normalizeArray(offerIds).map((value) => String(value)))) {
+    const offer = offerMap[offerId];
+    if (!offer) {
+      continue;
+    }
+    const playbookPath = writeOfferPlaybook({offer, workspaceDir: resolvedWorkspaceDir});
+    if (playbookPath) {
+      written.offers.push(playbookPath);
+    }
+  }
+  for (const jobId of new Set(normalizeArray(jobIds).map((value) => String(value)))) {
+    const job = jobMap[jobId];
+    if (!job) {
+      continue;
+    }
+    if (!job.request_payload_summary) {
+      job.request_payload_summary = summarizeRequestPayload({state, jobId});
+    }
+    const playbookPath = writeJobPlaybook({job, workspaceDir: resolvedWorkspaceDir});
+    if (playbookPath) {
+      written.jobs.push(playbookPath);
+    }
+  }
+
+  if (statePath) {
+    saveStateMerged(statePath, state);
+  }
+  return written;
+}
+
 async function fetchBot({botId, config, keys, identity}) {
   const result = await signedRequest({
     method: 'GET',
@@ -1606,7 +2013,9 @@ function collectTags(flags) {
 async function runOfferCreate(argv) {
   const {flags} = parseArgs(argv);
   const config = buildConfig();
-  const state = loadState(config.state_path);
+  const statePath = expandHomePath(String(flags.statePath || config.state_path));
+  const workspaceDir = flags.workspaceDir || process.cwd();
+  const state = loadState(statePath);
   const {keys} = requireKeys(state);
   const identity = deriveIdentity(keys);
 
@@ -1655,7 +2064,12 @@ async function runOfferCreate(argv) {
   state.bot_id = identity.botId;
   state.signing_kid = identity.signingKid;
   state.encryption_kid = identity.encryptionKid;
-  saveStateMerged(config.state_path, state);
+  syncOperatorPlaybooks({
+    state,
+    statePath,
+    workspaceDir,
+    offerIds: result.data && result.data.offer_id ? [result.data.offer_id] : [],
+  });
 
   printJson(result.data, !!flags.compact);
 }
@@ -1668,7 +2082,9 @@ async function runOfferCancel(argv) {
   }
 
   const config = buildConfig();
-  const state = loadState(config.state_path);
+  const statePath = expandHomePath(String(flags.statePath || config.state_path));
+  const workspaceDir = flags.workspaceDir || process.cwd();
+  const state = loadState(statePath);
   const {keys} = requireKeys(state);
   const identity = deriveIdentity(keys);
 
@@ -1693,7 +2109,12 @@ async function runOfferCancel(argv) {
   state.bot_id = identity.botId;
   state.signing_kid = identity.signingKid;
   state.encryption_kid = identity.encryptionKid;
-  saveStateMerged(config.state_path, state);
+  syncOperatorPlaybooks({
+    state,
+    statePath,
+    workspaceDir,
+    offerIds: result.data && result.data.offer_id ? [result.data.offer_id] : [],
+  });
 
   printJson(result.data, !!flags.compact);
 }
@@ -1827,7 +2248,9 @@ async function buildDeliverPayload({keys, senderBotId, recipientBotId, recipient
 async function runJobCreate(argv) {
   const {flags} = parseArgs(argv);
   const config = buildConfig();
-  const state = loadState(config.state_path);
+  const statePath = expandHomePath(String(flags.statePath || config.state_path));
+  const workspaceDir = flags.workspaceDir || process.cwd();
+  const state = loadState(statePath);
   const {keys} = requireKeys(state);
   const identity = deriveIdentity(keys);
 
@@ -1934,7 +2357,22 @@ async function runJobCreate(argv) {
   state.bot_id = identity.botId;
   state.signing_kid = identity.signingKid;
   state.encryption_kid = identity.encryptionKid;
-  saveStateMerged(config.state_path, state);
+  if (result.data && result.data.job_id) {
+    const knownJob = state.known_jobs[result.data.job_id];
+    if (knownJob) {
+      knownJob.request_payload_summary = payloadMeta && payloadMeta.payload_id
+        ? `request payload created locally as ${payloadMeta.payload_id}`
+        : knownJob.request_payload_summary;
+      knownJob.status_timeline = appendStatusTimeline(knownJob.status_timeline, `${new Date().toISOString()} job created`);
+      knownJob.last_updated_at = new Date().toISOString();
+    }
+  }
+  syncOperatorPlaybooks({
+    state,
+    statePath,
+    workspaceDir,
+    jobIds: result.data && result.data.job_id ? [result.data.job_id] : [],
+  });
 
   printJson(result.data, !!flags.compact);
 }
@@ -2065,7 +2503,20 @@ async function runJobCharge(argv) {
   state.bot_id = identity.botId;
   state.signing_kid = identity.signingKid;
   state.encryption_kid = identity.encryptionKid;
-  saveStateMerged(statePath, state);
+  if (result.data && result.data.job_id) {
+    const knownJob = state.known_jobs[result.data.job_id];
+    if (knownJob) {
+      knownJob.charge = payload;
+      knownJob.status_timeline = appendStatusTimeline(knownJob.status_timeline, `${new Date().toISOString()} charge created`);
+      knownJob.last_updated_at = new Date().toISOString();
+    }
+  }
+  syncOperatorPlaybooks({
+    state,
+    statePath,
+    workspaceDir: flags.workspaceDir || process.cwd(),
+    jobIds: result.data && result.data.job_id ? [result.data.job_id] : [],
+  });
 
   printJson(result.data, !!flags.compact);
 }
@@ -2131,7 +2582,22 @@ async function runJobMarkPaid(argv) {
   state.bot_id = identity.botId;
   state.signing_kid = identity.signingKid;
   state.encryption_kid = identity.encryptionKid;
-  saveStateMerged(statePath, state);
+  if (result.data && result.data.job_id) {
+    const knownJob = state.known_jobs[result.data.job_id];
+    if (knownJob) {
+      knownJob.payment_status = 'CONFIRMED';
+      knownJob.payment_verified_at = requestBody && requestBody.observed_at ? String(requestBody.observed_at) : new Date().toISOString();
+      knownJob.payment_evidence = Object.assign({}, requestBody || {});
+      knownJob.status_timeline = appendStatusTimeline(knownJob.status_timeline, `${new Date().toISOString()} marked paid`);
+      knownJob.last_updated_at = new Date().toISOString();
+    }
+  }
+  syncOperatorPlaybooks({
+    state,
+    statePath,
+    workspaceDir: flags.workspaceDir || process.cwd(),
+    jobIds: result.data && result.data.job_id ? [result.data.job_id] : [],
+  });
 
   printJson(result.data, !!flags.compact);
 }
@@ -2218,7 +2684,24 @@ async function runJobDeliver(argv) {
   state.bot_id = identity.botId;
   state.signing_kid = identity.signingKid;
   state.encryption_kid = identity.encryptionKid;
-  saveStateMerged(statePath, state);
+  if (result.data && result.data.job_id) {
+    const knownJob = state.known_jobs[result.data.job_id];
+    if (knownJob) {
+      knownJob.delivery_payload_format = built.envelope.payload_kind;
+      knownJob.delivery_artifacts = normalizeArray(knownJob.delivery_artifacts);
+      if (!knownJob.delivery_artifacts.includes(payloadId)) {
+        knownJob.delivery_artifacts.push(payloadId);
+      }
+      knownJob.status_timeline = appendStatusTimeline(knownJob.status_timeline, `${new Date().toISOString()} payload delivered (${payloadId})`);
+      knownJob.last_updated_at = new Date().toISOString();
+    }
+  }
+  syncOperatorPlaybooks({
+    state,
+    statePath,
+    workspaceDir: flags.workspaceDir || process.cwd(),
+    jobIds: result.data && result.data.job_id ? [result.data.job_id] : [],
+  });
 
   printJson(result.data, !!flags.compact);
 }
@@ -2231,7 +2714,8 @@ async function runJobReissueRequest(argv) {
   }
 
   const config = buildConfig();
-  const state = loadState(config.state_path);
+  const statePath = expandHomePath(String(flags.statePath || config.state_path));
+  const state = loadState(statePath);
   const {keys} = requireKeys(state);
   const identity = deriveIdentity(keys);
 
@@ -2256,6 +2740,15 @@ async function runJobReissueRequest(argv) {
   if (!result.response.ok) {
     throw new Error(`Reissue request failed (${result.response.status}): ${result.text || result.response.statusText}`);
   }
+
+  const knownJob = upsertKnownJob(state, {job_id: String(jobId), last_updated_at: new Date().toISOString()});
+  knownJob.status_timeline = appendStatusTimeline(knownJob.status_timeline, `${new Date().toISOString()} charge reissue requested`);
+  syncOperatorPlaybooks({
+    state,
+    statePath,
+    workspaceDir: flags.workspaceDir || process.cwd(),
+    jobIds: [String(jobId)],
+  });
 
   printJson(result.data, !!flags.compact);
 }
@@ -2339,7 +2832,19 @@ async function runJobReissueCharge(argv) {
   state.bot_id = identity.botId;
   state.signing_kid = identity.signingKid;
   state.encryption_kid = identity.encryptionKid;
-  saveStateMerged(statePath, state);
+  if (result.data && result.data.job_id) {
+    const knownJob = state.known_jobs[result.data.job_id];
+    if (knownJob) {
+      knownJob.status_timeline = appendStatusTimeline(knownJob.status_timeline, `${new Date().toISOString()} charge reissued`);
+      knownJob.last_updated_at = new Date().toISOString();
+    }
+  }
+  syncOperatorPlaybooks({
+    state,
+    statePath,
+    workspaceDir: flags.workspaceDir || process.cwd(),
+    jobIds: result.data && result.data.job_id ? [result.data.job_id] : [],
+  });
 
   printJson(result.data, !!flags.compact);
 }
@@ -2374,7 +2879,8 @@ async function runJobPaymentSent(argv) {
   }
 
   const config = buildConfig();
-  const state = loadState(config.state_path);
+  const statePath = expandHomePath(String(flags.statePath || config.state_path));
+  const state = loadState(statePath);
   const {keys} = requireKeys(state);
   const identity = deriveIdentity(keys);
 
@@ -2391,6 +2897,20 @@ async function runJobPaymentSent(argv) {
   if (!result.response.ok) {
     throw new Error(`Payment sent failed (${result.response.status}): ${result.text || result.response.statusText}`);
   }
+
+  const knownJob = upsertKnownJob(state, {
+    job_id: String(jobId),
+    payment_sent_at: payload && payload.sent_at ? String(payload.sent_at) : new Date().toISOString(),
+    payment_status: 'PENDING',
+    last_updated_at: new Date().toISOString(),
+  });
+  knownJob.status_timeline = appendStatusTimeline(knownJob.status_timeline, `${new Date().toISOString()} payment sent`);
+  syncOperatorPlaybooks({
+    state,
+    statePath,
+    workspaceDir: flags.workspaceDir || process.cwd(),
+    jobIds: [String(jobId)],
+  });
 
   printJson(result.data, !!flags.compact);
 }
@@ -2553,6 +3073,7 @@ async function pollOnce({
   config,
   state,
   statePath,
+  workspaceDir,
   keys,
   identity,
   since,
@@ -2648,6 +3169,30 @@ async function pollOnce({
     }
   }
 
+  if (events.length > 0) {
+    const touchedOfferIds = [];
+    const touchedJobIds = [];
+    const now = new Date().toISOString();
+    for (const event of events) {
+      const updated = applyEventToKnownState(state, event, {now});
+      if (updated.offer && updated.offer.offer_id) {
+        touchedOfferIds.push(updated.offer.offer_id);
+      }
+      if (updated.job && updated.job.job_id) {
+        touchedJobIds.push(updated.job.job_id);
+      }
+    }
+    if (touchedOfferIds.length > 0 || touchedJobIds.length > 0) {
+      syncOperatorPlaybooks({
+        state,
+        statePath: effectiveStatePath,
+        workspaceDir: workspaceDir || process.cwd(),
+        offerIds: touchedOfferIds,
+        jobIds: touchedJobIds,
+      });
+    }
+  }
+
   let ackedId = state.last_acked_event_id || 0;
   let maxEventId = 0;
   if (events.length > 0 && ack !== false) {
@@ -2722,6 +3267,7 @@ async function runPoll(argv, options) {
     config,
     state,
     statePath: config.state_path,
+    workspaceDir: flags.workspaceDir || process.cwd(),
     keys,
     identity,
     since,
@@ -3490,12 +4036,18 @@ if (require.main === module) {
   });
 } else {
   module.exports = {
+    applyEventToKnownState,
     backoffDelayMs,
     planReconnect,
+    resolveJobPlaybookPath,
+    resolveOfferPlaybookPath,
+    syncOperatorPlaybooks,
     WATCH_RECONNECT_BASE_MS,
     WATCH_RECONNECT_FACTOR,
     WATCH_RECONNECT_CAP_MS,
     WATCH_RECONNECT_JITTER_RATIO,
     WATCH_RECONNECT_STABLE_WINDOW_MS,
+    writeJobPlaybook,
+    writeOfferPlaybook,
   };
 }
