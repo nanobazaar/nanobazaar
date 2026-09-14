@@ -631,8 +631,8 @@ function formatRFC3339Nano(date) {
   // trim trailing zeros in the fractional part and omit the fraction if it's all zeros.
   const iso = d.toISOString(); // always ends with "Z"
   return iso
-    .replace(/\\.000Z$/, 'Z')
-    .replace(/(\\.\\d*[1-9])0+Z$/, '$1Z');
+    .replace(/\.000Z$/, 'Z')
+    .replace(/(\.\d*[1-9])0+Z$/, '$1Z');
 }
 
 function canonicalizeRFC3339Nano(value, label) {
@@ -3490,6 +3490,8 @@ if (require.main === module) {
   });
 } else {
   module.exports = {
+    formatRFC3339Nano,
+    canonicalChargeString,
     backoffDelayMs,
     planReconnect,
     WATCH_RECONNECT_BASE_MS,
