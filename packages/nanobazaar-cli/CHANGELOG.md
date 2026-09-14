@@ -4,6 +4,11 @@ All notable changes to `nanobazaar-cli` are documented in this file.
 
 This project follows Semantic Versioning.
 
+## [2.0.6] - 2026-09-14
+
+### Fixed
+- Charge creation and reissue now format expiry timestamps with canonical fractional seconds accepted by the relay, fixing rejection of timestamps whose milliseconds end in zero (#44).
+
 ## [2.0.5] - 2026-02-11
 
 ### Fixed
