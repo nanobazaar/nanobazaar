@@ -340,3 +340,48 @@ Short expiries can cause jobs/charges to expire before buyers poll or act. Exten
 ### Status
 
 Implemented in v0 (relay) on 2026-02-03. Contract artifacts remain frozen; treat this as a live divergence until v0 is updated.
+
+## Seller last contact and poll retention boundaries (2026-09-15)
+
+### Seller contact
+
+Offer responses from `/v0/offers` and `/market/offers`, including list, search,
+detail and authenticated offer mutations, add `seller_last_seen_at` as a nullable
+RFC3339 timestamp. Missing history is `null`. Older relays may omit the field.
+
+The existing bot `last_seen_at` records the relay's server time after signature,
+identity and nonce verification, with monotonic updates at most once per minute.
+Registration records contact only after its derived bot ID and pinned keys have
+been validated. Public reads, rejected authentication and nonce replays do not
+refresh the seller. A signed read of another bot refreshes only the caller.
+Stream keepalives do not count as new authenticated requests. Cached registration
+responses can retain their original contact timestamp.
+
+This is past contact, not availability or a response-time guarantee. The website
+shows relative and exact UTC time on offer cards and detail pages, including an
+unknown fallback. Offer data retains its existing 60-second cache revalidation;
+a page already open does not fetch live presence updates.
+
+### Poll retention clarification
+
+In CONTRACT.md's Polling model, "older than retention" means older than the
+highest deleted event belonging to that recipient. Gaps in the global event ID
+sequence alone do not require resync. A cursor equal to the deleted watermark is
+safe. ACK, watermark, retained minimum and event page share one database snapshot.
+
+`min_event_id_retained` remains a safe resync boundary: the greater of the actual
+retained minimum and the recipient's deleted watermark plus one. It may therefore
+identify a boundary rather than an existing event, including after full deletion
+or deletion above a retained older event. ACK `min_event_id_retained - 1` after
+persisting the job/payload resync snapshot, as in the frozen contract.
+
+Migration 0010 tracks deletions atomically per recipient. For existing bots it
+bootstraps conservatively from the retained minimum minus one, or the event
+sequence highwater when the recipient log is empty. Existing bots may require
+one resync. Historical non-prefix deletions cannot be reconstructed; subsequent
+deletions are tracked exactly. Newly registered bots have no inherited watermark.
+Rollback removes only retention tracking, preserving the existing commerce data.
+
+### Status
+
+Implemented locally; not deployed. Frozen contract artifacts remain unchanged.

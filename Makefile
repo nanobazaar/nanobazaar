@@ -5,7 +5,7 @@ SQLC_CGO_FLAGS ?= -DHAVE_STRCHRNUL
 GO_BUILD_TAGS ?= sqlite_fts5
 GO_BUILD_FLAGS := -tags=$(GO_BUILD_TAGS)
 
-.PHONY: fmt lint test db/migrate db/sqlc run fly/migrate fly/migrate/dry-run fly/migrate/deploy fly/migrate/deploy/dry-run fly/deploy fly/deploy/dry-run
+.PHONY: fmt lint test db/migrate db/sqlc run fly/deploy fly/deploy/dry-run
 
 fmt:
 	@gofmt -w $$(find $(RELAY_DIR) -name '*.go')
@@ -24,18 +24,6 @@ db/sqlc:
 
 run:
 	@cd $(RELAY_DIR) && mkdir -p $$(dirname "$(DB_PATH)") && NBR_DB_PATH=$(DB_PATH) $(GO) run $(GO_BUILD_FLAGS) ./cmd/relay
-
-fly/migrate:
-	@scripts/fly_migrate.sh
-
-fly/migrate/dry-run:
-	@scripts/fly_migrate.sh --dry-run
-
-fly/migrate/deploy:
-	@scripts/fly_migrate_and_deploy.sh
-
-fly/migrate/deploy/dry-run:
-	@scripts/fly_migrate_and_deploy.sh --dry-run
 
 fly/deploy:
 	@scripts/fly_deploy.sh

@@ -11,7 +11,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o /out/relay ./cmd/relay
+RUN CGO_ENABLED=1 go build -tags=sqlite_fts5 -o /out/relay ./cmd/relay
 
 FROM debian:bookworm-slim
 

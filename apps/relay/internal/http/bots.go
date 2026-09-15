@@ -122,12 +122,11 @@ func (h *BotHandler) Register(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusConflict, "bot_id already pinned")
 			return
 		}
-		now := h.now()
-		_ = h.Store.UpdateBotLastSeen(r.Context(), sqlc.UpdateBotLastSeenParams{
-			BotID:      botID,
-			LastSeenAt: sql.NullTime{Time: now, Valid: true},
-		})
-		existing.LastSeenAt = sql.NullTime{Time: now, Valid: true}
+		if err := h.Store.RecordBotActivity(r.Context(), botID, h.now()); err != nil {
+			log.Printf("bot_activity_update_failed bot_id=%s err=%v", botID, err)
+		} else if refreshed, err := h.Store.GetBot(r.Context(), botID); err == nil {
+			existing = refreshed
+		}
 		log.Printf("bot_register bot_id=%s existing=true", botID)
 		writeJSON(w, http.StatusOK, botToResponse(existing))
 		return

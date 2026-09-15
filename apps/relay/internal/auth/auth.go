@@ -33,6 +33,7 @@ const (
 )
 
 type Store interface {
+	RecordBotActivity(ctx context.Context, botID string, at time.Time) error
 	GetBot(ctx context.Context, botID string) (sqlc.Bot, error)
 	CountNonce(ctx context.Context, arg sqlc.CountNonceParams) (int64, error)
 	InsertNonce(ctx context.Context, arg sqlc.InsertNonceParams) error
@@ -92,6 +93,14 @@ func Middleware(v *Verifier) func(http.Handler) http.Handler {
 				logAuthFailure(r, err.Message)
 				writeError(w, err)
 				return
+			}
+
+			// Registration uses a body-supplied key; the handler binds it to the
+			// caller and pinned keys before recording contact.
+			if !(r.Method == http.MethodPost && r.URL.Path == "/v0/bots") {
+				if err := v.Store.RecordBotActivity(r.Context(), r.Header.Get(headerBotID), v.now()); err != nil {
+					logInternalError(r, "bot_activity_update_failed", http.StatusInternalServerError, err)
+				}
 			}
 
 			if !isMutating(r.Method) {

@@ -77,8 +77,17 @@ func (h *PollHandler) Poll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Retention cleanup can run concurrently. Pin all poll reads to one
+	// snapshot so a page cannot silently lose events after its boundary check.
+	tx, err := h.Store.DB.BeginTx(r.Context(), &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		writeJSONInternalError(w, r, "poll snapshot failed", err)
+		return
+	}
+	defer tx.Rollback()
+	queries := h.Store.Queries.WithTx(tx)
 	lastAcked := int64(0)
-	ack, err := h.Store.GetPollAck(r.Context(), caller)
+	ack, err := queries.GetPollAck(r.Context(), caller)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			writeJSONInternalError(w, r, "poll ack lookup failed", err)
@@ -93,12 +102,17 @@ func (h *PollHandler) Poll(w http.ResponseWriter, r *http.Request) {
 		cursor = lastAcked
 	}
 
-	minEventID, err := h.getMinEventID(r.Context(), caller)
+	retention, err := store.ReadEventRetention(r.Context(), tx, caller)
 	if err != nil {
 		writeJSONInternalError(w, r, "poll min lookup failed", err)
 		return
 	}
-	if minEventID > 0 && cursor < minEventID-1 {
+	minEventID := retention.MinEventIDRetained
+	if cursor < retention.DeletedThroughEventID {
+		if err := tx.Commit(); err != nil {
+			writeJSONInternalError(w, r, "poll snapshot failed", err)
+			return
+		}
 		if h.Metrics != nil {
 			h.Metrics.IncPollGone()
 		}
@@ -113,9 +127,13 @@ func (h *PollHandler) Poll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	types := parseEventTypes(r.URL.Query().Get("types"))
-	events, newestEventTime, err := h.fetchEvents(r.Context(), caller, cursor, limit, types)
+	events, newestEventTime, err := fetchEvents(r.Context(), queries, caller, cursor, limit, types)
 	if err != nil {
 		writeJSONInternalError(w, r, "poll failed", err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		writeJSONInternalError(w, r, "poll snapshot failed", err)
 		return
 	}
 	if h.Metrics != nil && newestEventTime != nil {
@@ -192,45 +210,20 @@ func (h *PollHandler) now() time.Time {
 	return h.Clock().UTC()
 }
 
-func (h *PollHandler) getMinEventID(ctx context.Context, recipient string) (int64, error) {
-	min, err := h.Store.GetMinEventID(ctx, recipient)
-	if err != nil {
-		return 0, err
-	}
-	switch value := min.(type) {
-	case nil:
-		return 0, nil
-	case int64:
-		return value, nil
-	case int32:
-		return int64(value), nil
-	case int:
-		return int64(value), nil
-	case []byte:
-		parsed, err := strconv.ParseInt(string(value), 10, 64)
-		if err != nil {
-			return 0, err
-		}
-		return parsed, nil
-	default:
-		return 0, nil
-	}
-}
-
-func (h *PollHandler) fetchEvents(ctx context.Context, recipient string, sinceID int64, limit int, types map[string]struct{}) ([]pollEvent, *time.Time, error) {
+func fetchEvents(ctx context.Context, queries *sqlc.Queries, recipient string, sinceID int64, limit int, types map[string]struct{}) ([]pollEvent, *time.Time, error) {
 	var (
 		batch []sqlc.Event
 		err   error
 	)
 	if len(types) > 0 {
-		batch, err = h.Store.ListEventsAfterIDByTypes(ctx, sqlc.ListEventsAfterIDByTypesParams{
+		batch, err = queries.ListEventsAfterIDByTypes(ctx, sqlc.ListEventsAfterIDByTypesParams{
 			RecipientBotID: recipient,
 			SinceEventID:   sinceID,
 			EventTypes:     mapKeys(types),
 			Limit:          int64(limit),
 		})
 	} else {
-		batch, err = h.Store.ListEventsAfterID(ctx, sqlc.ListEventsAfterIDParams{
+		batch, err = queries.ListEventsAfterID(ctx, sqlc.ListEventsAfterIDParams{
 			RecipientBotID: recipient,
 			SinceEventID:   sinceID,
 			Limit:          int64(limit),
