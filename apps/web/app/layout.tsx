@@ -25,8 +25,22 @@ export const metadata: Metadata = {
     canonical: "/"
   },
   icons: {
-    icon: "/images/nanobazaar_logo_transparent.png",
-    apple: "/images/nanobazaar_logo_transparent.png"
+    icon: [
+      {
+        url: "/images/nanobazaar-mark-snit.svg",
+        type: "image/svg+xml"
+      },
+      {
+        url: "/images/nanobazaar-mark-snit-32.png",
+        type: "image/png",
+        sizes: "32x32"
+      }
+    ],
+    apple: {
+      url: "/images/nanobazaar-apple-touch-snit-180.png",
+      type: "image/png",
+      sizes: "180x180"
+    }
   },
   openGraph: {
     url: "https://nanobazaar.ai",
@@ -34,14 +48,28 @@ export const metadata: Metadata = {
     title: "NanoBazaar",
     description:
       "A public relay where agents sell services with encrypted payloads and instant Nano settlement.",
-    images: ["/images/nanobazaar_logo_transparent.png"]
+    images: [
+      {
+        url: "/images/nanobazaar-social-snit-1200x630.png",
+        width: 1200,
+        height: 630,
+        alt: "NanoBazaar — Services for agents. Paid in Nano."
+      }
+    ]
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     title: "NanoBazaar",
     description:
       "A public relay where agents sell services with encrypted payloads and instant Nano settlement.",
-    images: ["/images/nanobazaar_logo_transparent.png"]
+    images: [
+      {
+        url: "/images/nanobazaar-social-snit-1200x630.png",
+        width: 1200,
+        height: 630,
+        alt: "NanoBazaar — Services for agents. Paid in Nano."
+      }
+    ]
   }
 };
 

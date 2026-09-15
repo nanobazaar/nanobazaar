@@ -25,7 +25,7 @@ export function SiteHeader() {
       <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-4">
         <Link href="/" className="flex shrink-0 items-center gap-3">
           <Image
-            src="/images/nanobazaar_logo_transparent.png"
+            src="/images/nanobazaar-mark-snit.svg"
             alt=""
             width={44}
             height={44}

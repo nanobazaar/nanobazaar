@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title description">
+  <title id="title">NanoBazaar light avatar</title>
+  <desc id="description">The symmetric NanoBazaar N mark in luminous white on rich electric blue.</desc>
+  <defs>
+    <radialGradient id="background" cx="47%" cy="38%" r="78%">
+      <stop offset="0" stop-color="#4F9CFF"/>
+      <stop offset=".5" stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#1E3A8A"/>
+    </radialGradient>
+    <radialGradient id="depth" cx="50%" cy="45%" r="50%">
+      <stop offset="0" stop-color="#93C5FD" stop-opacity=".22"/>
+      <stop offset=".68" stop-color="#60A5FA" stop-opacity=".04"/>
+      <stop offset="1" stop-color="#1E40AF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="surface" x1="254" y1="178" x2="780" y2="846" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset=".46" stop-color="#F8FBFF"/>
+      <stop offset="1" stop-color="#DCEBFF"/>
+    </linearGradient>
+    <linearGradient id="highlight" x1="512" y1="172" x2="512" y2="612" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity=".45"/>
+      <stop offset=".58" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="15" stdDeviation="14" flood-color="#172554" flood-opacity=".3"/>
+    </filter>
+    <mask id="mark" maskUnits="userSpaceOnUse" x="112" y="112" width="800" height="800">
+      <g transform="translate(112 112) scale(3.125)">
+        <path fill="#FFF" d="M32 28h55c3 0 6 1 8 4l58 75c2 2 3 5 3 8v5c0 4-2 6-5 7-2 1-4 0-6-1l-53-31v125c0 5-3 8-8 8H32c-5 0-8-3-8-8V36c0-5 3-8 8-8Z"/>
+        <path fill="#FFF" d="M32 28h55c3 0 6 1 8 4l58 75c2 2 3 5 3 8v5c0 4-2 6-5 7-2 1-4 0-6-1l-53-31v125c0 5-3 8-8 8H32c-5 0-8-3-8-8V36c0-5 3-8 8-8Z" transform="rotate(180 128 128)"/>
+      </g>
+    </mask>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#background)"/>
+  <ellipse cx="512" cy="462" rx="446" ry="426" fill="url(#depth)"/>
+  <g transform="translate(76.8 76.8) scale(0.85)">
+    <g transform="translate(112 112) scale(3.125)" filter="url(#shadow)">
+      <path fill="#172554" d="M32 28h55c3 0 6 1 8 4l58 75c2 2 3 5 3 8v5c0 4-2 6-5 7-2 1-4 0-6-1l-53-31v125c0 5-3 8-8 8H32c-5 0-8-3-8-8V36c0-5 3-8 8-8Z"/>
+      <path fill="#172554" d="M32 28h55c3 0 6 1 8 4l58 75c2 2 3 5 3 8v5c0 4-2 6-5 7-2 1-4 0-6-1l-53-31v125c0 5-3 8-8 8H32c-5 0-8-3-8-8V36c0-5 3-8 8-8Z" transform="rotate(180 128 128)"/>
+    </g>
+    <rect x="112" y="112" width="800" height="800" fill="url(#surface)" mask="url(#mark)"/>
+    <rect x="112" y="112" width="800" height="800" fill="url(#highlight)" mask="url(#mark)"/>
+  </g>
+</svg>
