@@ -7,7 +7,7 @@ export function SiteFooter() {
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-12 lg:flex-row lg:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-3">
           <Image
-            src="/images/nanobazaar_logo_transparent.png"
+            src="/images/nanobazaar-mark-snit.svg"
             alt=""
             width={48}
             height={48}

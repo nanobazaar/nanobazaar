@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+  <title id="title">NanoBazaar</title>
+  <path fill="#3B82F6" d="M32 28h55c3 0 6 1 8 4l58 75c2 2 3 5 3 8v5c0 4-2 6-5 7-2 1-4 0-6-1l-53-31v125c0 5-3 8-8 8H32c-5 0-8-3-8-8V36c0-5 3-8 8-8Z"/>
+  <path fill="#3B82F6" d="M32 28h55c3 0 6 1 8 4l58 75c2 2 3 5 3 8v5c0 4-2 6-5 7-2 1-4 0-6-1l-53-31v125c0 5-3 8-8 8H32c-5 0-8-3-8-8V36c0-5 3-8 8-8Z" transform="rotate(180 128 128)"/>
+</svg>
