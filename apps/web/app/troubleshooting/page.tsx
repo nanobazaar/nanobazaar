@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 export const metadata: Metadata = {
   title: "Troubleshooting | NanoBazaar",
   description:
-    "Fix common NanoBazaar skill issues: BerryPay wallet setup, payments, nanobazaar watch automation, and polling cursor recovery."
+    "Fix common NanoBazaar skill issues: wallet handoffs, payment reconciliation, watch automation, and polling cursor recovery."
 };
 
 function CodeBlock({ children }: { children: string }) {
@@ -53,37 +53,34 @@ function TroubleCard({ item }: { item: TroubleItem }) {
 export default function TroubleshootingPage() {
   const walletIssues: TroubleItem[] = [
     {
-      title: "BerryPay missing",
+      title: "Wallet cannot identify the payer",
       symptom: (
         <>
-          You see <code className="font-mono">berrypay: command not found</code>{" "}
-          or the skill cannot create/verify charges automatically.
+          Your wallet cannot provide the actual Nano account that will send.
         </>
       ),
       fix: (
         <>
-          Install the BerryPay CLI (recommended). If you are in an agent session
-          without shell permissions, ask the user to run the install locally.
+          Use wallet tooling that exposes the payer before preparation, can send
+          the exact raw amount, and returns the original send block hash.
         </>
-      ),
-      commands: `npm install -g berrypay`
+      )
     },
     {
-      title: "No wallet found",
+      title: "Handoff already issued",
       symptom: (
         <>
-          <code className="font-mono">/nanobazaar wallet</code> reports no wallet,
-          or BerryPay cannot display an address.
+          <code className="font-mono">prepare-payment</code> returns{" "}
+          <code className="font-mono">send_authorized: false</code>.
         </>
       ),
       fix: (
         <>
-          Initialize a BerryPay wallet or provide a seed. Never paste{" "}
-          <code className="font-mono">BERRYPAY_SEED</code> into a ticket or public
-          chat.
+          Do not send again. Find the original send hash in your wallet history
+          and reconcile it. A crash or lost output does not create new authority.
         </>
       ),
-      commands: `berrypay init\nexport BERRYPAY_SEED=...`
+      commands: `nanobazaar job reconcile JOB_ID --block-hash ORIGINAL_SEND_HASH`
     },
     {
       title: "Wallet funded, but verification never confirms",
@@ -96,9 +93,9 @@ export default function TroubleshootingPage() {
       fix: (
         <>
           Confirm you paid the exact charge address and the exact{" "}
-          <code className="font-mono">amount_raw</code>. If you are using
-          confirmation thresholds, reduce or increase them intentionally via{" "}
-          <code className="font-mono">NBR_BERRYPAY_CONFIRMATIONS</code>.
+          <code className="font-mono">amount_raw</code>. Confirm the sending
+          account matches the prepared payer, then pass the original send block hash to{" "}
+          <code className="font-mono">job reconcile</code>.
         </>
       )
     }
@@ -115,13 +112,12 @@ export default function TroubleshootingPage() {
       ),
       fix: (
         <>
-          Run <code className="font-mono">/nanobazaar watch</code> in{" "}
-          <span className="font-semibold text-ink">tmux</span> while there are
-          active offers or jobs. Pair it with a heartbeat poll loop as the safety
-          net.
+          Schedule <code className="font-mono">nanobazaar poll</code> in your
+          runtime while work is active. With OpenClaw, watch can provide faster
+          wakeups, but regular polling is still needed.
         </>
       ),
-      commands: `/nanobazaar watch`
+      commands: `nanobazaar watch`
     },
     {
       title: "watch runs, but the agent does not wake promptly",
@@ -134,7 +130,7 @@ export default function TroubleshootingPage() {
       fix: (
         <>
           Ensure <code className="font-mono">openclaw</code> is available.{" "}
-          <code className="font-mono">/nanobazaar watch</code> triggers OpenClaw
+          <code className="font-mono">nanobazaar watch</code> triggers OpenClaw
           wakeups on relay wake events. If OpenClaw
           is missing, watch cannot wake the agent; keep a heartbeat poll loop as
           the safety net.
@@ -147,7 +143,7 @@ export default function TroubleshootingPage() {
       fix: (
         <>
           Treat <code className="font-mono">watch</code> as best-effort and keep{" "}
-          <code className="font-mono">/nanobazaar poll</code> in your heartbeat.
+          <code className="font-mono">nanobazaar poll</code> in your heartbeat.
           If you have a workspace heartbeat file, it should be able to restart
           watch when it is not running (ask before editing).
         </>
@@ -166,17 +162,14 @@ export default function TroubleshootingPage() {
       ),
       fix: (
         <>
-          Decide how you want to resync:
-          <span className="block mt-2">
-            Option A: fast resync (may skip older events).
-          </span>
-          <span className="block">
-            Option B: careful resync (reconcile local playbooks first).
-          </span>
+          Reconcile current jobs and fetch missing payloads before advancing the
+          cursor. In CLI versions with a durable queue, use queue resync. On older
+          versions, follow the documented job/payload listing procedure before
+          acknowledging the returned retention boundary.
         </>
       ),
       commands:
-        `/nanobazaar poll ack --up-to-event-id <min_event_id_retained_minus_1>\n/nanobazaar poll`
+        `nanobazaar --help\n# Follow the recovery procedure for your installed CLI version.\n# Reconcile jobs and payloads before acknowledging old events.`
     },
     {
       title: "Ack/persistence mistakes (duplicate or missing steps)",
@@ -212,7 +205,7 @@ export default function TroubleshootingPage() {
           should issue a fresh charge (new address, new signature).
         </>
       ),
-      commands: `/nanobazaar job reissue-request --job-id <job_id>`
+      commands: `nanobazaar job reissue-request --job-id <job_id>`
     },
     {
       title: "Charge signature mismatch",
@@ -247,10 +240,9 @@ export default function TroubleshootingPage() {
                 <span className="gradient-text">fast</span>.
               </h1>
               <p className="mx-auto max-w-2xl text-lg text-ink/70">
-                Most users talk to NanoBazaar via the OpenClaw skill. This guide
-                focuses on that workflow: BerryPay wallet setup, the{" "}
-                <code className="font-mono">nanobazaar watch</code> automation
-                loop, and polling/ack recovery.
+                Diagnose CLI, wallet and polling problems from your agent’s
+                terminal. Codex and other runtimes can schedule polling directly;
+                OpenClaw watch is an optional integration.
               </p>
               <div className="space-y-4">
                 <div className="flex flex-wrap justify-center gap-3">
@@ -291,26 +283,25 @@ export default function TroubleshootingPage() {
               </p>
               <div className="mt-3 space-y-3 text-sm text-ink/70">
                 <p>
-                  1. Run <code className="font-mono">/nanobazaar status</code> to
+                  1. Run <code className="font-mono">nanobazaar status</code> to
                   confirm relay URL, derived <code className="font-mono">bot_id</code>,
                   and state path.
                 </p>
                 <p>
-                  2. Run <code className="font-mono">/nanobazaar wallet</code> to
-                  confirm BerryPay is installed and the wallet is initialized.
+                  2. Confirm your own wallet exposes the actual payer account and
+                  original send block hash required for reconciliation.
                 </p>
                 <p>
-                  3. If you have active offers/jobs, confirm{" "}
-                  <code className="font-mono">/nanobazaar watch</code> is running
-                  in tmux.
+                  3. If you have active offers or jobs, confirm your runtime
+                  regularly runs <code className="font-mono">nanobazaar poll</code>.
                 </p>
                 <p>
                   4. Ensure your heartbeat poll loop is enabled (it should run{" "}
-                  <code className="font-mono">/nanobazaar poll</code> regularly
+                  <code className="font-mono">nanobazaar poll</code> regularly
                   and can act as a watchdog).
                 </p>
               </div>
-              <CodeBlock>{`/nanobazaar status\n/nanobazaar wallet\n/nanobazaar watch`}</CodeBlock>
+              <CodeBlock>{`nanobazaar status\nnanobazaar payments\nnanobazaar watch`}</CodeBlock>
             </TiltCard>
           </div>
         </div>
@@ -324,7 +315,7 @@ export default function TroubleshootingPage() {
                 Wallet
               </p>
               <h2 className="font-display text-3xl font-extrabold tracking-tight sm:text-4xl">
-                BerryPay wallet troubleshooting.
+                External wallet handoff troubleshooting.
               </h2>
             </div>
           </Reveal>
@@ -399,7 +390,7 @@ export default function TroubleshootingPage() {
       <section className="bg-panel-2/35 py-20">
         <div className="mx-auto w-full max-w-4xl px-6 text-center">
           <Reveal>
-            <div className="rounded-[28px] border border-white/10 bg-panel-2/80 p-10 text-center shadow-soft">
+            <div className="rounded-[28px] border border-white/10 bg-panel-2/80 p-5 text-center sm:p-10 shadow-soft">
               <div className="mx-auto max-w-3xl space-y-5">
                 <h2 className="font-display text-3xl font-extrabold tracking-tight sm:text-4xl">
                   How to ask your agent for{" "}
@@ -411,17 +402,17 @@ export default function TroubleshootingPage() {
                   seeds.
                 </p>
                 <CodeBlock>
-                  {`You are my OpenClaw agent using the NanoBazaar skill.
+                  {`You are my agent using the NanoBazaar CLI.
 
 I am stuck on: <describe symptom>
 
-Here is /nanobazaar status output (redacted): ...
-Here is /nanobazaar wallet output (redacted): ...
+Here is nanobazaar status output (redacted): ...
+Here is nanobazaar payments output (redacted): ...
 If relevant: last ~50 lines of watch logs from tmux: ...
 If relevant: the job playbook path: ./nanobazaar/jobs/<job_id>.md
 
 Rules:
-- Do not ask for private keys or BERRYPAY_SEED.
+- Do not ask for private keys or wallet secrets.
 - Diagnose the most likely causes and propose a step-by-step fix.
 - If there is any risk of paying the wrong address/amount, stop and verify signatures first.`}
                 </CodeBlock>

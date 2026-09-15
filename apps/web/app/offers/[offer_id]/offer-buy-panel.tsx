@@ -1,125 +1,42 @@
 "use client";
 
-import * as React from "react";
-
+import { useState } from "react";
+import { CopyText } from "@/components/copy-text";
+import { buildAgentRequest, offerAgentData } from "@/lib/agent-handoff";
 import type { PublicOffer } from "@/lib/relay-offers";
 
-type OfferBuyPanelProps = {
-  offer: PublicOffer;
-};
+type OfferBuyPanelProps = { offer: PublicOffer; dataUrl: string };
 
-export function OfferBuyPanel({ offer }: OfferBuyPanelProps) {
-  const [inputText, setInputText] = React.useState("");
-  const [copyStatus, setCopyStatus] = React.useState<
-    "idle" | "copied" | "error"
-  >("idle");
-
-  const requestSchemaHint = offer.requestSchemaHint?.trim() ?? "";
-  const guidanceText =
-    requestSchemaHint || "No input guidance provided for this offer.";
-  const promptInput =
-    inputText.trim() || requestSchemaHint || "YOUR_INPUT_HERE";
-
-  const offerJson = React.useMemo(
-    () =>
-      JSON.stringify(
-        {
-          offer_id: offer.offerId,
-          ...(offer.sellerBotName
-            ? { seller_bot_name: offer.sellerBotName }
-            : {}),
-          title: offer.title,
-          description: offer.description,
-          tags: offer.tags,
-          price_raw: offer.priceRaw,
-          turnaround_seconds: offer.turnaroundSeconds,
-          purchase_count: offer.purchaseCount,
-          created_at: offer.createdAt,
-          ...(requestSchemaHint ? { request_schema_hint: requestSchemaHint } : {})
-        },
-        null,
-        2
-      ),
-    [
-      offer.createdAt,
-      offer.description,
-      offer.offerId,
-      offer.priceRaw,
-      offer.purchaseCount,
-      offer.sellerBotName,
-      offer.tags,
-      offer.title,
-      offer.turnaroundSeconds,
-      requestSchemaHint
-    ]
-  );
-
-  const handleCopyPrompt = async () => {
-    if (!navigator?.clipboard?.writeText) {
-      setCopyStatus("error");
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(
-        `use the nanobazaar skill to buy offer with ID ${offer.offerId} and add this input: ${promptInput}`
-      );
-      setCopyStatus("copied");
-      window.setTimeout(() => setCopyStatus("idle"), 2000);
-    } catch {
-      setCopyStatus("error");
-    }
-  };
+export function OfferBuyPanel({ offer, dataUrl }: OfferBuyPanelProps) {
+  const [inputText, setInputText] = useState("");
 
   return (
-    <div className="space-y-4">
-      <div className="space-y-3 text-sm text-ink/70">
-        <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-ink/50">
-            Input guidance
-          </p>
-          <p className="mt-2 text-sm text-ink">{guidanceText}</p>
-        </div>
-
-        <label className="block">
-          <span className="text-xs uppercase tracking-[0.2em] text-ink/50">
-            Input for this offer
-          </span>
-          <textarea
-            value={inputText}
-            onChange={(event) => setInputText(event.target.value)}
-            placeholder={guidanceText}
-            rows={4}
-            className="mt-2 w-full rounded-xl border border-white/10 bg-ink/10 px-3 py-2 text-sm text-ink placeholder:text-ink/40"
-          />
-        </label>
-
-        <div className="flex items-center justify-between gap-3">
-          <button
-            type="button"
-            onClick={handleCopyPrompt}
-            className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-ink/80 transition hover:border-white/40 hover:text-ink"
-          >
-            Buy via agent
-          </button>
-          <span className="text-xs text-ink/50">
-            {copyStatus === "copied"
-              ? "Prompt copied!"
-              : copyStatus === "error"
-                ? "Clipboard unavailable"
-                : " "}
-          </span>
-        </div>
+    <div className="min-w-0 space-y-6">
+      <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm">
+        <a href={dataUrl} className="text-accent underline underline-offset-4">Offer JSON</a>
+        <a href="/llms.txt" className="text-accent underline underline-offset-4">Agent instructions</a>
       </div>
-
-      <div className="rounded-xl border border-white/10 bg-ink/10 p-3">
-        <p className="text-xs uppercase tracking-[0.2em] text-ink/50">
-          JSON representation
+      <div className="space-y-2">
+        <h3 className="text-sm font-semibold text-ink">What the seller needs</h3>
+        <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink/70">
+          {offer.requestSchemaHint?.trim() || "No input requirements provided. Confirm the scope with the seller before paying."}
         </p>
-        <pre className="mt-2 max-h-72 overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-words text-xs text-ink/80">
-          {offerJson}
-        </pre>
       </div>
+      <label className="block text-sm font-medium text-ink">
+        Your task input
+        <textarea value={inputText} onChange={event => setInputText(event.target.value)}
+          placeholder="Describe the work you want this agent to do…" rows={4}
+          className="mt-2 block w-full min-w-0 rounded-xl border border-white/10 bg-ink/5 px-3 py-2 text-sm font-normal text-ink placeholder:text-ink/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" />
+      </label>
+      <div className="space-y-3">
+        <h3 className="text-sm font-semibold text-ink">Request to give your agent</h3>
+        <p className="text-xs text-ink/60">Copying this request does not place an order or send a payment.</p>
+        <CopyText text={buildAgentRequest(offer, inputText)} label="Agent request" />
+      </div>
+      <details className="min-w-0 rounded-xl border border-white/10 p-4">
+        <summary className="cursor-pointer text-sm font-medium text-ink/80">Offer data and identifiers</summary>
+        <div className="mt-4"><CopyText text={JSON.stringify(offerAgentData(offer), null, 2)} label="Offer JSON" /></div>
+      </details>
     </div>
   );
 }
-

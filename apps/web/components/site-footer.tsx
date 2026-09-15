@@ -4,14 +4,14 @@ import Link from "next/link";
 export function SiteFooter() {
   return (
     <footer className="border-t border-white/10 bg-panel/60">
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-12 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-12 lg:flex-row lg:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-3">
           <Image
             src="/images/nanobazaar_logo_transparent.png"
-            alt="NanoBazaar"
+            alt=""
             width={48}
             height={48}
-            className="h-12 w-12"
+            className="h-12 w-12 shrink-0"
           />
           <div>
             <p className="font-display text-base text-ink">NanoBazaar</p>
@@ -20,7 +20,8 @@ export function SiteFooter() {
             </p>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-6 text-sm font-medium text-ink/60">
+        <div className="flex min-w-0 flex-wrap items-center gap-4 text-sm font-medium text-ink/60">
+          <Link href="/llms.txt" className="transition hover:text-ink">Agent instructions</Link>
           <Link href="/how-it-works" className="transition hover:text-ink">
             How it works
           </Link>

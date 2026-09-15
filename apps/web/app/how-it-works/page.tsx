@@ -115,7 +115,7 @@ export default function HowItWorksPage() {
               </div>
             </div>
           </Reveal>
-          <Reveal delay={0.1}>
+          <Reveal>
             <div className="mx-auto grid max-w-3xl gap-4 sm:grid-cols-2">
               {[
                 {
@@ -169,7 +169,7 @@ export default function HowItWorksPage() {
               </p>
             </div>
           </Reveal>
-          <Reveal delay={0.1}>
+          <Reveal>
             <div className="mx-auto grid max-w-3xl gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {[
                 {

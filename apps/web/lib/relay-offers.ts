@@ -1,6 +1,7 @@
 export type PublicOffer = {
   offerId: string;
   sellerBotName?: string;
+  sellerLastSeenAt?: string | null;
   title: string;
   description: string;
   tags: string[];
@@ -14,6 +15,7 @@ export type PublicOffer = {
 type PublicOfferApiOffer = {
   offer_id: string;
   seller_bot_name?: string;
+  seller_last_seen_at?: string | null;
   title: string;
   description: string;
   tags?: string[];
@@ -42,6 +44,8 @@ const DEFAULT_MAX_PAGES = 10;
 const MOCK_PUBLIC_OFFERS: PublicOffer[] = [
   {
     offerId: "mock_offer_counterpoint",
+    sellerBotName: "Counterpoint",
+    sellerLastSeenAt: new Date(Date.now() - 8 * 60 * 1000).toISOString(),
     title: "Counterpoint Chaos: Savage, Hilarious Rebuttals",
     description:
       "Bring your argument. I'll return a hilarious, unhinged counterpoint that's still logically sharp.",
@@ -55,6 +59,8 @@ const MOCK_PUBLIC_OFFERS: PublicOffer[] = [
   },
   {
     offerId: "mock_offer_pitch",
+    sellerBotName: "Pitch Bot",
+    sellerLastSeenAt: new Date(Date.now() - 3 * 86400 * 1000).toISOString(),
     title: "Pitch-Perfect Startup One-Liner",
     description:
       "I'll craft a punchy one-liner that explains your product in 140 characters.",
@@ -68,6 +74,7 @@ const MOCK_PUBLIC_OFFERS: PublicOffer[] = [
   },
   {
     offerId: "mock_offer_research",
+    sellerLastSeenAt: null,
     title: "Rapid Market Scan + Insight Summary",
     description:
       "Get a crisp summary of competitors, positioning, and key differentiators.",
@@ -103,10 +110,15 @@ function resolveRelayBaseUrl(): string | null {
   return base.endsWith("/") ? base.slice(0, -1) : base;
 }
 
+export function getPublicOfferDataUrl(offerId: string): string {
+  return new URL(`/market/offers/${encodeURIComponent(offerId)}`, resolveRelayBaseUrl() ?? "https://relay.nanobazaar.ai").toString();
+}
+
 function mapPublicOffer(offer: PublicOfferApiOffer): PublicOffer {
   return {
     offerId: offer.offer_id,
     sellerBotName: offer.seller_bot_name,
+    sellerLastSeenAt: offer.seller_last_seen_at,
     title: offer.title,
     description: offer.description,
     tags: offer.tags ?? [],
@@ -116,6 +128,21 @@ function mapPublicOffer(offer: PublicOfferApiOffer): PublicOffer {
     createdAt: offer.created_at,
     requestSchemaHint: offer.request_schema_hint
   };
+}
+
+export function getPublicOffersDataUrl(options: PublicOfferQuery = {}): string {
+  const url = new URL("/market/offers", resolveRelayBaseUrl() ?? "https://relay.nanobazaar.ai");
+  if (options.sort) url.searchParams.set("sort", options.sort);
+  if (options.limit) url.searchParams.set("limit", String(options.limit));
+  if (options.cursor) url.searchParams.set("cursor", options.cursor);
+  if (options.query) url.searchParams.set("q", options.query);
+  if (options.tags && options.tags.length > 0) {
+    url.searchParams.set("tags", options.tags.join(","));
+  }
+  if (options.sellerBotId) {
+    url.searchParams.set("seller_bot_id", options.sellerBotId);
+  }
+  return url.toString();
 }
 
 export async function getPublicOffers(
@@ -132,17 +159,7 @@ export async function getPublicOffers(
     return null;
   }
 
-  const url = new URL("/market/offers", baseUrl);
-  if (options.sort) url.searchParams.set("sort", options.sort);
-  if (options.limit) url.searchParams.set("limit", String(options.limit));
-  if (options.cursor) url.searchParams.set("cursor", options.cursor);
-  if (options.query) url.searchParams.set("q", options.query);
-  if (options.tags && options.tags.length > 0) {
-    url.searchParams.set("tags", options.tags.join(","));
-  }
-  if (options.sellerBotId) {
-    url.searchParams.set("seller_bot_id", options.sellerBotId);
-  }
+  const url = getPublicOffersDataUrl(options);
 
   try {
     const response = await fetch(url, { next: { revalidate: 60 } });
