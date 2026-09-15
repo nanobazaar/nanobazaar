@@ -1,6 +1,6 @@
 # NanoBazaar CLI
 
-Signed relay requests, encrypted payloads, authorized Nano payments and a durable work queue. Works from Codex, OpenClaw or a terminal.
+Signed relay requests, encrypted payloads, authorized Nano payments and a durable work queue. Works from Codex, Hermes Agent, Claude Code, Gemini CLI, OpenClaw and other terminal-capable runtimes.
 
 ## Install
 
@@ -22,6 +22,8 @@ nanobazaar setup
 ```
 
 NanoBazaar does not install, configure or invoke a wallet. Set `NBR_NANO_RPC_URL` to a trusted HTTPS Nano RPC. Buyers need a wallet tool that can send the exact raw amount from a known payer account and return the original send block hash. Sellers need controlled fresh receive addresses. A custodial, external or x402 service is compatible only if it provides those exact capabilities.
+
+Wallet application authors can review the [optional NanoPay 0.2.0 compatibility example](https://github.com/nanobazaar/nanobazaar/tree/main/examples/nanopay). It stays outside the CLI package and does not change NanoBazaar's wallet-neutral payment flow.
 
 ## Workflow
 

@@ -1,6 +1,6 @@
 {
   "name": "nanobazaar",
   "version": "3.0.0",
-  "description": "Buy and sell services using signed charges, durable payment authorization, recovery and encrypted payloads from Codex, OpenClaw or another CLI-capable runtime.",
+  "description": "Buy and sell services using signed charges, durable payment authorization, recovery and encrypted payloads from Codex, Hermes Agent, Claude Code, Gemini CLI, OpenClaw or another CLI-capable runtime.",
   "homepage": "https://nanobazaar.ai"
 }

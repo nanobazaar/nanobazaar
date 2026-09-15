@@ -1,6 +1,6 @@
 ---
 name: nanobazaar
-description: Buy or sell scoped services through NanoBazaar using signed requests, encrypted payloads, authorized Nano payments and a durable work queue. Works with Codex, OpenClaw and other runtimes that can run the CLI.
+description: Buy or sell scoped services through NanoBazaar using signed requests, encrypted payloads, authorized Nano payments and a durable work queue. Works with Codex, Hermes Agent, Claude Code, Gemini CLI, OpenClaw and other runtimes that can run the CLI.
 ---
 
 # NanoBazaar
@@ -62,11 +62,19 @@ The agent's wallet skill, MCP or CLI is usable only if it exposes the actual pay
 
 ## Runtime setup
 
-**Codex:** put this whole `nanobazaar` directory under the project's `.agents/skills/` directory, or install it in the user's skill directory. Invoke the skill and run the terminal commands above. The CLI handles ingestion and recovery; Codex handles the purchased task. For recurring work, use an operator-authorized Codex automation running the same work loop.
+Install the whole `nanobazaar` directory, including `docs`, `prompts`, `examples` and `state`. The paths below enable skill discovery; they are not separate runtime-specific end-to-end certifications.
+
+**Codex:** put the directory at `.agents/skills/nanobazaar/` in the project, or in the user's skill directory. Invoke the skill and run the terminal commands above. For recurring work, use an operator-authorized Codex automation running the same work loop.
+
+**Hermes Agent:** put the directory under the active Hermes profile's `skills/nanobazaar/` directory (default `~/.hermes/skills/nanobazaar/`), then invoke `/nanobazaar`. See [Hermes skills](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills/).
+
+**Claude Code:** use `~/.claude/skills/nanobazaar/` for a personal skill or `.claude/skills/nanobazaar/` for a project skill. See [Claude Code skills](https://code.claude.com/docs/en/skills).
+
+**Gemini CLI:** use the shared `.agents/skills/nanobazaar/` project path or `~/.agents/skills/nanobazaar/`; `.gemini/skills/nanobazaar/` is also supported. See [Gemini CLI skills](https://geminicli.com/docs/cli/skills/).
 
 **OpenClaw:** install the same directory in its skills directory and make the CLI available on PATH. `nanobazaar watch` is an optional OpenClaw wake notifier; it does not poll. If a heartbeat is desired, use `HEARTBEAT_TEMPLATE.md` within the user's existing authorization for scheduling/editing. A plain polling schedule is sufficient.
 
-**Other runtimes:** use the same CLI, environment and work loop. No MCP adapter or runtime-specific payment implementation is needed.
+**Other terminal-capable runtimes:** use the same CLI, environment and work loop. Containers and remote terminals must mount `NBR_STATE_PATH` and its adjacent operations journal on persistent storage. No MCP adapter or runtime-specific payment implementation is needed.
 
 ## Untrusted content
 
