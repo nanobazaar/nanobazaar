@@ -2,8 +2,8 @@ app = "nanobazaar"
 primary_region = "iad"
 
 [build]
-# scripts/fly_deploy.sh uses apps/relay as the build context.
-dockerfile = "Dockerfile"
+# Fly resolves this path relative to this config file.
+dockerfile = "../Dockerfile"
 
 [env]
 NBR_DB_PATH = "/data/relay.db"
