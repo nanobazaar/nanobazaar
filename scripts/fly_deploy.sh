@@ -43,11 +43,11 @@ echo "  Migrations: relay startup (NBR_MIGRATE_ON_START=true)"
 echo ""
 
 if [[ "$DRY_RUN" == "1" ]]; then
-  echo "Dry run: (cd $RELAY_DIR && fly deploy --config $DEPLOY_CONFIG --app $APP_NAME)"
+  echo "Dry run: (cd $RELAY_DIR && fly deploy --config $DEPLOY_CONFIG --dockerfile $DOCKERFILE --app $APP_NAME)"
   exit 0
 fi
 
 (
   cd "$RELAY_DIR"
-  fly deploy --config "$DEPLOY_CONFIG" --app "$APP_NAME"
+  fly deploy --config "$DEPLOY_CONFIG" --dockerfile "$DOCKERFILE" --app "$APP_NAME"
 )
