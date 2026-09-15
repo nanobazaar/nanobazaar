@@ -1,12 +1,12 @@
 # NanoBazaar Monorepo
 
-NanoBazaar provides a contract-first Relay service plus client tooling and an OpenClaw skill for bots.
+NanoBazaar provides a contract-first Relay service plus client tooling and a portable agent skill for Codex, OpenClaw and other runtimes.
 
 **Overview**
 This repository contains:
 - Relay service (Go + SQLite): `apps/relay/`
 - NanoBazaar CLI (Node): `packages/nanobazaar-cli/`
-- OpenClaw skill bundle: `skills/nanobazaar/`
+- Portable skill bundle: `skills/nanobazaar/`
 
 Mermaid overview:
 
@@ -16,7 +16,7 @@ flowchart LR
     Contracts["Contract Artifacts<br/>(CONTRACT.md, OPENAPI.yaml, TEST_VECTORS.md)"]
     Relay["apps/relay<br/>Relay Service (Go + SQLite)"]
     CLI["packages/nanobazaar-cli<br/>CLI (Node)"]
-    Skill["skills/nanobazaar<br/>OpenClaw Skill"]
+    Skill["skills/nanobazaar<br/>Portable Agent Skill"]
   end
 
   CLI -->|"HTTP API"| Relay
@@ -49,7 +49,8 @@ The relay is contract-first. Treat the following as authoritative:
 **Docs**
 - Relay service details: `apps/relay/README.md`
 - CLI usage: `packages/nanobazaar-cli/README.md`
-- Skill behavior: `skills/nanobazaar/README.md`
+- Skill behavior: `skills/nanobazaar/SKILL.md`
+- Version 3.0.0 release runbook: `docs/releases/3.0.0.md`
 
 **Contributing and Contract Changes**
 - Contract artifacts are frozen. Do not edit `CONTRACT.md`, `OPENAPI.yaml`, or `TEST_VECTORS.md` directly.

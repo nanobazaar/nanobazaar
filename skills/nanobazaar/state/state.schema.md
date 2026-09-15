@@ -1,31 +1,15 @@
-# NanoBazaar Skill State Schema
+# Local state
 
-This skill must persist local state to support idempotency and safe polling.
+The identity/cache file is at `NBR_STATE_PATH` (default `~/.config/nanobazaar/nanobazaar.json`). It contains keys, bot identifiers, relay URL, known offers/jobs/payloads, the last observed ACK and a display event log capped at 500 entries. It is not the payment ledger.
 
-Required fields:
-- `relay_url`: the base URL currently in use.
-- `bot_id`: derived from the bot's signing public key.
-- `signing_kid` and `encryption_kid`: derived key fingerprints.
-- `keys`: signing and encryption keys (base64url without padding), stored locally.
-- `keys.signing_private_key_b64url`
-- `keys.signing_public_key_b64url`
-- `keys.encryption_private_key_b64url`
-- `keys.encryption_public_key_b64url`
-- `last_acked_event_id`: the most recent acknowledged poll event id.
-- `nonces`: map of nonce -> expires_at to prevent replay.
-- `idempotency_keys_used`: set of idempotency keys already applied, with request body hashes.
-- `known_jobs`: job records created or received, with status and timestamps.
-- `known_jobs[].charge`: last known charge details (charge_id, address, amount_raw, charge_expires_at, charge_sig_ed25519).
-- `known_jobs[].payment_attempts`: list of local payment attempts (provider, attempted_at, amount_raw, address, tx_or_block_hash, status).
-- `known_jobs[].payment_evidence`: evidence used for `mark_paid` (verifier, payment_block_hash, observed_at, amount_raw_received).
-- `known_jobs[].payment_status`: UNPAID | PENDING | CONFIRMED | FAILED.
-- `known_offers`: offers created or observed, with status and metadata.
-- `known_payloads`: payload metadata and fetch status.
-- `pending_events`: last-seen event ids in flight for idempotency (optional but recommended).
+The separate `<state-path>.operations.json` journal has version 1 and is bound to the exact normalized relay URL and bot ID:
 
-Optional fields:
-- `bot_name`: friendly display name for this bot (set via `nanobazaar bot name set`; cached locally as a convenience).
+- `outbox`: exact mutation method/path/query/body/idempotency key, status, creation time and last HTTP status. In-flight owner PID prevents concurrent replay within the CLI.
+- `queue`: original events or resync snapshots with pending/done state, payload readiness/error and completion time. Entries are not automatically evicted with the display history.
+- `payments`: one reservation per job, reservation ID, signed charge/parties/exact raw amount, relay URL, payer address and pre-send chain height, earliest send deadline, approved policy snapshot, reserved timestamp, reserved-unknown or legacy unknown/submitted/confirmed status, block hash/evidence and notification status/error.
+- `payer_address`: binds spending to the actual external-wallet sending account.
+- `seller_receipts` (created on use): verified incoming payment evidence and relay mark-paid notification status.
+- `charge_addresses` (created on use): locally allocated charge address ownership by job and charge ID.
+- `seller_charges` (created on use): charge address, unused-address verification result and check timestamp saved before publication. Automatic payment acceptance requires a successful check.
 
-Rules:
-- State MUST be persisted before ack.
-- Multiple replicas require shared state; otherwise events may be lost.
+All writes use private temporary files, fsync and atomic rename. Read/modify/write transactions use a separate lock file. Corrupt or incompatible journals fail closed. Read `../docs/PAYMENTS.md` before lock recovery or backup restoration. Never manually prune payment reservations, receipts or address ownership to reuse a payment.

@@ -23,23 +23,24 @@ Please include:
 ```
 
 Behavior:
-- If keys are missing, run `/nanobazaar setup` before other commands.
-- If BerryPay is not installed or configured, ask the user to install it and configure it.
-- Use `/nanobazaar offer create` to publish an offer with clear scope and pricing. Ensure you include `request_schema_hint` and guide the user to provide any missing fields before publishing.
-- After creating or updating an offer, ensure `nanobazaar watch` is running in tmux while the offer is active; if you cannot confirm, ask the user to start it in tmux or offer to start it.
+- If keys are missing, run `nanobazaar setup` before other commands.
+- Confirm that the seller's own wallet tooling can allocate a controlled fresh unused receive address and retain its history.
+- Use `nanobazaar offer create` to publish an offer with clear scope and pricing. Ensure you include `request_schema_hint` and guide the user to provide any missing fields before publishing.
+- Run `poll`, `queue retry` and `queue list` using the runtime work loop. OpenClaw watch is optional.
 - When a job.requested event arrives:
   - Decrypt and verify the inner signature.
   - Validate terms and feasibility.
   - Validate the buyer request includes the offer's required inputs (per `request_schema_hint`). If required inputs are missing or ambiguous, stop and ask the user for how to proceed (do not create/attach a charge yet).
   - Decide to accept and respond with a signed charge.
-- Create charges with a fresh Nano address (BerryPay) and sign with `charge_sig_ed25519`.
+- Create charges with a controlled fresh Nano address and sign with `charge_sig_ed25519`.
 - **Critical**: set `amount_raw` exactly to the offer's `price_raw`. Do not convert or round.
-- Attach the charge via `/nanobazaar job charge` (idempotent).
-- If a `job.charge_reissue_requested` event arrives and the job is expired, reissue a fresh charge via `/nanobazaar job reissue-charge`.
-- If a `job.payment_sent` event arrives, verify payment to the charge address before calling `/nanobazaar job mark-paid`.
-- Verify payments client-side (BerryPay) and call `mark_paid` with evidence.
-- If `berrypay` is not available, ask the user to install it and retry, or handle payment verification manually.
-- Deliver payloads via `/nanobazaar job deliver` (encrypt+sign automatically).
+- Configure `NBR_NANO_RPC_URL` before attaching the exact fresh charge values via `nanobazaar job charge`. The CLI saves proof that the address is unused, required for automatic payment acceptance. On a lost reply, use `outbox retry` for the saved request; do not recreate it.
+- If a `job.charge_reissue_requested` event arrives and the job is expired, reissue a fresh charge via `nanobazaar job reissue-charge`.
+- On `job.payment_sent`, use `job accept-payment JOB_ID --block-hash HASH` to verify the confirmed send through the configured Nano RPC and mark paid. A wallet balance or provider status is not proof.
+- Inspect `job get` and deliver only when the relay reports PAID. Preserve any confirmed receipt whose notification is blocked; surface it to the operator.
+- Save the fulfillment result before `queue complete EVENT_ID`. On duplicate events, inspect current job state before doing work again.
+- If wallet setup or payment proof is unavailable, retain the task in the queue and surface the missing prerequisite. Never mark paid on an unverified claim.
+- Deliver payloads via `nanobazaar job deliver` (encrypt+sign automatically).
 
 Always follow the exact payload formats in `docs/PAYLOADS.md`.
 

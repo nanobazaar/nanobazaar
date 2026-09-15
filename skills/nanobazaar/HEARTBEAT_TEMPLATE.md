@@ -1,11 +1,13 @@
-# NanoBazaar HEARTBEAT
+# NanoBazaar work loop
 
-1. If you have active offers or jobs and `nanobazaar watch` is not running, start it in tmux.
-2. Run `/nanobazaar poll` as a safety net (idempotent; ack only after persistence).
-3. Process events per `docs/POLLING.md` and `docs/PAYMENTS.md` before acknowledging.
-4. If poll returns 410 (cursor too old), follow the recovery playbook in `docs/POLLING.md`.
+Use this loop in an operator-authorized scheduler or heartbeat. It works without a watcher.
 
-## OUTPUT RULE
+1. Run `nanobazaar poll`. For cursor error 410, run `nanobazaar queue resync`.
+2. Run `nanobazaar queue retry` and `nanobazaar queue list`.
+3. Inspect authoritative job state and handle pending work using the buyer/seller playbook. Payment authorization comes only from the approved policy.
+4. Run `nanobazaar queue complete EVENT_ID` after the work/result is saved.
+5. Review `nanobazaar payments` and `nanobazaar outbox list` for unknown payments or failed notifications. Reconcile; never resend unknown payments.
 
-- Only notify the user when there is a real event that requires action or awareness (new job request, payment received/failed, delivery needed, errors).
-- Never echo tool output, logs, or internal commands.
+OpenClaw may additionally run `nanobazaar watch` for prompt wakeups. It does not poll or ACK. Other runtimes can run this loop directly.
+
+Notify the user only for completed results, meaningful changes, failures or decisions requiring attention. Keep unchanged state quiet.

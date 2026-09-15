@@ -7,7 +7,7 @@ const http = require('http');
 const https = require('https');
 const os = require('os');
 const path = require('path');
-const {spawnSync} = require('child_process');
+const {readJson, writeJson} = require('../lib/journal');
 
 const DEFAULT_RELAY_URL = 'https://relay.nanobazaar.ai';
 function resolveHomeDir() {
@@ -34,14 +34,26 @@ const STATE_LOCK_RETRY_MS = 50;
 const STATE_LOCK_TIMEOUT_MS = 5000;
 let STATE_LOCK_SLEEP = null;
 
-const args = new Set(process.argv.slice(2));
-const installBerryPay = !args.has('--no-install-berrypay');
-const skipRegister = args.has('--skip-register');
+function parseSetupArgs(argv) {
+  let skipRegister = false;
+  for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === '--skip-register') {
+      skipRegister = true;
+      continue;
+    }
+    if (argv[i] === '--state-path' && argv[i + 1]) {
+      i += 1;
+      continue;
+    }
+    if (argv[i].startsWith('--state-path=')) continue;
+    throw new Error(`Unknown setup argument: ${argv[i]}`);
+  }
+  return {skipRegister};
+}
 
 const env = process.env;
 const relayUrl = (env.NBR_RELAY_URL || DEFAULT_RELAY_URL).trim();
 const statePath = expandHomePath((env.NBR_STATE_PATH || STATE_DEFAULT).trim());
-const berrypayBin = (env.NBR_BERRYPAY_BIN || 'berrypay').trim();
 
 function base32Encode(buffer) {
   const alphabet = 'abcdefghijklmnopqrstuvwxyz234567';
@@ -78,12 +90,7 @@ function sha256Hex(buffer) {
 }
 
 function loadState(filePath) {
-  try {
-    const raw = fs.readFileSync(filePath, 'utf8');
-    return JSON.parse(raw);
-  } catch (err) {
-    return {};
-  }
+  return readJson(filePath);
 }
 
 function sleepSync(ms) {
@@ -155,13 +162,7 @@ function withStateLock(filePath, fn) {
 }
 
 function saveState(filePath, state) {
-  fs.mkdirSync(path.dirname(filePath), {recursive: true});
-  fs.writeFileSync(filePath, JSON.stringify(state, null, 2));
-  try {
-    fs.chmodSync(filePath, 0o600);
-  } catch (_) {
-    // ignore chmod errors on unsupported platforms
-  }
+  writeJson(filePath, state);
 }
 
 function writeStateLocked(filePath, updateFn) {
@@ -246,28 +247,6 @@ function resolveKeys(state) {
   };
 }
 
-function ensureBerryPay() {
-  const result = spawnSync(berrypayBin, ['--version'], {stdio: 'ignore'});
-  if (result.status === 0) {
-    return true;
-  }
-  if (!installBerryPay) {
-    return false;
-  }
-
-  const npmCheck = spawnSync('npm', ['--version'], {stdio: 'ignore'});
-  if (npmCheck.status !== 0) {
-    return false;
-  }
-
-  const npmResult = spawnSync('npm', ['install', '-g', 'berrypay'], {stdio: 'inherit'});
-  if (npmResult.status !== 0) {
-    return false;
-  }
-  const retry = spawnSync(berrypayBin, ['--version'], {stdio: 'ignore'});
-  return retry.status === 0;
-}
-
 function request(url, body, headers) {
   return new Promise((resolve, reject) => {
     const client = url.protocol === 'https:' ? https : http;
@@ -294,8 +273,13 @@ function request(url, body, headers) {
 }
 
 async function main() {
-  const state = loadState(statePath);
-  const resolved = resolveKeys(state);
+  const {skipRegister} = parseSetupArgs(process.argv.slice(2));
+  let resolved;
+  // Persist the identity before registration, including when the reply is lost.
+  writeStateLocked(statePath, state => {
+    resolved = resolveKeys(state);
+    return {...state, keys: resolved.keys};
+  });
 
   const keys = resolved.keys;
   const signingPubBytes = Buffer.from(keys.signing_public_key_b64url, 'base64url');
@@ -366,25 +350,14 @@ async function main() {
     return next;
   });
 
-  const berrypayInstalled = ensureBerryPay();
-
   console.log('NanoBazaar setup complete.');
   console.log(`State path: ${statePath}`);
   console.log(`Relay URL: ${relayUrl}`);
   console.log(`Bot ID: ${botId}`);
   console.log(`Keys source: ${resolved.source}`);
-  if (!berrypayInstalled) {
-    console.log('BerryPay CLI not detected. Install it for automated payments.');
-  } else {
-    if (!process.env.BERRYPAY_SEED) {
-      console.log('BerryPay CLI installed but BERRYPAY_SEED is not set.');
-      console.log('Run `berrypay init` or set BERRYPAY_SEED to configure a wallet.');
-    }
-    console.log('Top up your BerryPay wallet with: /nanobazaar wallet');
-  }
 }
 
 main().catch((err) => {
-  console.error(err);
+  console.error(err.message || err);
   process.exit(1);
 });

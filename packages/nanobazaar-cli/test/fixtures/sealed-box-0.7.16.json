@@ -1,0 +1,6 @@
+{
+  "message": "NanoBazaar sealed box compatibility fixture (libsodium-wrappers 0.7.16)",
+  "publicKey": "c7b7a40e567a3917d2102172412687a6509e0f68ef4e651a0de40fb9c1fbf522",
+  "privateKey": "650b219952e8268f87fde32dd8c32fcac3a0663f8f7be396c244c7d0a448843e",
+  "ciphertext": "2adbe93c8c955e994431073a0272d9bdf3cb87b12ca32724865c81deed3a393d1dfc1b0b5330a7fa94ac975af8e05a0675e65675f5f78596b108628a4d9eedf590849eedbc0be385e6a9a741705c29be9fdb3bb9a377e7e9ef55e33189bd033f12cea3349e740f4b9a2a18e838a3e5d57232c1d311a2dc"
+}
