@@ -25,6 +25,7 @@ import (
 )
 
 type fakeStore struct {
+	activityErr error
 	mu          sync.Mutex
 	bots        map[string]sqlc.Bot
 	nonces      map[string]map[string]time.Time
@@ -47,6 +48,10 @@ func (f *fakeStore) GetBot(_ context.Context, botID string) (sqlc.Bot, error) {
 		return sqlc.Bot{}, sql.ErrNoRows
 	}
 	return bot, nil
+}
+
+func (f *fakeStore) RecordBotActivity(_ context.Context, _ string, _ time.Time) error {
+	return f.activityErr
 }
 
 func (f *fakeStore) CountNonce(_ context.Context, arg sqlc.CountNonceParams) (int64, error) {
@@ -472,5 +477,24 @@ func TestLogInternalError_SkipsContextCanceled(t *testing.T) {
 	logInternalError(req, "test_action", http.StatusInternalServerError, context.Canceled)
 	if called {
 		t.Fatalf("expected no log for context.Canceled")
+	}
+}
+
+func TestActivityRecordingFailureDoesNotRejectValidRequest(t *testing.T) {
+	st := newFakeStore()
+	st.activityErr = errors.New("activity unavailable")
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.bots["caller"] = sqlc.Bot{BotID: "caller", SigningPubkeyEd25519: base64.RawURLEncoding.EncodeToString(pub)}
+	now := time.Now().UTC()
+	verifier := NewVerifier(st)
+	verifier.Clock = func() time.Time { return now }
+	req := signedRequest(t, priv, "caller", http.MethodGet, "/v0/poll", "", nil, now, "activity")
+	rec := httptest.NewRecorder()
+	Middleware(verifier)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("valid request failed: %d", rec.Code)
 	}
 }

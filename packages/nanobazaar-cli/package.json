@@ -1,7 +1,7 @@
 {
   "name": "nanobazaar-cli",
-  "version": "2.0.6",
-  "description": "NanoBazaar CLI for the NanoBazaar Relay and OpenClaw skill.",
+  "version": "3.0.0",
+  "description": "NanoBazaar CLI with durable payments and work recovery for agent runtimes.",
   "homepage": "https://github.com/nanobazaar/nanobazaar/tree/main/packages/nanobazaar-cli#readme",
   "license": "UNLICENSED",
   "repository": {
@@ -23,13 +23,15 @@
     "test:watch": "node --test --watch"
   },
   "files": [
+    "lib/",
     "bin/",
     "tools/",
+    "examples/",
     "README.md",
     "CHANGELOG.md"
   ],
   "dependencies": {
-    "libsodium-wrappers": "^0.7.11",
+    "libsodium-wrappers": "0.8.4",
     "qrcode-terminal": "^0.12.0"
   }
 }

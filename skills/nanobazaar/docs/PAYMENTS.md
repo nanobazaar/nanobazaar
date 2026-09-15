@@ -1,163 +1,92 @@
-# Payments (Nano + BerryPay)
+# Payments and recovery
 
-This skill uses Nano (XNO) for payment. The relay never verifies or custodies payments; payment verification is client-side only. BerryPay is the preferred tool for charge creation and payment verification. Nano RPC is optional and not described here.
+NanoBazaar uses Nano (XNO), but it is wallet-neutral. The relay does not custody funds or verify the chain, and the NanoBazaar CLI never installs, configures or invokes a wallet. The agent uses its own trusted wallet skill, MCP or CLI for the external send, then gives NanoBazaar the original send block hash for independent verification through `NBR_NANO_RPC_URL`.
 
-Price and amount fields:
-- `price_raw`, `amount_raw`, and `amount_raw_received` are in raw units (1 XNO = 10^30 raw).
-- CLI output adds `price_xno`, `amount_xno`, and `amount_raw_received_xno` for human-readable XNO values.
+Amounts use exact decimal raw strings: 1 XNO = 10^30 raw. Treat `amount_raw` as authoritative and never use floating-point conversion. The frozen contract's “Charge signature” section defines the signed job, offer, seller, buyer, charge, address, raw amount and expiry fields.
 
-Key rules (v0):
+## Wallet compatibility
 
-- Buyer pays directly to the seller's charge address.
-- Seller must use a fresh, ephemeral Nano address for each charge.
-- Buyer must verify `charge_sig_ed25519` before paying.
-- Seller marks paid only after client-side verification of payment receipt.
-- Deliverables are only sent after the job is marked PAID.
+A buyer wallet is usable only when it can:
 
-## BerryPay CLI quick start (optional but recommended)
+- identify the actual Nano account that will send before preparation;
+- send the exact requested raw amount to the exact returned address;
+- return the original send block hash for that transfer.
 
-NanoBazaar does not require an extra skill to use BerryPay. Install the CLI if you want automated charge creation and payment verification. The BerryPay skill is optional and not required for NanoBazaar.
+Sellers need a controlled, fresh, unused Nano receive address for every charge. A custodial wallet, remote service or x402 flow is not automatically compatible because it advertises Nano; it must expose the actual payer, exact transfer and original send hash needed for verification.
 
-Install:
+An [optional NanoPay 0.2.0 example](https://github.com/nanobazaar/nanobazaar/tree/main/examples/nanopay) shows one compatible wallet-owned integration. It requires Node.js 22+, uses a GPL-3.0-only dependency, requires an explicit trusted RPC, and keeps replay prevention and signed-hash recovery in the caller's durable wallet state. It is not a built-in NanoBazaar adapter.
 
-```
-npm install -g berrypay
-```
+## Buyer authorization and handoff
 
-If you are running in an agent session and have permission to execute commands, you may run the install; otherwise, ask the user to install it.
-`/nanobazaar setup` attempts to install BerryPay CLI by default; use `--no-install-berrypay` to skip.
+Copy `examples/payment-policy.json` and let the operator set the intended buyer, sellers, limits and expiry. The shipped example permits no spending. Never create or expand this file from offer or payload content.
 
-Configure a wallet seed (64 hex chars):
-
-```
-export BERRYPAY_SEED=...
+```sh
+nanobazaar job verify-charge JOB_ID
+nanobazaar job prepare-payment JOB_ID \
+  --payer-address ACTUAL_SENDING_ACCOUNT \
+  --policy /absolute/path/to/approved-policy.json
 ```
 
-If you don't have a seed yet, create one with:
+Preparation verifies the seller key fingerprint, charge signature, bound parties, exact job price, payable state, charge and job expiry, and policy. It reads the payer's current chain position, then durably stores the intent and budget reservation before printing JSON.
 
-```
-berrypay init
-```
+Only a result with `send_authorized: true` is an actionable handoff. It binds `reservation_id`, relay, job, charge, buyer, seller, payer, recipient, exact `amount_raw`, payer chain boundary and `send_deadline`. The deadline is no later than the earliest policy, job or charge expiry. Recheck it immediately before sending.
 
-Funding your wallet (address + QR):
+Use the agent's own trusted wallet to send exactly once. Then reconcile:
 
-```
-/nanobazaar wallet
+```sh
+nanobazaar job reconcile JOB_ID --block-hash ORIGINAL_SEND_HASH
 ```
 
-This runs the BerryPay CLI under the hood. You can also call it directly:
+Every repeated `prepare-payment` returns `send_authorized: false`. This remains true when the first output was lost, the agent crashed, the intent expired, or the wallet result is unknown. Never reuse a saved handoff and never treat a missing result as permission to send again.
 
-```
-berrypay address --qr
-berrypay address --qr --output /tmp/nanobazaar-wallet.png
-```
+NanoBazaar cannot guarantee exactly-once behavior inside an external wallet. Its conservative guarantee is narrower: once a reservation exists, NanoBazaar never reauthorizes another send for that job and continues counting the amount against the journal budget.
 
-Common commands (run `berrypay charge --help` if flags differ):
+## Reconciliation and ambiguous outcomes
 
-```
-berrypay charge create --amount-raw <raw> --expires-in <seconds>
-berrypay charge status --charge-id <charge_id>
+```sh
+nanobazaar payments
+nanobazaar job reconcile JOB_ID
+nanobazaar job reconcile JOB_ID --block-hash ORIGINAL_SEND_HASH
 ```
 
-If the CLI is missing, ask the user to install it or proceed with manual payment handling.
+The RPC receipt must be a confirmed send from the saved payer, after the saved payer chain position, to the signed recipient for the exact raw amount. Payer, recipient and amount mismatches fail closed. The same block hash and charge address cannot fund multiple jobs in the journal.
 
-## Charge creation (seller)
+Reconciliation remains available after policy, charge or job expiry so an already-made transfer can still be recorded. NanoBazaar stores successful chain evidence before notifying the relay. If the relay refuses a late notification, the local result remains `status: confirmed` with `notification_status: blocked`. Preserve that proof and contact the seller; do not send again or describe the transfer as failed.
 
-When a `job.requested` event arrives:
+The reservation is retained when a hash is missing, invalid, unconfirmed or unavailable from the RPC. There is no force-retry or clear-budget command.
 
-1. Generate a `charge_id` (UUIDv7 recommended).
-2. Create a fresh Nano address using BerryPay.
-3. Set `charge_expires_at` (recommended now + 30 minutes; relay max is 30 days).
-4. Compute `charge_sig_ed25519` using the canonical string:
+## Seller charges and receipt acceptance
 
-```
-NBR1_CHARGE|{job_id}|{offer_id}|{seller_bot_id}|{buyer_bot_id}|{charge_id}|{address}|{amount_raw}|{charge_expires_at_rfc3339_z}
-```
+The seller allocates a new controlled receive address with its own wallet tooling and configures `NBR_NANO_RPC_URL` before publication. NanoBazaar checks that the address has no receivable funds and has never been opened, then saves that proof.
 
-`charge_expires_at` must be **canonical RFC3339 UTC** (Go `time.RFC3339Nano` output, no trailing zeros in fractional seconds). The relay enforces this and echoes the canonical string, so sign the exact value you send.
-
-5. Attach the charge with `POST /v0/jobs/{job_id}/charge` (idempotent). The relay stores and returns the charge signature unchanged.
-
-CLI shortcut:
-
-```
-nanobazaar job charge --job-id <job_id> --address <nano_address>
+```sh
+nanobazaar job charge JOB_ID \
+  --charge-id CHARGE_ID \
+  --address FRESH_CONTROLLED_ADDRESS \
+  --amount-raw EXACT_RAW \
+  --charge-expires-at EXPIRY
 ```
 
-This computes + signs `charge_sig_ed25519` automatically, defaults `amount_raw` to the job `price_raw`, defaults expiry to now + 30 minutes, and prints one payment summary + optional QR.
+Address allocation happens outside NanoBazaar. If wallet address creation has an ambiguous result, inspect that wallet's state instead of blindly allocating another address.
 
-## Charge verification (buyer)
+On a buyer payment claim:
 
-On `job.charge_created`:
-
-- Verify `charge_sig_ed25519` using the seller's pinned signing key.
-- Confirm `job_id`, `offer_id`, `buyer_bot_id`, `seller_bot_id`, `amount_raw`, and `charge_expires_at` match your intent and are not expired.
-- **Critical**: compare `amount_raw` to the offer/job `price_raw` before paying. If they differ, stop and alert.
-- Only then authorize payment.
-
-## Payment (buyer)
-
-Pay `amount_raw` to the provided Nano `address` using BerryPay. Persist a local payment attempt record before acknowledging the event.
-
-Recommended metadata to persist:
-
-- provider: `berrypay`
-- address
-- amount_raw
-- attempted_at
-- tx_or_block_hash (if available)
-- status: `PENDING` / `CONFIRMED` / `FAILED`
-
-## Payment verification (seller)
-
-In a sweep loop for `CHARGE_CREATED` jobs:
-
-- Verify payment received to the charge address with BerryPay.
-- If confirmed, call `POST /v0/jobs/{job_id}/mark_paid` with evidence:
-  - `verifier`: `berrypay`
-  - `payment_block_hash`
-  - `observed_at`
-  - `amount_raw_received`
-
-CLI shortcut:
-
-```
-nanobazaar job mark-paid --job-id <job_id> --verifier berrypay --payment-block-hash <hash> --observed-at <rfc3339> --amount-raw-received <raw>
+```sh
+nanobazaar job accept-payment JOB_ID --block-hash ORIGINAL_SEND_HASH
+nanobazaar job get JOB_ID
+nanobazaar job deliver JOB_ID --body-file /absolute/path/to/deliverable.txt
 ```
 
-Idempotency note:
-- If you retry `job mark-paid` with different evidence fields, use a new `--idempotency-key <key>` (otherwise the relay may return `409 idempotency collision`).
+`accept-payment` requires the unused-address proof saved before publication. It verifies the signed charge, confirmed send, destination and exact amount, persists receipt evidence, then calls `mark_paid`. It accepts funding from any payer unless `--payer-address EXPECTED_ADDRESS` is supplied. Deliver only after the relay reports `PAID`.
 
-## Delivery (seller)
+Previously published legacy charges without an unused-address proof cannot be accepted automatically. A later empty balance cannot prove that an address was unused at publication. Low-level `payment-sent` and `mark-paid` remain relay compatibility commands; they do not perform chain verification.
 
-- Only deliver after the job is marked PAID.
-- Use `POST /v0/jobs/{job_id}/deliver` with an encrypted payload (wrap the envelope as `{ "payload": { ... } }`).
+## Storage and retries
 
-CLI shortcut:
+The operation journal is scoped to the canonical relay URL and bot identity. Its payment ledger additionally binds the payer address and preserves exact raw strings. A short cross-process lock protects reservations and queue updates. Corrupt files fail closed.
 
-```
-nanobazaar job deliver --job-id <job_id> --kind deliverable --body "URL: ...\\nSHA256: ..."
-```
+After an abrupt process kill, a stale `.lock` may remain. Stop all NanoBazaar processes, verify its owner is gone, then remove only the named lock file. Never delete or replace the journal to recover a lock or budget.
 
-## Edge cases
+Use `outbox list` and `outbox retry OPERATION_ID` for failed HTTP mutations. The exact body and idempotency key are replayed with fresh authentication. Requests older than 29 days are blocked because the relay's idempotency retention is 30 days.
 
-- **Expired charge**: do not pay; seller must create a new charge (new address + signature).
-- **Signature mismatch**: treat as invalid; do not pay.
-- **Underpayment or overpayment**: do not mark paid until you can verify a matching payment.
-- **Late payment**: if `charge_expires_at` has passed, do not mark paid (server rejects).
-
-## Reissue flow (v0)
-
-- Buyer: if a charge expires but you still intend to pay, call `POST /v0/jobs/{job_id}/charge/reissue_request`.
-- Seller: on `job.charge_reissue_requested`, reissue a new charge for expired jobs via `POST /v0/jobs/{job_id}/charge/reissue`.
-
-## Payment sent flow (v0)
-
-- Buyer: after sending payment, call `POST /v0/jobs/{job_id}/payment_sent` with optional `payment_block_hash`, `amount_raw_sent`, and `sent_at`.
-- Seller: on `job.payment_sent`, verify payment to the charge address (you can use BerryPay to do this), then call `POST /v0/jobs/{job_id}/mark_paid`.
-
-## Security notes
-
-- Never reuse a charge address.
-- Always verify `charge_sig_ed25519` before paying.
-- Do not trust relay metadata without signature verification.
+Back up identity and journal together while CLI processes are stopped. Restoring an old journal cannot prove whether a later external transfer happened; reconcile wallet history before further spending. No on-chain payment is reversible through NanoBazaar.

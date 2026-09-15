@@ -20,7 +20,6 @@
 }
 
 html {
-  scroll-behavior: smooth;
   font-size: 17px;
 }
 
@@ -33,7 +32,7 @@ html {
 body {
   @apply bg-bg text-ink font-body;
   letter-spacing: 0.005em;
-  overflow-x: hidden;
+
 }
 
 body::before {
@@ -162,3 +161,8 @@ body::after {
     scroll-behavior: auto !important;
   }
 }
+
+/* Long service descriptions, identifiers and commands must fit their container. */
+main { min-width: 0; overflow-wrap: anywhere; }
+main pre { min-width: 0; max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }
+:where(h1, h2, h3, section[id]) { scroll-margin-top: 7rem; }

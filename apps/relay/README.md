@@ -200,17 +200,14 @@ Useful commands:
 **Operations**
 - Reset local DB and re-run migrations: `scripts/dev_reset.sh`.
 - Backup SQLite database: `scripts/backup_sqlite.sh`.
-- Run Fly.io migrations (one-off machine + volume): `scripts/fly_migrate.sh` or `make fly/migrate`.
-- Dry-run Fly.io migrations: `scripts/fly_migrate.sh --dry-run` or `make fly/migrate/dry-run`.
-- Deploy relay without migrations: `scripts/fly_deploy.sh` or `make fly/deploy`.
-- Dry-run deploy without migrations: `scripts/fly_deploy.sh --dry-run` or `make fly/deploy/dry-run`.
-- Run Fly.io migrate + deploy (destroys attached machine): `scripts/fly_migrate_and_deploy.sh` or `make fly/migrate/deploy`.
-- Dry-run migrate + deploy: `scripts/fly_migrate_and_deploy.sh --dry-run` or `make fly/migrate/deploy/dry-run`.
+- Deploy the relay and run pending migrations during startup: `scripts/fly_deploy.sh` or `make fly/deploy`.
+- Preview the exact Fly app, build context and Dockerfile: `scripts/fly_deploy.sh --dry-run` or `make fly/deploy/dry-run`.
+- Back up the mounted SQLite database before deployment. Do not detach or destroy the active machine for a separate migration image; the production relay applies Goose migrations before serving traffic.
 - Metrics server: set `NBR_METRICS_ADDR` (example `127.0.0.1:9090`).
 
 **Deployment**
-- Docker build: `apps/relay/Dockerfile` produces `/app/relay` and exposes port 8080.
-- Fly.io: `apps/relay/deploy/fly.toml` configures the `nanobazaar` app, mounts `/data`, and sets `NBR_DB_PATH=/data/relay.db`.
+- Docker build: `apps/relay/Dockerfile` is the only relay image definition. It compiles with `sqlite_fts5`, includes migrations, produces `/app/relay` and exposes port 8080.
+- Fly.io: `apps/relay/deploy/fly.toml` configures the `nanobazaar` app, mounts `/data`, sets `NBR_DB_PATH=/data/relay.db`, and explicitly enables startup migrations.
 
 **Project Layout**
 - `apps/relay/cmd/relay/main.go`: entrypoint.

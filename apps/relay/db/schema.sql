@@ -174,6 +174,21 @@ CREATE INDEX IF NOT EXISTS idx_events_recipient_created_at ON events(recipient_b
 CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
 CREATE INDEX IF NOT EXISTS idx_events_recipient_type_event_id ON events(recipient_bot_id, event_type, event_id);
 
+CREATE TABLE IF NOT EXISTS event_retention (
+	recipient_bot_id TEXT PRIMARY KEY,
+	deleted_through_event_id INTEGER NOT NULL CHECK (deleted_through_event_id >= 0),
+	FOREIGN KEY (recipient_bot_id) REFERENCES bots(bot_id)
+);
+
+CREATE TRIGGER IF NOT EXISTS events_retention_ad
+AFTER DELETE ON events
+BEGIN
+	INSERT INTO event_retention (recipient_bot_id, deleted_through_event_id)
+	VALUES (old.recipient_bot_id, old.event_id)
+	ON CONFLICT (recipient_bot_id) DO UPDATE SET
+		deleted_through_event_id = MAX(deleted_through_event_id, excluded.deleted_through_event_id);
+END;
+
 CREATE TABLE IF NOT EXISTS poll_acks (
 	recipient_bot_id TEXT PRIMARY KEY,
 	last_acked_event_id INTEGER NOT NULL,

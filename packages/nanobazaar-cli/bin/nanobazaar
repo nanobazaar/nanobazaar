@@ -6,6 +6,8 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const {spawnSync, spawn} = require('child_process');
+const {Journal, readJson, writeJson} = require('../lib/journal');
+const payments = require('../lib/payments');
 
 const DEFAULT_RELAY_URL = 'https://relay.nanobazaar.ai';
 const ENC_ALG = 'libsodium.crypto_box_seal.x25519.xsalsa20poly1305';
@@ -109,12 +111,7 @@ function stableJsonStringify(value) {
 }
 
 function loadState(filePath) {
-  try {
-    const raw = fs.readFileSync(filePath, 'utf8');
-    return JSON.parse(raw);
-  } catch (_) {
-    return {};
-  }
+  return readJson(filePath);
 }
 
 function sleepSync(ms) {
@@ -208,12 +205,7 @@ function saveState(filePath, state) {
     // ignore read errors; we'll (re)create the file below
   }
 
-  fs.writeFileSync(filePath, json);
-  try {
-    fs.chmodSync(filePath, 0o600);
-  } catch (_) {
-    // ignore chmod errors on unsupported platforms
-  }
+  writeJson(filePath, state);
 }
 
 const DEFAULT_STATE_MERGE = Object.freeze({
@@ -643,11 +635,13 @@ function canonicalizeRFC3339Nano(value, label) {
   if (!raw.endsWith('Z')) {
     throw new Error(`${label} must be UTC (end with 'Z').`);
   }
+  const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?Z$/.exec(raw);
   const ms = Date.parse(raw);
-  if (!Number.isFinite(ms)) {
+  if (!match || !Number.isFinite(ms) || new Date(ms).toISOString().slice(0, 19) !== match[1]) {
     throw new Error(`Invalid ${label}: ${raw}`);
   }
-  return formatRFC3339Nano(new Date(ms));
+  const fraction = (match[2] || '').replace(/0+$/, '');
+  return `${match[1]}${fraction ? `.${fraction}` : ''}Z`;
 }
 
 function canonicalChargeString({jobId, offerId, sellerBotId, buyerBotId, chargeId, address, amountRaw, chargeExpiresAt}) {
@@ -722,7 +716,7 @@ async function loadSodium() {
       const sodium = require('libsodium-wrappers');
       sodiumPromise = sodium.ready.then(() => sodium);
     } catch (err) {
-      throw new Error('Missing dependency libsodium-wrappers. Run: (cd skills/nanobazaar && npm install)');
+      throw new Error('Missing dependency libsodium-wrappers. Run pnpm install in packages/nanobazaar-cli, or reinstall nanobazaar-cli.');
     }
   }
   return sodiumPromise;
@@ -798,10 +792,33 @@ function buildURL({path, query, relayUrl}) {
   return url;
 }
 
+function operationJournal(relayUrl, identity, statePath) {
+  return new Journal(`${statePath || buildConfig().state_path}.operations.json`, JSON.stringify([new URL(relayUrl).href, identity.botId]));
+}
+
 async function signedRequest({method, path, query, body, idempotencyKey, relayUrl, keys, identity, extraHeaders, signal}) {
-  const {url, init} = buildSignedFetch({method, path, query, body, idempotencyKey, relayUrl, keys, identity, extraHeaders, signal});
-  const response = await fetch(url, init);
-  const text = await response.text();
+  const journal = operationJournal(relayUrl, identity);
+  let operation;
+  if (idempotencyKey && method.toUpperCase() !== 'GET') {
+    operation = journal.prepareRequest({method, path, query, body: body ? (typeof body === 'string' ? body : JSON.stringify(body)) : '', idempotencyKey});
+    // Relay idempotency records are retained for 30 days. Do not silently replay
+    // an old mutation after its server-side protection may have disappeared.
+    if (Date.now() - Date.parse(operation.created_at) > 29 * 86400000) throw new Error('Outbox request is too old to retry safely. Inspect the job on the relay.');
+    journal.claimRequest(operation.id);
+  }
+  signal = signal || AbortSignal.timeout(30000);
+  let response, text;
+  try {
+    const {url, init} = buildSignedFetch({method, path, query, body, idempotencyKey, relayUrl, keys, identity, extraHeaders, signal});
+    response = await fetch(url, init);
+    text = await response.text();
+    if (operation) journal.finishRequest(operation.id, response);
+  } catch (err) {
+    if (operation) throw new Error(`Request outcome unknown. Retry its saved bytes with: nanobazaar outbox retry ${operation.id}. ${err.message}`);
+    throw err;
+  } finally {
+    if (operation) journal.releaseRequest(operation.id);
+  }
   let data = null;
   if (text) {
     try {
@@ -879,9 +896,7 @@ function readJsonFile(filePath, label) {
 }
 
 function writeJsonFile(filePath, data, compact) {
-  fs.mkdirSync(path.dirname(filePath), {recursive: true});
-  fs.writeFileSync(filePath, JSON.stringify(data, null, compact ? 0 : 2));
-  ensurePrivateFile(filePath);
+  writeJson(filePath, data, compact ? 0 : 2);
 }
 
 async function fetchBot({botId, config, keys, identity}) {
@@ -1055,6 +1070,7 @@ function verifyPayloadInner({inner, envelope, senderSigningPubkeyEd25519}) {
   }
 
   const signature = decodeBase64url(inner.sender_sig_ed25519, 'sender_sig_ed25519');
+  if (payments.fingerprint(String(senderSigningPubkeyEd25519)) !== inner.sender_bot_id) throw new Error('Payload sender signing key fingerprint mismatch');
   let pubKey;
   try {
     pubKey = crypto.createPublicKey({
@@ -1154,6 +1170,9 @@ async function resolvePayloadIdForJob({jobId, state, config, keys, identity}) {
       if (!entry || entry.job_id !== trimmed || !entry.payload_id) {
         continue;
       }
+      // The map also records outgoing request/delivery envelopes. They cannot
+      // be fetched by their sender and must not hide a newer incoming payload.
+      if (entry.recipient_bot_id !== identity.botId || entry.verified !== true) continue;
       if (!best) {
         best = entry;
         continue;
@@ -1225,15 +1244,28 @@ function upsertPayloadMeta(state, payloadId, meta) {
 }
 
 function printHelp() {
-  console.log(`NanoBazaar CLI (OpenClaw skill)
+  console.log(`NanoBazaar CLI (Codex, OpenClaw and other agent runtimes)
 
 Usage:
   nanobazaar <command> [options]
 
 Commands:
+  job get <job_id>             Inspect authoritative job state
+  job list                    List this bot's jobs
+  job verify-charge <job_id>   Verify signed charge without paying
+  job prepare-payment <job_id> --payer-address <address> --policy <file>
+                              Reserve budget and emit one external-wallet handoff
+  job reconcile <job_id> [--block-hash <hash>]
+                              Verify an existing payment; never send again
+  job accept-payment <job_id> --block-hash <hash> [--payer-address <address>]
+                              Seller: verify a confirmed send, then mark paid
+  payments                    List durable payment attempts
+  outbox list | retry <id>     Inspect/replay exact saved HTTP request bytes
+  queue list | retry | resync | complete <event_id>
+                              Recover unfinished work; completion is explicit
   status                     Show config + state summary
   config [--json]            Show derived config (env + state paths)
-  setup [--no-install-berrypay] [--skip-register]
+  setup [--skip-register]
                              Generate keys, register bot, persist state
   bot name set --name <name>
                              Set the bot's public display name
@@ -1241,8 +1273,6 @@ Commands:
                              Clear the bot's public display name
   bot name get [--bot-id <id>]
                              Fetch a bot record (includes bot_name when set)
-  wallet [--output <path>] [--no-qr]
-                             Show BerryPay wallet address + QR
   qr <text>
                              Render a terminal QR code (best-effort)
   search <query> [--tags a,b] [--seller <bot_id>] [--mine]
@@ -1295,7 +1325,7 @@ Notes:
   - Defaults to relay: ${DEFAULT_RELAY_URL}
   - Uses NBR_STATE_PATH for local state (default: ${STATE_DEFAULT})
   - Decrypted payloads are cached under: (dirname NBR_STATE_PATH)/${PAYLOAD_CACHE_DIRNAME}/
-  - Job payloads are encrypted with libsodium (install deps in skills/nanobazaar)
+  - Job payloads are encrypted with libsodium (included with the CLI package)
   - If --since-event-id is omitted, /v0/poll uses the relay's server-side cursor (last_acked_event_id)
 `);
 }
@@ -1314,12 +1344,6 @@ function printConfig(config, compact) {
   if (config.poll_types) {
     console.log(`Poll types: ${config.poll_types}`);
   }
-  if (config.berrypay_bin) {
-    console.log(`BerryPay bin: ${config.berrypay_bin}`);
-  }
-  if (config.payment_provider) {
-    console.log(`Payment provider: ${config.payment_provider}`);
-  }
 }
 
 function buildConfig() {
@@ -1330,8 +1354,6 @@ function buildConfig() {
     state_path: statePath,
     poll_limit: getEnvValue('NBR_POLL_LIMIT'),
     poll_types: getEnvValue('NBR_POLL_TYPES'),
-    berrypay_bin: getEnvValue('NBR_BERRYPAY_BIN') || 'berrypay',
-    payment_provider: getEnvValue('NBR_PAYMENT_PROVIDER') || 'berrypay',
   };
 }
 
@@ -1472,13 +1494,6 @@ async function runBotNameGet(argv) {
 
 function runSetup(args) {
   const script = path.resolve(BASE_DIR, 'tools/setup.js');
-  const nodeBin = process.execPath;
-  const result = spawnSync(nodeBin, [script, ...args], {stdio: 'inherit'});
-  process.exit(typeof result.status === 'number' ? result.status : 1);
-}
-
-function runWallet(args) {
-  const script = path.resolve(BASE_DIR, 'tools/wallet.js');
   const nodeBin = process.execPath;
   const result = spawnSync(nodeBin, [script, ...args], {stdio: 'inherit'});
   process.exit(typeof result.status === 'number' ? result.status : 1);
@@ -1939,35 +1954,21 @@ async function runJobCreate(argv) {
   printJson(result.data, !!flags.compact);
 }
 
-function berrypayWalletAddress(bin) {
-  const berrypayBin = String(bin || 'berrypay').trim() || 'berrypay';
-  const result = spawnSync(berrypayBin, ['address'], {encoding: 'utf8'});
-  if (result.error) {
-    throw new Error(`Failed to run ${berrypayBin}: ${result.error.message}`);
-  }
-  if (result.status !== 0) {
-    const stdout = (result.stdout || '').trim();
-    const stderr = (result.stderr || '').trim();
-    const detail = stdout || stderr || `exit=${result.status}`;
-    throw new Error(`BerryPay address failed: ${detail}`);
-  }
-  let payload;
-  try {
-    payload = JSON.parse(result.stdout);
-  } catch (_) {
-    payload = null;
-  }
-  if (payload && payload.error) {
-    throw new Error(`BerryPay error: ${payload.error}`);
-  }
-  if (payload && payload.address) {
-    return String(payload.address);
-  }
-  const trimmed = (result.stdout || '').trim();
-  if (trimmed) {
-    return trimmed;
-  }
-  throw new Error('BerryPay returned an empty address.');
+async function prepareSellerCharge({config, identity, statePath, jobId, charge}) {
+  const journal = operationJournal(config.relay_url, identity, statePath);
+  const owner = JSON.stringify([jobId, charge.charge_id]);
+  const saved = (journal.read().seller_charges || {})[owner];
+  if (saved && saved.address === charge.address && saved.verified_unused === true) return;
+  payments.rpcUrl(process.env.NBR_NANO_RPC_URL);
+  const proof = await payments.verifyUnusedAddress(process.env.NBR_NANO_RPC_URL, charge.address);
+  journal.transaction(data => {
+    data.charge_addresses = data.charge_addresses || {};
+    data.seller_charges = data.seller_charges || {};
+    if (Object.hasOwn(data.charge_addresses, charge.address) && data.charge_addresses[charge.address] !== owner) throw new Error('Charge address already belongs to another charge; use a fresh address');
+    if (data.seller_charges[owner] && data.seller_charges[owner].address !== charge.address) throw new Error('Charge identity already has another address');
+    data.charge_addresses[charge.address] = owner;
+    if (!data.seller_charges[owner]) data.seller_charges[owner] = {...proof, address: charge.address};
+  });
 }
 
 async function runJobCharge(argv) {
@@ -1993,11 +1994,8 @@ async function runJobCharge(argv) {
 
   const chargeId = flags.chargeId || flags.charge || `chg_${safeIdPart(jobId)}`;
   let address = flags.address ? String(flags.address) : '';
-  if (!address && flags.berrypay) {
-    address = berrypayWalletAddress(config.berrypay_bin);
-  }
   if (!address) {
-    throw new Error('Missing address. Provide --address (or pass --berrypay to use the local BerryPay wallet address).');
+    throw new Error('Missing address. Provide a fresh, controlled Nano receive address with --address.');
   }
 
   const amountRaw = flags.amountRaw
@@ -2030,6 +2028,8 @@ async function runJobCharge(argv) {
     charge_expires_at: expiresAt,
     charge_sig_ed25519: chargeSig,
   };
+
+  await prepareSellerCharge({config, identity, statePath, jobId: String(jobId), charge: payload});
 
   const result = await signedRequest({
     method: 'POST',
@@ -2317,6 +2317,8 @@ async function runJobReissueCharge(argv) {
     payload.charge_sig_ed25519 = signCanonical(keys, canonical);
   }
 
+  await prepareSellerCharge({config, identity, statePath, jobId: String(jobId), charge: payload});
+
   const result = await signedRequest({
     method: 'POST',
     path: `/v0/jobs/${jobId}/charge/reissue`,
@@ -2395,6 +2397,222 @@ async function runJobPaymentSent(argv) {
   printJson(result.data, !!flags.compact);
 }
 
+async function runCommerce(command, argv) {
+  const {flags, positionals} = parseArgs(argv);
+  const config = buildConfig();
+  const state = loadState(config.state_path);
+  const {keys} = requireKeys(state);
+  const identity = deriveIdentity(keys);
+  const journal = operationJournal(config.relay_url, identity, config.state_path);
+  const request = args => signedRequest({...args, relayUrl: config.relay_url, keys, identity});
+  const output = value => printJson(value, !!flags.compact);
+  const checked = async args => {
+    const result = await request(args);
+    if (!result.response.ok) throw new Error(`Relay request failed (${result.response.status}): ${result.text}`);
+    return result.data;
+  };
+
+  if (command === 'payments') {
+    output({payments: Object.values(journal.read().payments).map(payment => ({...payment, send_authorized: false}))});
+    return;
+  }
+  if (command === 'outbox') {
+    const [action = 'list', id] = positionals;
+    if (action === 'list') {
+      output({outbox: Object.values(journal.read().outbox).filter(item => flags.all || item.status !== 'done').map(({body, ...item}) => item)});
+      return;
+    }
+    if (action !== 'retry' || !/^[a-f0-9]{64}$/.test(id || '')) throw new Error('Use: outbox list [--all] | outbox retry <id>');
+    const entry = journal.read().outbox[id];
+    if (!entry) throw new Error('Unknown outbox request');
+    output(await checked({method: entry.method, path: entry.path, query: entry.query, body: entry.body, idempotencyKey: entry.idempotencyKey}));
+    return;
+  }
+  if (command === 'queue') {
+    const [action = 'list', id] = positionals;
+    if (action === 'resync') {
+      const probe = await request({method: 'GET', path: '/v0/poll', query: {limit: 100}});
+      let cutoff;
+      if (probe.response.status === 410) {
+        const min = probe.data && probe.data.min_event_id_retained;
+        if (!Number.isSafeInteger(min) || min < 1) throw new Error('Relay returned an invalid resync cursor');
+        cutoff = min - 1;
+      } else if (!probe.response.ok) throw new Error(`Cannot inspect relay cursor (${probe.response.status})`);
+      const persistSnapshots = entries => journal.transaction(data => {
+        for (const [id, event] of entries) {
+          if (!Object.hasOwn(data.queue, id)) data.queue[id] = {event, status: 'pending', source: 'resync', received_at: new Date().toISOString()};
+        }
+      });
+      // Recover current job state and all retained recipient payloads before
+      // advancing past pruned transport history. Payments stay in their ledger.
+      for (const role of ['buyer', 'seller']) {
+        let cursor;
+        const seen = new Set();
+        do {
+          const page = await checked({method: 'GET', path: '/v0/jobs', query: {role, limit: 100, cursor}});
+          if (!Array.isArray(page.jobs)) throw new Error('Invalid job resync response');
+          persistSnapshots(page.jobs.map(job => [`job_${sha256Hex(stableJsonStringify(job))}`, {event_type: 'job.reconciled', data: job}]));
+          cursor = page.next_cursor;
+          if (cursor && seen.has(cursor)) throw new Error('Repeated job resync cursor');
+          seen.add(cursor);
+        } while (cursor);
+      }
+      let cursor;
+      const seen = new Set();
+      do {
+        const page = await listPayloadMetadata({status: 'all', limit: 100, cursor, config, keys, identity});
+        if (!Array.isArray(page.payloads)) throw new Error('Invalid payload resync response');
+        persistSnapshots(page.payloads.map(payload => [`payload_${sha256Hex(payload.payload_id)}`, {event_type: 'job.payload_available', data: payload}]));
+        cursor = page.next_cursor;
+        if (cursor && seen.has(cursor)) throw new Error('Repeated payload resync cursor');
+        seen.add(cursor);
+      } while (cursor);
+      if (cutoff !== undefined) await checked({method: 'POST', path: '/v0/poll/ack', body: {up_to_event_id: cutoff}, idempotencyKey: `resync:${cutoff}`});
+      await pollOnce({config, state, statePath: config.state_path, keys, identity, limit: 100, ack: true, fetchPayloads: true, quiet: true});
+    }
+    if (action === 'complete') {
+      const item = journal.read().queue[id];
+      if (!item) throw new Error('Unknown queue event');
+      if (extractPayloadRefsFromEvents([item.event]).length && !item.payload_ready) throw new Error('Fetch and verify this event payload using queue retry before completing it');
+      journal.complete(id);
+      output({event_id: id, status: 'done'});
+      return;
+    }
+    if (action === 'retry') {
+      const events = Object.values(journal.read().queue).filter(item => item.status !== 'done').map(item => item.event);
+      const ids = new Set(extractPayloadRefsFromEvents(events).map(ref => ref.payload_id));
+      const results = new Map();
+      for (const payloadId of ids) {
+        results.set(payloadId, await ensurePayloadCached({payloadId, state, statePath: config.state_path, config, keys, identity}));
+      }
+      updateQueuePayloads(journal, results);
+    } else if (action !== 'list' && action !== 'resync') throw new Error('Use: queue list | retry | resync | complete <event_id>');
+    output({queue: Object.entries(journal.read().queue).filter(([, item]) => flags.all || item.status !== 'done').map(([id, item]) => ({id, ...item}))});
+    return;
+  }
+
+  if (command === 'list') {
+    output(await checked({method: 'GET', path: '/v0/jobs', query: {role: flags.role || 'buyer', status: flags.status, cursor: flags.cursor, limit: flags.limit}}));
+    return;
+  }
+  const jobId = String(flags.jobId || positionals[0] || '');
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(jobId)) throw new Error('Provide a valid job id');
+  if (command === 'get') {
+    output(await fetchJob({jobId, config, keys, identity}));
+    return;
+  }
+  const nanoRpcUrl = process.env.NBR_NANO_RPC_URL;
+  const reconcile = blockHash => payments.reconcilePayment({
+    journal, jobId, blockHash, nanoRpcUrl,
+    notify: async attempt => checked({method: 'POST', path: `/v0/jobs/${jobId}/payment_sent`, idempotencyKey: `payment_sent:${jobId}:${attempt.block_hash}`, body: {payment_block_hash: attempt.block_hash, amount_raw_sent: attempt.amount_raw, sent_at: attempt.reserved_at}}),
+  });
+  if (command === 'reconcile') {
+    output(await reconcile(flags.blockHash));
+    return;
+  }
+  if (command === 'accept-payment') {
+    const job = await fetchJob({jobId, config, keys, identity});
+    if (job.job_id !== jobId || job.seller_bot_id !== identity.botId) throw new Error('Only this job seller can accept its payment');
+    const receipts = journal.read().seller_receipts || {};
+    let receipt = Object.hasOwn(receipts, jobId) ? receipts[jobId] : null;
+    if (!receipt) {
+      const charge = payments.verifyCharge(job, {signing_pubkey_ed25519: keys.signing_public_key_b64url}, job.buyer_bot_id, canonicalChargeString);
+      const proof = (journal.read().seller_charges || {})[JSON.stringify([jobId, charge.charge_id])];
+      if (!proof || proof.verified_unused !== true || proof.address !== charge.address) throw new Error('No saved unused-address proof for this charge. Automatic acceptance is blocked; reconcile the legacy charge manually.');
+      const block = await payments.inspectBlock(nanoRpcUrl, flags.blockHash);
+      payments.verifyBlock(block, {...charge, payer_address: flags.payerAddress || block.block_account, payer_block_count: '0'});
+      const normalized = String(flags.blockHash).toUpperCase();
+      receipt = {job_id: jobId, status: 'confirmed', address: charge.address, evidence: {verifier: 'nano_rpc', payment_block_hash: normalized, amount_raw_received: charge.amount_raw, observed_at: formatRFC3339Nano(new Date())}};
+      journal.transaction(data => {
+        data.seller_receipts = data.seller_receipts || {};
+        for (const [id, existing] of Object.entries(data.seller_receipts)) {
+          if (id !== jobId && (existing.evidence.payment_block_hash === normalized || existing.address === charge.address)) throw new Error('Receipt or charge address already used for another job');
+        }
+        if (Object.hasOwn(data.seller_receipts, jobId)) receipt = data.seller_receipts[jobId];
+        else data.seller_receipts[jobId] = receipt;
+      });
+    }
+    if (flags.blockHash && String(flags.blockHash).toUpperCase() !== receipt.evidence.payment_block_hash) throw new Error('Block hash differs from the saved seller receipt');
+    if (receipt.notification_status !== 'notified') {
+      try {
+        await checked({method: 'POST', path: `/v0/jobs/${jobId}/mark_paid`, body: receipt.evidence, idempotencyKey: `verified_paid:${jobId}:${receipt.evidence.payment_block_hash}`});
+        journal.transaction(data => { data.seller_receipts[jobId].notification_status = 'notified'; delete data.seller_receipts[jobId].notification_error; });
+      } catch (err) {
+        journal.transaction(data => {
+          if (data.seller_receipts[jobId].notification_status !== 'notified') {
+            data.seller_receipts[jobId].notification_status = 'blocked';
+            data.seller_receipts[jobId].notification_error = err.message;
+          }
+        });
+      }
+    }
+    output(journal.read().seller_receipts[jobId]);
+    return;
+  }
+  if (command === 'prepare-payment' && Object.hasOwn(journal.read().payments, jobId)) {
+    const existing = journal.read().payments[jobId];
+    output({
+      job_id: jobId,
+      reservation_id: existing.reservation_id || null,
+      status: existing.status,
+      send_authorized: false,
+      action_required: existing.status === 'confirmed'
+        ? 'Payment is already confirmed. Inspect the saved payment; do not send again.'
+        : 'A payment handoff was already issued. Locate the original send block hash and run job reconcile; do not send again.',
+    });
+    return;
+  }
+  const job = await fetchJob({jobId, config, keys, identity});
+  if (job.job_id !== jobId) throw new Error('Relay returned a different job');
+  const seller = await fetchBot({botId: job.seller_bot_id, config, keys, identity});
+  const intent = payments.verifyCharge(job, seller, identity.botId, canonicalChargeString);
+  if (command === 'verify-charge') {
+    output({verified: true, ...intent});
+    return;
+  }
+  if (command !== 'prepare-payment') throw new Error('Unknown commerce command');
+  if (typeof flags.policy !== 'string') throw new Error('Payment requires an operator-approved policy file: --policy <file>');
+  if (typeof flags.payerAddress !== 'string') throw new Error('Payment preparation requires the actual sending account: --payer-address <address>');
+  const policy = readJson(expandHomePath(flags.policy));
+  payments.rpcUrl(nanoRpcUrl);
+  const payerAddress = flags.payerAddress;
+  const payerBlockCount = await payments.payerBoundary(nanoRpcUrl, payerAddress);
+  // RPC lookup may have taken time. Refresh relay state, require the signed
+  // intent to remain identical, then recheck every expiry under the journal lock.
+  const refreshedJob = await fetchJob({jobId, config, keys, identity});
+  const refreshed = payments.verifyCharge(refreshedJob, seller, identity.botId, canonicalChargeString);
+  for (const field of ['job_id', 'offer_id', 'seller_bot_id', 'buyer_bot_id', 'charge_id', 'address', 'amount_raw', 'charge_expires_at', 'job_expires_at']) {
+    if (refreshed[field] !== intent[field]) throw new Error('Payment intent changed while preparing; inspect the current job and start over without sending');
+  }
+  refreshed.payer_address = payerAddress;
+  refreshed.payer_block_count = payerBlockCount;
+  refreshed.relay_url = new URL(config.relay_url).href;
+  const reservation = payments.reservePayment(journal, refreshed, policy);
+  if (!reservation.created) {
+    output({job_id: jobId, reservation_id: reservation.payment.reservation_id || null, status: reservation.payment.status, send_authorized: false, action_required: 'A payment handoff was already issued. Locate the original send block hash and run job reconcile; do not send again.'});
+    return;
+  }
+  const reserved = reservation.payment;
+  output({
+    kind: 'nanobazaar.payment_handoff',
+    version: 1,
+    status: reserved.status,
+    send_authorized: true,
+    reservation_id: reserved.reservation_id,
+    job_id: reserved.job_id,
+    charge_id: reserved.charge_id,
+    buyer_bot_id: reserved.buyer_bot_id,
+    seller_bot_id: reserved.seller_bot_id,
+    relay_url: reserved.relay_url,
+    payer_address: reserved.payer_address,
+    recipient_address: reserved.address,
+    amount_raw: reserved.amount_raw,
+    payer_block_count: reserved.payer_block_count,
+    send_deadline: reserved.send_deadline,
+    action_required: 'Using your own trusted Nano wallet, recheck the deadline and send exactly amount_raw once from payer_address to recipient_address. Then run job reconcile with the original send block hash. This handoff is never reissued.',
+  });
+}
+
 async function cachePayloadToDisk({payloadId, envelope, inner, state, statePath, compact}) {
   const cacheDir = resolvePayloadCacheDir(statePath);
   const cachePath = path.join(cacheDir, safePayloadCacheFilename(payloadId));
@@ -2450,6 +2668,19 @@ async function ensurePayloadCached({payloadId, state, statePath, config, keys, i
     }
     return {payload_id: payloadId, error: err && err.message ? err.message : String(err)};
   }
+}
+
+function updateQueuePayloads(journal, results) {
+  if (!results.size) return;
+  journal.transaction(data => {
+    for (const item of Object.values(data.queue)) {
+      const refs = extractPayloadRefsFromEvents([item.event]);
+      if (!refs.length || !refs.every(ref => results.has(ref.payload_id))) continue;
+      const errors = refs.map(ref => results.get(ref.payload_id).error).filter(Boolean);
+      item.payload_error = errors.length ? errors.join('; ') : null;
+      item.payload_ready = errors.length === 0;
+    }
+  });
 }
 
 async function runPayloadList(argv) {
@@ -2574,6 +2805,9 @@ async function pollOnce({
   if (!keys || !identity) {
     throw new Error('Missing keys/identity.');
   }
+  if (ack !== false && (types || since !== undefined && since !== null)) {
+    throw new Error('Filtered polling or an explicit cursor requires --no-ack, so omitted events cannot be silently acknowledged. Use unfiltered poll for durable ingestion.');
+  }
 
   // NOTE: By default, rely on the relay's server-side cursor (last_acked_event_id).
   // Passing a local cursor can silently skip events if the state file is reused
@@ -2612,6 +2846,10 @@ async function pollOnce({
   }
 
   const events = result.data && result.data.events ? result.data.events : [];
+  const journal = operationJournal(config.relay_url, identity, effectiveStatePath);
+  // Unfinished work is never evicted with the capped display history. A relay
+  // ACK is safe only once this transaction has reached disk.
+  journal.ingest(events);
   const addedEvents = appendEvents(state, events);
   if (debugLog) {
     debugLog('response', {status: result.response.status, events: events.length, added: addedEvents});
@@ -2632,11 +2870,12 @@ async function pollOnce({
       if (debugLog) {
         debugLog('payloads detected', {count: refs.length, payload_ids: refs.map((ref) => ref.payload_id)});
       }
-      for (const ref of refs) {
+      const results = new Map();
+      for (const payloadId of new Set(refs.map(ref => ref.payload_id))) {
         // Best-effort caching: poll remains useful even if a payload decrypt fails.
         // Errors are persisted in known_payloads to aid follow-up debugging.
-        await ensurePayloadCached({
-          payloadId: ref.payload_id,
+        const cached = await ensurePayloadCached({
+          payloadId,
           state,
           statePath: effectiveStatePath,
           config,
@@ -2644,7 +2883,9 @@ async function pollOnce({
           identity,
           debugLog,
         });
+        results.set(payloadId, cached);
       }
+      updateQueuePayloads(journal, results);
     }
   }
 
@@ -3247,7 +3488,6 @@ const DISPATCH_BOOL_FLAGS = new Set([
   'compact',
   'raw',
   'cache-only',
-  'berrypay',
   'print-polls',
   'fetch-payloads',
   'skip-register',
@@ -3314,6 +3554,11 @@ function loadVersion() {
 
 async function main() {
   let argv = process.argv.slice(2);
+  // Honor --state-path consistently, including journal writes and subcommands.
+  for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === '--state-path' && argv[i + 1]) process.env.NBR_STATE_PATH = expandHomePath(argv[i + 1]);
+    if (argv[i].startsWith('--state-path=')) process.env.NBR_STATE_PATH = expandHomePath(argv[i].slice(13));
+  }
   // Treat --debug as a global flag (it can appear anywhere without stealing positionals).
   let debugValue = null;
   const filtered = [];
@@ -3389,9 +3634,6 @@ async function main() {
       }
       throw new Error('Unknown bot command. Use: bot name ...');
     }
-    case 'wallet':
-      runWallet(rest);
-      return;
     case 'qr':
       runQr(rest);
       return;
@@ -3422,7 +3664,12 @@ async function main() {
         'payment-sent',
         'mark-paid',
         'deliver',
+        'get', 'list', 'verify-charge', 'prepare-payment', 'reconcile', 'accept-payment',
       ]);
+      if (['get', 'list', 'verify-charge', 'prepare-payment', 'reconcile', 'accept-payment'].includes(sub)) {
+        await runCommerce(sub, subArgv);
+        return;
+      }
       if (sub === 'create') {
         await runJobCreate(subArgv);
         return;
@@ -3451,7 +3698,7 @@ async function main() {
         await runJobDeliver(subArgv);
         return;
       }
-      throw new Error('Unknown job command. Use: job create|charge|reissue-request|reissue-charge|payment-sent|mark-paid|deliver');
+      throw new Error('Unknown job command. Use: job create|charge|reissue-request|reissue-charge|verify-charge|prepare-payment|reconcile|accept-payment|payment-sent|mark-paid|deliver');
     }
     case 'payload': {
       const {sub, argv: subArgv} = splitSubcommand(rest, ['list', 'fetch']);
@@ -3477,6 +3724,11 @@ async function main() {
       return;
     case 'watch':
       await runWatch(rest);
+      return;
+    case 'outbox':
+    case 'queue':
+    case 'payments':
+      await runCommerce(command, rest);
       return;
     default:
       throw new Error(`Unknown command: ${command}`);

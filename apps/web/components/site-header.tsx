@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -9,10 +9,12 @@ const GITHUB_URL = "https://github.com/nanobazaar/nanobazaar";
 const TWITTER_URL = "https://x.com/TheNanoBazaar";
 
 export function SiteHeader() {
+  const menuButton = useRef<HTMLButtonElement>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const navItems = [
     { href: "/offers", label: "Browse offers" },
+    { href: "/llms.txt", label: "Agent instructions" },
     { href: "/how-it-works", label: "How it works" },
     { href: "/faq", label: "FAQ" },
     { href: "/troubleshooting", label: "Troubleshooting" }
@@ -21,10 +23,10 @@ export function SiteHeader() {
   return (
     <header className="sticky top-0 z-50 border-b border-white/10 bg-bg/70 backdrop-blur">
       <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-4">
-        <Link href="/" className="flex items-center gap-3">
+        <Link href="/" className="flex shrink-0 items-center gap-3">
           <Image
             src="/images/nanobazaar_logo_transparent.png"
-            alt="NanoBazaar"
+            alt=""
             width={44}
             height={44}
             className="h-11 w-11"
@@ -33,14 +35,14 @@ export function SiteHeader() {
             NanoBazaar
           </span>
         </Link>
-        <nav className="hidden items-center gap-6 text-sm font-medium text-ink/70 md:flex">
+        <nav aria-label="Main navigation" className="hidden items-center gap-4 text-sm font-medium text-ink/70 xl:flex">
           {navItems.map((item) => (
             <Link key={item.href} href={item.href} className="transition hover:text-ink">
               {item.label}
             </Link>
           ))}
         </nav>
-        <div className="hidden items-center gap-3 md:flex">
+        <div className="hidden items-center gap-3 xl:flex">
           <a
             href={GITHUB_URL}
             className="inline-flex items-center justify-center rounded-full border border-white/10 bg-white/5 p-2 text-ink/70 transition hover:border-white/20 hover:text-ink"
@@ -75,14 +77,16 @@ export function SiteHeader() {
             <Link href="/#get-started">Get started</Link>
           </Button>
         </div>
-        <div className="relative md:hidden">
+        <div className="relative xl:hidden">
           <button
             type="button"
             className="inline-flex cursor-pointer items-center justify-center rounded-lg border border-white/10 bg-white/5 p-2 text-ink/80 transition hover:border-white/20 hover:text-ink"
             aria-expanded={mobileOpen}
+            ref={menuButton}
             aria-controls="mobile-menu"
             aria-label="Toggle navigation menu"
             onClick={() => setMobileOpen((open) => !open)}
+            onKeyDown={(event) => { if (event.key === "Escape") { setMobileOpen(false); menuButton.current?.focus(); } }}
           >
             <svg
               aria-hidden="true"
@@ -95,6 +99,7 @@ export function SiteHeader() {
           {mobileOpen ? (
             <div
               id="mobile-menu"
+              onKeyDown={(event) => { if (event.key === "Escape") { setMobileOpen(false); menuButton.current?.focus(); } }}
               className="absolute right-0 top-[calc(100%+0.75rem)] z-50 w-64 rounded-2xl border border-white/10 bg-panel-2/95 p-3 shadow-soft backdrop-blur"
             >
               <nav className="flex flex-col text-sm font-medium text-ink/80">

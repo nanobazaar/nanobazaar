@@ -52,10 +52,15 @@ type offerCreateRequest struct {
 	RequestSchemaHint string     `json:"request_schema_hint"`
 }
 
+type offerSeller struct {
+	SellerBotName    string     `json:"seller_bot_name,omitempty"`
+	SellerLastSeenAt *time.Time `json:"seller_last_seen_at"`
+}
+
 type offerResponse struct {
-	OfferID           string     `json:"offer_id"`
-	SellerBotID       string     `json:"seller_bot_id"`
-	SellerBotName     string     `json:"seller_bot_name,omitempty"`
+	OfferID     string `json:"offer_id"`
+	SellerBotID string `json:"seller_bot_id"`
+	offerSeller
 	Title             string     `json:"title"`
 	Description       string     `json:"description"`
 	Tags              []string   `json:"tags"`
@@ -73,8 +78,8 @@ type offerListResponse struct {
 }
 
 type publicOfferResponse struct {
-	OfferID           string    `json:"offer_id"`
-	SellerBotName     string    `json:"seller_bot_name,omitempty"`
+	OfferID string `json:"offer_id"`
+	offerSeller
 	Title             string    `json:"title"`
 	Description       string    `json:"description"`
 	Tags              []string  `json:"tags"`
@@ -104,7 +109,7 @@ type offerCursor struct {
 
 type offerEntry struct {
 	Offer         sqlc.Offer
-	SellerBotName string
+	Seller        offerSeller
 	Tags          []string
 	Score         int
 	Price         *big.Int
@@ -164,7 +169,7 @@ func (h *OfferHandler) Create(w http.ResponseWriter, r *http.Request) {
 	resp := offerResponse{
 		OfferID:           offerID,
 		SellerBotID:       sellerBotID,
-		SellerBotName:     h.lookupBotName(r.Context(), sellerBotID),
+		offerSeller:       h.lookupSeller(r.Context(), sellerBotID),
 		Title:             normalized.Title,
 		Description:       normalized.Description,
 		Tags:              normalized.Tags,
@@ -209,7 +214,7 @@ func (h *OfferHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, offerToResponse(offer, tags, h.lookupBotName(r.Context(), offer.SellerBotID)))
+	writeJSON(w, http.StatusOK, offerToResponse(offer, tags, h.lookupSeller(r.Context(), offer.SellerBotID)))
 }
 
 func (h *OfferHandler) Cancel(w http.ResponseWriter, r *http.Request) {
@@ -255,7 +260,7 @@ func (h *OfferHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 			writeJSONInternalError(w, r, "offer tags failed", err)
 			return
 		}
-		writeJSON(w, http.StatusOK, offerToResponse(offer, tags, h.lookupBotName(r.Context(), offer.SellerBotID)))
+		writeJSON(w, http.StatusOK, offerToResponse(offer, tags, h.lookupSeller(r.Context(), offer.SellerBotID)))
 		return
 	case string(domain.OfferExpired):
 		writeJSONError(w, http.StatusConflict, "offer expired")
@@ -282,7 +287,7 @@ func (h *OfferHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("offer_cancel offer_id=%s seller_bot_id=%s", offer.OfferID, offer.SellerBotID)
-	writeJSON(w, http.StatusOK, offerToResponse(offer, tags, h.lookupBotName(r.Context(), offer.SellerBotID)))
+	writeJSON(w, http.StatusOK, offerToResponse(offer, tags, h.lookupSeller(r.Context(), offer.SellerBotID)))
 }
 
 func (h *OfferHandler) Pause(w http.ResponseWriter, r *http.Request) {
@@ -334,7 +339,7 @@ func (h *OfferHandler) Pause(w http.ResponseWriter, r *http.Request) {
 			writeJSONInternalError(w, r, "offer tags failed", err)
 			return
 		}
-		writeJSON(w, http.StatusOK, offerToResponse(offer, tags, h.lookupBotName(r.Context(), offer.SellerBotID)))
+		writeJSON(w, http.StatusOK, offerToResponse(offer, tags, h.lookupSeller(r.Context(), offer.SellerBotID)))
 		return
 	}
 
@@ -354,7 +359,7 @@ func (h *OfferHandler) Pause(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("offer_pause offer_id=%s seller_bot_id=%s", offer.OfferID, offer.SellerBotID)
-	writeJSON(w, http.StatusOK, offerToResponse(offer, tags, h.lookupBotName(r.Context(), offer.SellerBotID)))
+	writeJSON(w, http.StatusOK, offerToResponse(offer, tags, h.lookupSeller(r.Context(), offer.SellerBotID)))
 }
 
 func (h *OfferHandler) Resume(w http.ResponseWriter, r *http.Request) {
@@ -406,7 +411,7 @@ func (h *OfferHandler) Resume(w http.ResponseWriter, r *http.Request) {
 			writeJSONInternalError(w, r, "offer tags failed", err)
 			return
 		}
-		writeJSON(w, http.StatusOK, offerToResponse(offer, tags, h.lookupBotName(r.Context(), offer.SellerBotID)))
+		writeJSON(w, http.StatusOK, offerToResponse(offer, tags, h.lookupSeller(r.Context(), offer.SellerBotID)))
 		return
 	}
 
@@ -426,7 +431,7 @@ func (h *OfferHandler) Resume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("offer_resume offer_id=%s seller_bot_id=%s", offer.OfferID, offer.SellerBotID)
-	writeJSON(w, http.StatusOK, offerToResponse(offer, tags, h.lookupBotName(r.Context(), offer.SellerBotID)))
+	writeJSON(w, http.StatusOK, offerToResponse(offer, tags, h.lookupSeller(r.Context(), offer.SellerBotID)))
 }
 
 func (h *OfferHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -527,7 +532,7 @@ func (h *OfferHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	respOffers := make([]offerResponse, 0, len(entries))
 	for _, entry := range entries {
-		respOffers = append(respOffers, offerToResponse(entry.Offer, entry.Tags, entry.SellerBotName))
+		respOffers = append(respOffers, offerToResponse(entry.Offer, entry.Tags, entry.Seller))
 	}
 
 	writeJSON(w, http.StatusOK, offerListResponse{
@@ -637,11 +642,13 @@ func (h *OfferHandler) PublicGet(w http.ResponseWriter, r *http.Request) {
 	row := h.Store.DB.QueryRowContext(r.Context(), selectPublicOfferByIDQuery, offerID)
 	var offer sqlc.Offer
 	var sellerBotName sql.NullString
+	var sellerLastSeenAt sql.NullTime
 	var purchaseCount int64
 	if err := row.Scan(
 		&offer.OfferID,
 		&offer.SellerBotID,
 		&sellerBotName,
+		&sellerLastSeenAt,
 		&offer.Title,
 		&offer.Description,
 		&offer.TagsJson,
@@ -683,7 +690,7 @@ func (h *OfferHandler) PublicGet(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, publicOfferToResponse(offerEntry{
 		Offer:         offer,
-		SellerBotName: sellerBotName.String,
+		Seller:        sellerMetadata(sellerBotName, sellerLastSeenAt),
 		Tags:          tags,
 		PurchaseCount: int(purchaseCount),
 	}))
@@ -743,11 +750,13 @@ func (h *OfferHandler) loadOfferEntries(ctx context.Context, sellerBotID, query 
 	for rows.Next() {
 		var offer sqlc.Offer
 		var sellerBotName sql.NullString
+		var sellerLastSeenAt sql.NullTime
 		var purchaseCount int64
 		if err := rows.Scan(
 			&offer.OfferID,
 			&offer.SellerBotID,
 			&sellerBotName,
+			&sellerLastSeenAt,
 			&offer.Title,
 			&offer.Description,
 			&offer.TagsJson,
@@ -781,7 +790,7 @@ func (h *OfferHandler) loadOfferEntries(ctx context.Context, sellerBotID, query 
 
 		entries = append(entries, offerEntry{
 			Offer:         offer,
-			SellerBotName: sellerBotName.String,
+			Seller:        sellerMetadata(sellerBotName, sellerLastSeenAt),
 			Tags:          tags,
 			Score:         0,
 			Price:         parsePrice(offer.PriceRaw),
@@ -816,12 +825,14 @@ func (h *OfferHandler) loadOfferEntriesSearch(ctx context.Context, sellerBotID, 
 	for rows.Next() {
 		var offer sqlc.Offer
 		var sellerBotName sql.NullString
+		var sellerLastSeenAt sql.NullTime
 		var purchaseCount int64
 		var score int64
 		if err := rows.Scan(
 			&offer.OfferID,
 			&offer.SellerBotID,
 			&sellerBotName,
+			&sellerLastSeenAt,
 			&offer.Title,
 			&offer.Description,
 			&offer.TagsJson,
@@ -856,7 +867,7 @@ func (h *OfferHandler) loadOfferEntriesSearch(ctx context.Context, sellerBotID, 
 
 		entries = append(entries, offerEntry{
 			Offer:         offer,
-			SellerBotName: sellerBotName.String,
+			Seller:        sellerMetadata(sellerBotName, sellerLastSeenAt),
 			Tags:          tags,
 			Score:         int(score),
 			Price:         parsePrice(offer.PriceRaw),
@@ -888,11 +899,13 @@ func (h *OfferHandler) loadOfferEntriesSearchFallback(ctx context.Context, selle
 	for rows.Next() {
 		var offer sqlc.Offer
 		var sellerBotName sql.NullString
+		var sellerLastSeenAt sql.NullTime
 		var purchaseCount int64
 		if err := rows.Scan(
 			&offer.OfferID,
 			&offer.SellerBotID,
 			&sellerBotName,
+			&sellerLastSeenAt,
 			&offer.Title,
 			&offer.Description,
 			&offer.TagsJson,
@@ -931,7 +944,7 @@ func (h *OfferHandler) loadOfferEntriesSearchFallback(ctx context.Context, selle
 
 		entries = append(entries, offerEntry{
 			Offer:         offer,
-			SellerBotName: sellerBotName.String,
+			Seller:        sellerMetadata(sellerBotName, sellerLastSeenAt),
 			Tags:          tags,
 			Score:         score,
 			Price:         parsePrice(offer.PriceRaw),
@@ -961,18 +974,24 @@ func (h *OfferHandler) loadOfferTags(ctx context.Context, offer sqlc.Offer) ([]s
 	return h.Store.ListOfferTags(ctx, offer.OfferID)
 }
 
-func (h *OfferHandler) lookupBotName(ctx context.Context, botID string) string {
+func (h *OfferHandler) lookupSeller(ctx context.Context, botID string) offerSeller {
 	if h == nil || h.Store == nil || botID == "" {
-		return ""
+		return offerSeller{}
 	}
 	bot, err := h.Store.GetBot(ctx, botID)
 	if err != nil {
-		return ""
+		return offerSeller{}
 	}
-	if bot.BotName.Valid {
-		return bot.BotName.String
+	return sellerMetadata(bot.BotName, bot.LastSeenAt)
+}
+
+func sellerMetadata(name sql.NullString, lastSeen sql.NullTime) offerSeller {
+	seller := offerSeller{SellerBotName: name.String}
+	if lastSeen.Valid {
+		at := lastSeen.Time.UTC()
+		seller.SellerLastSeenAt = &at
 	}
-	return ""
+	return seller
 }
 
 func (h *OfferHandler) markOfferExpired(now time.Time, offer *sqlc.Offer) bool {
@@ -1009,7 +1028,7 @@ func (h *OfferHandler) now() time.Time {
 	return h.Clock()
 }
 
-func offerToResponse(offer sqlc.Offer, tags []string, sellerBotName string) offerResponse {
+func offerToResponse(offer sqlc.Offer, tags []string, seller offerSeller) offerResponse {
 	var expiresAt *time.Time
 	if offer.ExpiresAt.Valid {
 		t := offer.ExpiresAt.Time
@@ -1023,7 +1042,7 @@ func offerToResponse(offer sqlc.Offer, tags []string, sellerBotName string) offe
 	return offerResponse{
 		OfferID:           offer.OfferID,
 		SellerBotID:       offer.SellerBotID,
-		SellerBotName:     sellerBotName,
+		offerSeller:       seller,
 		Title:             offer.Title,
 		Description:       offer.Description,
 		Tags:              tags,
@@ -1043,7 +1062,7 @@ func publicOfferToResponse(entry offerEntry) publicOfferResponse {
 	}
 	return publicOfferResponse{
 		OfferID:           entry.Offer.OfferID,
-		SellerBotName:     entry.SellerBotName,
+		offerSeller:       entry.Seller,
 		Title:             entry.Offer.Title,
 		Description:       entry.Offer.Description,
 		Tags:              entry.Tags,
@@ -1520,7 +1539,7 @@ func newOfferID(now time.Time) (string, error) {
 }
 
 const selectOffersQuery = `
-SELECT o.offer_id, o.seller_bot_id, b.bot_name, o.title, o.description, o.tags_json, o.price_raw, o.turnaround_seconds, o.created_at, o.expires_at, o.status, o.cancelled_at, o.request_schema_hint,
+SELECT o.offer_id, o.seller_bot_id, b.bot_name, b.last_seen_at, o.title, o.description, o.tags_json, o.price_raw, o.turnaround_seconds, o.created_at, o.expires_at, o.status, o.cancelled_at, o.request_schema_hint,
 	COALESCE(p.purchase_count, 0) AS purchase_count
 FROM offers o
 LEFT JOIN bots b ON b.bot_id = o.seller_bot_id
@@ -1534,7 +1553,7 @@ WHERE (?1 = '' OR o.seller_bot_id = ?1)
 	AND (o.status = 'ACTIVE' OR (?2 = 1 AND o.status = 'PAUSED'))`
 
 const selectPublicOfferByIDQuery = `
-SELECT o.offer_id, o.seller_bot_id, b.bot_name, o.title, o.description, o.tags_json, o.price_raw, o.turnaround_seconds, o.created_at, o.expires_at, o.status, o.cancelled_at, o.request_schema_hint,
+SELECT o.offer_id, o.seller_bot_id, b.bot_name, b.last_seen_at, o.title, o.description, o.tags_json, o.price_raw, o.turnaround_seconds, o.created_at, o.expires_at, o.status, o.cancelled_at, o.request_schema_hint,
 	COALESCE(p.purchase_count, 0) AS purchase_count
 FROM offers o
 LEFT JOIN bots b ON b.bot_id = o.seller_bot_id
@@ -1548,7 +1567,7 @@ WHERE o.offer_id = ?1
 LIMIT 1`
 
 const selectOffersSearchQuery = `
-SELECT o.offer_id, o.seller_bot_id, b.bot_name, o.title, o.description, o.tags_json, o.price_raw, o.turnaround_seconds, o.created_at, o.expires_at, o.status, o.cancelled_at, o.request_schema_hint,
+SELECT o.offer_id, o.seller_bot_id, b.bot_name, b.last_seen_at, o.title, o.description, o.tags_json, o.price_raw, o.turnaround_seconds, o.created_at, o.expires_at, o.status, o.cancelled_at, o.request_schema_hint,
 	COALESCE(p.purchase_count, 0) AS purchase_count,
 	CAST((1000000.0 / (1.0 + bm25(offers_fts, 10.0, 2.0, 5.0))) AS INTEGER) AS score
 FROM offers_fts

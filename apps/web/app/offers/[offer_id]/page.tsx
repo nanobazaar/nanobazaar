@@ -2,10 +2,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import prettyMs from "pretty-ms";
 
+import { SellerLastSeen } from "@/components/seller-last-seen";
 import { Reveal } from "@/components/reveal";
 import { Button } from "@/components/ui/button";
 import { formatNanoRaw } from "@/lib/nano";
-import { getPublicOffer } from "@/lib/relay-offers";
+import { getPublicOffer, getPublicOfferDataUrl } from "@/lib/relay-offers";
 import { OfferBuyPanel } from "./offer-buy-panel";
 
 export default async function OfferDetailPage({
@@ -36,9 +37,7 @@ export default async function OfferDetailPage({
               <Button asChild variant="outline" size="sm">
                 <Link href="/offers">Back to offers</Link>
               </Button>
-              <span className="font-mono text-xs text-ink/45">
-                {offer.offerId}
-              </span>
+
             </div>
 
             <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
@@ -47,7 +46,7 @@ export default async function OfferDetailPage({
                   <p className="text-xs uppercase tracking-[0.3em] text-ink/60">
                     Offer
                   </p>
-                  <h1 className="min-w-0 break-words font-display text-[clamp(2.2rem,4vw,3.2rem)] font-extrabold tracking-tight text-ink">
+                  <h1 className="min-w-0 break-words font-display text-[clamp(1.8rem,4vw,3.2rem)] leading-tight font-extrabold tracking-tight text-ink">
                     {offer.title}
                   </h1>
                   {offer.sellerBotName ? (
@@ -58,6 +57,7 @@ export default async function OfferDetailPage({
                       </span>
                     </p>
                   ) : null}
+                  <SellerLastSeen at={offer.sellerLastSeenAt} explain />
                 </div>
 
                 <p className="min-w-0 break-words text-base text-ink/70">
@@ -82,25 +82,25 @@ export default async function OfferDetailPage({
 
               <div className="glass-panel w-full rounded-2xl p-5 lg:max-w-[22rem]">
                 <div className="space-y-3 text-sm">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-baseline justify-between gap-3">
                     <span className="text-ink/60">Price</span>
                     <span className="font-semibold text-ink">{priceLabel}</span>
                   </div>
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-baseline justify-between gap-3">
                     <span className="text-ink/60">Turnaround</span>
                     <span className="font-semibold text-ink">
                       {turnaroundLabel}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-baseline justify-between gap-3">
                     <span className="text-ink/60">Purchased</span>
                     <span className="font-semibold text-ink">{purchased}</span>
                   </div>
-                  <div className="flex items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-baseline justify-between gap-3">
                     <span className="text-ink/60">Created</span>
-                    <span className="min-w-0 truncate font-mono text-xs text-ink/70">
-                      {offer.createdAt}
-                    </span>
+                    <time dateTime={offer.createdAt} className="min-w-0 text-right text-xs text-ink/70">
+                      {new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(offer.createdAt))}
+                    </time>
                   </div>
                 </div>
               </div>
@@ -111,12 +111,12 @@ export default async function OfferDetailPage({
 
       <section className="mt-10">
         <div className="glass-panel rounded-2xl p-6">
-          <h2 className="text-base font-semibold text-ink">Buy via agent</h2>
+          <h2 className="text-base font-semibold text-ink">Request this service</h2>
           <p className="mt-1 text-sm text-ink/60">
-            Provide input, then copy a ready-to-use prompt for your agent.
+            Fetch the offer as JSON, or prepare a request for your agent below.
           </p>
           <div className="mt-6">
-            <OfferBuyPanel offer={offer} />
+            <OfferBuyPanel offer={offer} dataUrl={getPublicOfferDataUrl(offer.offerId)} />
           </div>
         </div>
       </section>

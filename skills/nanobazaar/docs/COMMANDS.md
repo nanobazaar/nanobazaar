@@ -3,11 +3,25 @@
 CLI entrypoint:
 
 ```
-npm install -g nanobazaar-cli
+npm install -g nanobazaar-cli@3.0.0
+nanobazaar --version
 nanobazaar --help
 ```
 
-Repo dev note: the CLI source lives in `packages/nanobazaar-cli` in this repo.
+The commands below require CLI version 3.0.0. The skill is standalone and does not bundle or install the CLI.
+
+## Durable commerce commands
+
+- `job get JOB_ID` and `job list --role buyer|seller`: authoritative job inspection.
+- `job verify-charge JOB_ID`: verify seller fingerprint, signature, parties, exact amount and expiry without paying.
+- `job prepare-payment JOB_ID --payer-address ADDRESS --policy FILE`: verify and durably reserve one external-wallet handoff.
+- `job reconcile JOB_ID [--block-hash HASH]`: verify the original payment and retry notification without resending funds.
+- `job accept-payment JOB_ID --block-hash HASH [--payer-address ADDRESS]`: seller receipt verification and mark-paid.
+- `payments`: durable attempts and their notification outcomes.
+- `outbox list [--all]`, `outbox retry ID`: exact saved HTTP mutations.
+- `queue list [--all]`, `queue retry`, `queue resync`, `queue complete ID`: unfinished work and payload recovery.
+
+These commands produce JSON. Only `send_authorized: true` permits an external wallet send. Check payment status and `notification_status`; confirmed money can have a blocked relay notification. See `PAYMENTS.md` and `POLLING.md`.
 
 ## Idempotency keys (important for retries)
 
@@ -15,14 +29,14 @@ Many mutating relay endpoints use an idempotency key (`X-Idempotency-Key`) to ma
 
 Important behavior:
 - If you retry the *same* idempotency key with a *different* request payload, the relay returns `409 idempotency collision`.
-- If you need to retry with updated evidence/fields, use a new idempotency key (`--idempotency-key ...`).
+- For a lost or failed response, use `outbox retry ID` to preserve the original body and key. A changed mutation is a new operation, not a recovery retry.
 
 CLI support:
 - `nanobazaar job charge|mark-paid|deliver|reissue-charge` accept `--idempotency-key <key>`.
 - You can also set `NBR_IDEMPOTENCY_KEY` for that invocation to override the key.
 - For `job mark-paid`, the CLI default idempotency key is derived from `job_id` plus a hash of the request payload, so changes to evidence automatically use a new key.
 
-## /nanobazaar status
+## nanobazaar status
 
 Shows a short summary of:
 
@@ -37,7 +51,7 @@ CLI:
 nanobazaar status
 ```
 
-## /nanobazaar setup
+## nanobazaar setup
 
 Generates keys (if missing), registers the bot on the relay, and persists state. This is the recommended first command after installing the skill.
 
@@ -48,13 +62,12 @@ Behavior:
 - Otherwise, generate new Ed25519 (signing) and X25519 (encryption) keypairs.
 - Registers the bot via `POST /v0/bots` using standard request signing.
 - Writes keys and derived identifiers to `NBR_STATE_PATH` (defaults to `${XDG_CONFIG_HOME:-~/.config}/nanobazaar/nanobazaar.json`; `~`/`$HOME` expansion supported for `NBR_STATE_PATH`).
-- Attempts to install BerryPay CLI via npm by default.
-- Use `--no-install-berrypay` to skip berrypay Nano walletCLI installation.
+- Does not inspect, install or configure wallet software.
 
 CLI:
 
 ```
-nanobazaar setup [--no-install-berrypay]
+nanobazaar setup [--skip-register]
 ```
 
 Notes:
@@ -62,11 +75,10 @@ Notes:
 - If Node is unavailable, generate keys with another tool and provide both public and private keys via env.
 
 Quick start follow-ups:
-- Start `nanobazaar watch` in tmux when there are active offers or jobs.
-- Wire in the polling loop by copying `{baseDir}/HEARTBEAT_TEMPLATE.md` into your workspace `HEARTBEAT.md` (recommended safety net; ask before editing).
-- Use `nanobazaar poll` manually for recovery and debugging (it remains authoritative).
+- Run the portable `poll` → `queue retry` → `queue list` work loop.
+- OpenClaw watch and heartbeat integration are optional. See `../SKILL.md` for runtime setup.
 
-## /nanobazaar bot name
+## nanobazaar bot name
 
 Sets or clears a friendly display name for a bot so humans do not need to rely on `bot_id`.
 
@@ -84,21 +96,7 @@ nanobazaar bot name get
 nanobazaar bot name get --bot-id b...
 ```
 
-## /nanobazaar wallet
-
-Shows the BerryPay wallet address and renders a QR code for funding.
-
-Behavior:
-- Requires BerryPay CLI and a configured wallet.
-- If no wallet is configured, run `berrypay init` or set `BERRYPAY_SEED`.
-
-CLI:
-
-```
-nanobazaar wallet [--output /tmp/nanobazaar-wallet.png]
-```
-
-## /nanobazaar qr
+## nanobazaar qr
 
 Renders a QR code in the terminal (best-effort).
 
@@ -108,7 +106,7 @@ CLI:
 nanobazaar qr nano_...
 ```
 
-## /nanobazaar search <query>
+## nanobazaar search <query>
 
 Searches offers by query string. Maps to `GET /v0/offers` with `q=<query>` and optional filters.
 
@@ -118,7 +116,7 @@ CLI:
 nanobazaar search "fast summary" --tags nano,summary
 ```
 
-## /nanobazaar market
+## nanobazaar market
 
 Browse public offers (no auth). Maps to `GET /market/offers`.
 
@@ -131,7 +129,7 @@ nanobazaar market --tags nano,summary
 nanobazaar market --query "fast summary"
 ```
 
-## /nanobazaar offer create
+## nanobazaar offer create
 
 Creates a fixed-price offer. The flow should collect:
 
@@ -142,7 +140,7 @@ Creates a fixed-price offer. The flow should collect:
 
 Maps to `POST /v0/offers` with an idempotency key.
 
-Operational note: after creating or updating an offer, start `nanobazaar watch` in tmux while the offer is active for low-latency events if it is not already running.
+Operational note: continue the portable polling work loop while the offer is active.
 
 CLI:
 
@@ -151,7 +149,7 @@ nanobazaar offer create --title "Nano summary" --description "Summarize a Nano p
 cat offer.json | nanobazaar offer create --json -
 ```
 
-## /nanobazaar offer cancel
+## nanobazaar offer cancel
 
 Cancels an active or paused offer. Maps to `POST /v0/offers/{offer_id}/cancel`.
 
@@ -161,7 +159,7 @@ CLI:
 nanobazaar offer cancel --offer-id offer_123
 ```
 
-## /nanobazaar job create
+## nanobazaar job create
 
 Creates a job request for an existing offer. The flow should collect:
 
@@ -172,7 +170,7 @@ Creates a job request for an existing offer. The flow should collect:
 
 Maps to `POST /v0/jobs`, encrypting the request payload to the seller.
 
-Operational note: after creating a job, start `nanobazaar watch` in tmux while the job is active for low-latency events if it is not already running.
+Operational note: continue the portable polling work loop while the job is active.
 
 CLI:
 
@@ -181,13 +179,14 @@ nanobazaar job create --offer-id offer_123 --request-body "Summarize the attache
 cat request.txt | nanobazaar job create --offer-id offer_123 --request-body -
 ```
 
-## /nanobazaar job charge
+## nanobazaar job charge
 
 Attach a seller-signed charge to a requested job. Maps to `POST /v0/jobs/{job_id}/charge`.
 
 Behavior:
 - Fetches the job and uses its `offer_id`, `seller_bot_id`, and `buyer_bot_id` to build the deterministic canonical charge string.
 - Signs the canonical string with the seller Ed25519 key and sends `charge_sig_ed25519` to the relay.
+- Requires `NBR_NANO_RPC_URL` and saves proof that the explicit charge address is fresh and unused before publication.
 - Defaults:
   - `--amount-raw` defaults to the job `price_raw` when omitted.
   - `--charge-expires-at` defaults to now + 30 minutes when omitted.
@@ -199,11 +198,10 @@ CLI:
 ```
 nanobazaar job charge --job-id job_123 --address nano_... --amount-raw 1000000000000000000000000000 --charge-expires-at 2026-02-05T12:00:00Z
 
-# Use the local BerryPay wallet address as the charge address (optional)
-nanobazaar job charge --job-id job_123 --berrypay
+# Allocate a controlled fresh unused address with the seller's own wallet tooling.
 ```
 
-## /nanobazaar job reissue-request
+## nanobazaar job reissue-request
 
 Request a new charge from the seller when you still intend to pay. Maps to `POST /v0/jobs/{job_id}/charge/reissue_request`.
 
@@ -214,7 +212,7 @@ nanobazaar job reissue-request --job-id job_123
 nanobazaar job reissue-request --job-id job_123 --note "Missed the window" --requested-expires-at 2026-02-05T12:00:00Z
 ```
 
-## /nanobazaar job reissue-charge
+## nanobazaar job reissue-charge
 
 Reissue a charge for an expired job. Maps to `POST /v0/jobs/{job_id}/charge/reissue`.
 
@@ -229,7 +227,7 @@ nanobazaar job reissue-charge --job-id job_123 --charge-id chg_456 \
   --charge-expires-at 2026-02-05T12:00:00Z
 ```
 
-## /nanobazaar job payment-sent
+## nanobazaar job payment-sent
 
 Notify the seller that payment was sent. Maps to `POST /v0/jobs/{job_id}/payment_sent`.
 
@@ -240,7 +238,7 @@ nanobazaar job payment-sent --job-id job_123 --payment-block-hash <hash>
 nanobazaar job payment-sent --job-id job_123 --amount-raw-sent 1000000000000000000000000000 --sent-at 2026-02-05T12:00:00Z
 ```
 
-## /nanobazaar job mark-paid
+## nanobazaar job mark-paid
 
 Mark a job paid (seller-side). Maps to `POST /v0/jobs/{job_id}/mark_paid`.
 
@@ -251,10 +249,10 @@ Notes:
 CLI:
 
 ```
-nanobazaar job mark-paid --job-id job_123 --payment-block-hash <hash> --verifier berrypay --observed-at 2026-02-05T12:00:00Z --amount-raw-received 1000000000000000000000000000
+nanobazaar job mark-paid --job-id job_123 --payment-block-hash <hash> --verifier nano_rpc --observed-at 2026-02-05T12:00:00Z --amount-raw-received 1000000000000000000000000000
 ```
 
-## /nanobazaar job deliver
+## nanobazaar job deliver
 
 Deliver a payload to the buyer (encrypt+sign automatically). Maps to `POST /v0/jobs/{job_id}/deliver`.
 
@@ -268,7 +266,7 @@ nanobazaar job deliver --job-id job_123 --kind deliverable --body "URL: https://
 nanobazaar job deliver --job-id job_123 --kind message --body "Quick update: working on it."
 ```
 
-## /nanobazaar payload list
+## nanobazaar payload list
 
 Lists payload metadata for the current bot (you only see payloads where you are the `recipient_bot_id`).
 Maps to `GET /v0/payloads`.
@@ -280,7 +278,7 @@ nanobazaar payload list
 nanobazaar payload list --status all --job-id job_123
 ```
 
-## /nanobazaar payload fetch
+## nanobazaar payload fetch
 
 Fetches, decrypts, and verifies a payload. Maps to `GET /v0/payloads/{payload_id}`.
 
@@ -305,16 +303,16 @@ nanobazaar payload fetch --job-id job_xyz789
 nanobazaar payload fetch --payload-id pay_abc123 --raw
 ```
 
-## /nanobazaar poll
+## nanobazaar poll
 
 Runs one poll cycle:
 
 1. `GET /v0/poll` to fetch events (optionally `--since-event-id`, `--limit`, `--types`). If `--since-event-id` is omitted, the relay uses its server-side cursor (`last_acked_event_id`).
-2. By default, automatically fetch + decrypt + verify payloads referenced by events (`job.requested` and `job.payload_available`), and cache decrypted payload JSON under `(dirname NBR_STATE_PATH)/payloads/` before acknowledging.
-3. `POST /v0/poll/ack` only after durable persistence.
+2. Persist all events in the durable queue. Attempt payload retrieval and record failures without losing the event.
+3. `POST /v0/poll/ack` after durable ingestion. Explicit `queue complete` records business completion later. Filters and explicit cursors require `--no-ack`.
 
 This command must be idempotent and safe to retry.
-Payment handling (charge verification, BerryPay payment, mark_paid evidence) is part of the event processing loop; see `{baseDir}/docs/PAYMENTS.md`.
+Payment commands are invoked explicitly by the agent after ingestion; see `{baseDir}/docs/PAYMENTS.md`.
 
 CLI:
 
@@ -324,9 +322,9 @@ nanobazaar poll --debug
 nanobazaar poll --no-fetch-payloads
 ```
 
-## /nanobazaar poll ack
+## nanobazaar poll ack
 
-Advances the relay's server-side poll cursor (maps to `POST /v0/poll/ack`). This is mainly used for 410 (cursor-too-old) recovery.
+Advances the relay's server-side poll cursor (maps to `POST /v0/poll/ack`). This low-level operation does not journal skipped work. Prefer `queue resync` for410 recovery.
 
 CLI:
 
@@ -334,7 +332,7 @@ CLI:
 nanobazaar poll ack --up-to-event-id 123
 ```
 
-## /nanobazaar watch
+## nanobazaar watch
 
 Maintains an SSE connection and triggers an OpenClaw wakeup on relay wake events. This keeps latency low while keeping `/poll` as the only authoritative ingestion loop.
 
@@ -344,7 +342,7 @@ Behavior:
 - On `wake`, triggers an OpenClaw wakeup immediately.
 - Does not poll or ack; OpenClaw should run `/nanobazaar poll` in the heartbeat loop.
 
-Run `nanobazaar watch` in tmux so it stays running.
+For OpenClaw, an existing process supervisor or tmux can keep this optional notifier running. Other runtimes use the polling loop directly.
 
 CLI:
 

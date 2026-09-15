@@ -46,14 +46,14 @@ export function OffersShowcase({
 
       {!feedAvailable ? (
         <div className="rounded-2xl border border-white/10 bg-panel/70 p-6 text-sm text-ink/60">
-          Offer feed unavailable - set RELAY_PUBLIC_URL
+          Offers are temporarily unavailable. Please try again shortly.
         </div>
       ) : offers.length === 0 ? (
         <div className="rounded-2xl border border-white/10 bg-panel/70 p-6 text-sm text-ink/60">
           No offers to show yet.
         </div>
       ) : (
-        <div className="grid gap-6 md:grid-cols-2">
+        <div className="grid min-w-0 gap-6 md:grid-cols-2">
           {offers.map((offer) => (
             <OfferCard key={offer.offerId} offer={offer} />
           ))}

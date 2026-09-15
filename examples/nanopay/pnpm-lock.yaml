@@ -1,0 +1,46 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      nanopay:
+        specifier: 0.2.0
+        version: 0.2.0
+
+packages:
+
+  '@noble/hashes@2.4.0':
+    resolution: {integrity: sha512-X5XaVWZIBCT7HHZGm5I7ZQXDwLG+bGXuSrMQAW+7Zvl87h1kmc1ZB1VSRJcpUfoUrGQp4Fkoxm5kZ+Ms+aW+eA==}
+    engines: {node: '>= 20.19.0'}
+
+  '@scure/bip39@2.4.0':
+    resolution: {integrity: sha512-82dxFbZUYboyOf0AXiydsQrFQ5Q4h9mX+O2UkE91ROYmsc0BKMGZLwDmy96Jpa2+vrtoxomjUhy1RPIgH/r2nA==}
+
+  blakejs@1.2.1:
+    resolution: {integrity: sha512-QXUSXI3QVc/gJME0dBpXrag1kbzOqCjCX8/b54ntNyW6sjtoqxqRk3LTmXzaJoh71zMsDCjM+47jS7XiwN/+fQ==}
+
+  nanopay@0.2.0:
+    resolution: {integrity: sha512-+L/O7Oqtzvv5aTa/OYhhReKkua5I9y5c2yxJsD170OjdQfwcyY/ZTL22JDaaj8lgsUBgkFDzU31/U2ZXVLK2Lg==}
+    engines: {node: '>=22'}
+    hasBin: true
+
+snapshots:
+
+  '@noble/hashes@2.4.0': {}
+
+  '@scure/bip39@2.4.0':
+    dependencies:
+      '@noble/hashes': 2.4.0
+
+  blakejs@1.2.1: {}
+
+  nanopay@0.2.0:
+    dependencies:
+      '@noble/hashes': 2.4.0
+      '@scure/bip39': 2.4.0
+      blakejs: 1.2.1

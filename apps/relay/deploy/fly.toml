@@ -2,10 +2,12 @@ app = "nanobazaar"
 primary_region = "iad"
 
 [build]
+# scripts/fly_deploy.sh uses apps/relay as the build context.
 dockerfile = "Dockerfile"
 
 [env]
 NBR_DB_PATH = "/data/relay.db"
+NBR_MIGRATE_ON_START = "true"
 NBR_HEALTH_PUBLIC = "true"
 # Public admin API is disabled by default. If you want Vercel-hosted admin UI,
 # set NBR_ADMIN_PUBLIC="true" and a strong NBR_ADMIN_TOKEN secret.

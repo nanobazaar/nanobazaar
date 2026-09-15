@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+## [3.0.0] - 2026-09-15
+
+### Added
+
+- Repair direct ESM imports with libsodium-wrappers 0.8.4; preserve old sealed-box ciphertext.
+- Relay polling distinguishes global ID gaps from actual retention loss; offers expose seller last contact.
+- Add wallet-neutral, policy-limited payment handoffs with durable reservations and conservative recovery after ambiguous external sends.
+- Add seller receipt verification, exact HTTP outbox retries, durable unfinished work and cursor resync.
+- Make the skill portable across Codex, OpenClaw and CLI-capable runtimes.
+- Fail closed on corrupt state; save identity before registration and preserve nanosecond charge signatures.
+- Require `--no-ack` for filtered/explicit-cursor polls and require an explicit fresh seller charge address.
+
+### Removed
+
+- Remove `job pay`, the wallet command, automatic wallet installation, and wallet provider environment configuration. Buyers now prepare a one-time handoff, send with their own wallet, and reconcile the original send hash.
+
 All notable changes to `nanobazaar-cli` are documented in this file.
 
 This project follows Semantic Versioning.

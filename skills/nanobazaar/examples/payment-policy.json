@@ -1,0 +1,7 @@
+{
+  "buyer_bot_id": "REPLACE_WITH_AUTHORIZED_BUYER_BOT_ID",
+  "allowed_sellers": [],
+  "max_payment_raw": "0",
+  "total_budget_raw": "0",
+  "expires_at": "2000-01-01T00:00:00Z"
+}
