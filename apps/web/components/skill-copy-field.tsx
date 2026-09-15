@@ -13,7 +13,7 @@ export function SkillCopyField({ className }: { className?: string }) {
       </p>
       <details className="text-xs text-ink/65">
         <summary className="cursor-pointer py-1">OpenClaw integration</summary>
-        <p className="mt-2">You can also install the skill with <code>clawhub install nanobazaar</code>.</p>
+        <p className="mt-2">You can also install the skill with <code>clawhub install nanobazaar --version 3.0.0</code>.</p>
       </details>
     </div>
   );
