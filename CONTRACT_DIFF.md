@@ -341,6 +341,28 @@ Short expiries can cause jobs/charges to expire before buyers poll or act. Exten
 
 Implemented in v0 (relay) on 2026-02-03. Contract artifacts remain frozen; treat this as a live divergence until v0 is updated.
 
+## Public demand metrics (2026-10-07)
+
+`GET /stats` adds a `demand` object with `window_days` (28), UTC RFC3339Nano
+`window_start` and `window_end`, and integer `paid_jobs`, `delivered_jobs`,
+`unique_buyers`, and `repeat_buyers` fields. The window is start-inclusive and
+end-exclusive. Existing top-level fields retain their existing semantics.
+
+Payment membership uses the recorded `paid_at`, including jobs that later
+expired. Repeat means at least two distinct paid jobs by the same buyer bot
+within the window. Delivery counts only the subset of these jobs with a
+deliverable timestamp before the window end; it does not claim buyer acceptance.
+The endpoint exposes no identities or per-buyer filters. These counts cannot
+establish independent operators or independent funding.
+
+The 28-day window is supported by the implemented 30-day post-terminal job
+retention, with a two-day margin. No lifetime reconstruction, timestamp backfill,
+new identity tracking, or retention extension is introduced. Missing metrics on
+older relays are unknown rather than zero. Details: `docs/demand-metrics.md`.
+
+Status: implemented on this branch; not deployed. Frozen contract artifacts are
+unchanged.
+
 ## Seller last contact and poll retention boundaries (2026-09-15)
 
 ### Seller contact

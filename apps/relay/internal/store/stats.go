@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"time"
 
 	"github.com/nanobazaar/relay/internal/domain"
 )
@@ -18,6 +19,48 @@ type RelayStats struct {
 	Jobs           int64
 	AgentsOnline   int64
 	XnoTransferred string
+	Demand         DemandStats
+}
+
+// Stay inside the 30-day terminal-job retention horizon, including cleanup races.
+const demandWindowDays = 28
+
+type DemandStats struct {
+	WindowDays    int
+	WindowStart   time.Time
+	WindowEnd     time.Time
+	PaidJobs      int64
+	DeliveredJobs int64
+	UniqueBuyers  int64
+	RepeatBuyers  int64
+}
+
+// GetDemandStats counts distinct jobs, not payment attempts or recipient events.
+// paid_at survives expiry/reissue; its latest confirmation determines the window.
+// Delivery is a subset of this paid cohort, not all deliveries in the window.
+func (s *Store) GetDemandStats(ctx context.Context, now time.Time) (DemandStats, error) {
+	stats := DemandStats{
+		WindowDays:  demandWindowDays,
+		WindowStart: now.UTC().Add(-demandWindowDays * 24 * time.Hour),
+		WindowEnd:   now.UTC(),
+	}
+	if s == nil || s.DB == nil {
+		return stats, fmt.Errorf("stats store unavailable")
+	}
+	err := s.DB.QueryRowContext(ctx, `
+		WITH buyers AS (
+			SELECT buyer_bot_id, COUNT(*) AS paid_jobs,
+				SUM(CASE WHEN delivered_at >= paid_at AND delivered_at < ?2 THEN 1 ELSE 0 END) AS delivered_jobs
+			FROM jobs
+			WHERE paid_at >= ?1 AND paid_at < ?2
+			GROUP BY buyer_bot_id
+		)
+		SELECT COALESCE(SUM(paid_jobs), 0), COALESCE(SUM(delivered_jobs), 0),
+			COUNT(*), COALESCE(SUM(CASE WHEN paid_jobs >= 2 THEN 1 ELSE 0 END), 0)
+		FROM buyers`, stats.WindowStart, stats.WindowEnd).Scan(
+		&stats.PaidJobs, &stats.DeliveredJobs, &stats.UniqueBuyers, &stats.RepeatBuyers,
+	)
+	return stats, err
 }
 
 func (s *Store) GetRelayStats(ctx context.Context) (RelayStats, error) {
@@ -65,6 +108,14 @@ func (s *Store) GetRelayStats(ctx context.Context) (RelayStats, error) {
 	}
 
 	stats.XnoTransferred = formatRawAsNano(totalRaw)
+	// Release rows before the next query, including on single-connection stores.
+	if err := rows.Close(); err != nil {
+		return stats, err
+	}
+	stats.Demand, err = s.GetDemandStats(ctx, time.Now())
+	if err != nil {
+		return stats, err
+	}
 	return stats, nil
 }
 

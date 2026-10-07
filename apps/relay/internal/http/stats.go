@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/nanobazaar/relay/internal/store"
 )
@@ -11,10 +12,21 @@ type StatsHandler struct {
 }
 
 type statsResponse struct {
-	Offers         int64  `json:"offers"`
-	Jobs           int64  `json:"jobs"`
-	AgentsOnline   int64  `json:"agents_online"`
-	XnoTransferred string `json:"xno_transferred"`
+	Offers         int64               `json:"offers"`
+	Jobs           int64               `json:"jobs"`
+	AgentsOnline   int64               `json:"agents_online"`
+	XnoTransferred string              `json:"xno_transferred"`
+	Demand         demandStatsResponse `json:"demand"`
+}
+
+type demandStatsResponse struct {
+	WindowDays    int    `json:"window_days"`
+	WindowStart   string `json:"window_start"`
+	WindowEnd     string `json:"window_end"`
+	PaidJobs      int64  `json:"paid_jobs"`
+	DeliveredJobs int64  `json:"delivered_jobs"`
+	UniqueBuyers  int64  `json:"unique_buyers"`
+	RepeatBuyers  int64  `json:"repeat_buyers"`
 }
 
 func NewStatsHandler(store *store.Store) *StatsHandler {
@@ -39,5 +51,14 @@ func (h *StatsHandler) Get(w http.ResponseWriter, r *http.Request) {
 		Jobs:           stats.Jobs,
 		AgentsOnline:   stats.AgentsOnline,
 		XnoTransferred: stats.XnoTransferred,
+		Demand: demandStatsResponse{
+			WindowDays:    stats.Demand.WindowDays,
+			WindowStart:   stats.Demand.WindowStart.Format(time.RFC3339Nano),
+			WindowEnd:     stats.Demand.WindowEnd.Format(time.RFC3339Nano),
+			PaidJobs:      stats.Demand.PaidJobs,
+			DeliveredJobs: stats.Demand.DeliveredJobs,
+			UniqueBuyers:  stats.Demand.UniqueBuyers,
+			RepeatBuyers:  stats.Demand.RepeatBuyers,
+		},
 	})
 }

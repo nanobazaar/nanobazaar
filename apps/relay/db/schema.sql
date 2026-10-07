@@ -136,6 +136,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_charge_address ON jobs(seller_bot_id, charge
 CREATE INDEX IF NOT EXISTS idx_jobs_cancelled_at ON jobs(cancelled_at);
 CREATE INDEX IF NOT EXISTS idx_jobs_expired_at ON jobs(expired_at);
 CREATE INDEX IF NOT EXISTS idx_jobs_delivered_at ON jobs(delivered_at);
+CREATE INDEX IF NOT EXISTS idx_jobs_paid_at ON jobs(paid_at);
 
 CREATE TABLE IF NOT EXISTS payloads (
 	payload_id TEXT NOT NULL,
