@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,7 +20,7 @@ func TestStatsEndpoint(t *testing.T) {
 	defer db.Close()
 
 	st := store.New(db)
-	now := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+	now := time.Now().UTC().Add(-time.Hour)
 
 	buyerID := "bot_buyer"
 	sellerID := "bot_seller"
@@ -62,6 +63,53 @@ func TestStatsEndpoint(t *testing.T) {
 	}
 	if resp.XnoTransferred != "1.5" {
 		t.Fatalf("expected xno_transferred 1.5, got %q", resp.XnoTransferred)
+	}
+	if resp.Demand.PaidJobs != 2 || resp.Demand.DeliveredJobs != 1 || resp.Demand.UniqueBuyers != 1 || resp.Demand.RepeatBuyers != 1 {
+		t.Fatalf("unexpected demand: %+v", resp.Demand)
+	}
+	start, err := time.Parse(time.RFC3339Nano, resp.Demand.WindowStart)
+	if err != nil {
+		t.Fatal(err)
+	}
+	end, err := time.Parse(time.RFC3339Nano, resp.Demand.WindowEnd)
+	if err != nil || end.Sub(start) != 28*24*time.Hour || resp.Demand.WindowDays != 28 {
+		t.Fatalf("invalid window: %+v, %v", resp.Demand, err)
+	}
+	if rec.Header().Get("Cache-Control") != "public, max-age=60" {
+		t.Fatal("missing cache policy")
+	}
+	var public map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &public); err != nil {
+		t.Fatal(err)
+	}
+	if len(public) != 5 {
+		t.Fatalf("unexpected public fields: %v", public)
+	}
+	var demand map[string]json.RawMessage
+	if err := json.Unmarshal(public["demand"], &demand); err != nil {
+		t.Fatal(err)
+	}
+	if len(demand) != 7 {
+		t.Fatalf("unexpected demand fields: %v", demand)
+	}
+	for _, key := range []string{"window_days", "window_start", "window_end", "paid_jobs", "delivered_jobs", "unique_buyers", "repeat_buyers"} {
+		if _, ok := demand[key]; !ok {
+			t.Fatalf("missing public field %q", key)
+		}
+	}
+	for _, private := range []string{buyerID, sellerID, revokedID, "job_paid", "job_delivered", "offer_a", "buyer_bot_id", "payment_block_hash"} {
+		if strings.Contains(rec.Body.String(), private) {
+			t.Fatalf("private value leaked: %q", private)
+		}
+	}
+	// Public callers cannot request per-buyer slices or arbitrary historical windows.
+	filtered := httptestRequest(t, NewRouter(RouterConfig{Store: st}), httptest.NewRequest(http.MethodGet, "/stats?buyer_bot_id=unknown&window_days=365", nil))
+	var unfiltered statsResponse
+	if err := json.Unmarshal(filtered.Body.Bytes(), &unfiltered); err != nil {
+		t.Fatal(err)
+	}
+	if filtered.Code != http.StatusOK || unfiltered.Demand.UniqueBuyers != 1 || unfiltered.Demand.WindowDays != 28 {
+		t.Fatalf("query altered scope: %s", filtered.Body.String())
 	}
 }
 

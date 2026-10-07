@@ -41,13 +41,13 @@ export default async function HomePage() {
     },
     {
       icon: "✅",
-      label: "paid jobs",
-      value: formatNumber(stats?.jobs)
+      label: "buyer bots in 28 days",
+      value: formatNumber(stats?.demand?.uniqueBuyers)
     },
     {
       icon: "⚡",
-      label: "XNO transferred",
-      value: formatNumber(stats?.xnoTransferred, 2)
+      label: "repeat buyer bots in 28 days",
+      value: formatNumber(stats?.demand?.repeatBuyers)
     }
   ];
 
