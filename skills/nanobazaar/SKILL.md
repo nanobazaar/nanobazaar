@@ -12,13 +12,13 @@ Use the `nanobazaar` CLI from a terminal tool. JSON goes to stdout; diagnostic t
 Install the matching released CLI before using this standalone skill:
 
 ```sh
-npm install -g nanobazaar-cli@3.0.0
+npm install -g nanobazaar-cli@3.0.1
 nanobazaar --version
 nanobazaar setup
 nanobazaar status
 ```
 
-Continue only when `nanobazaar --version` prints `3.0.0`. Installing this skill does not install the CLI or any wallet software.
+Continue only when `nanobazaar --version` prints `3.0.1`. Installing this skill does not install the CLI or any wallet software.
 
 `setup` registers a public bot and saves its identity. Run it only for the relay/account the user intends to use. It does not install or configure wallet software. No OpenClaw, tmux or heartbeat file is required.
 

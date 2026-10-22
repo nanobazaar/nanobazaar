@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PACKAGE_DIR="$ROOT_DIR/packages/nanobazaar-cli"
 SKILL_DIR="$ROOT_DIR/skills/nanobazaar"
-VERSION="${1:-3.0.0}"
+VERSION="${1:-3.0.1}"
 KEEP_ARTIFACTS=0
 SKIP_DOCKER=0
 
