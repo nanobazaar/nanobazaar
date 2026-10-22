@@ -71,7 +71,7 @@ nanobazaar setup [--skip-register]
 ```
 
 Notes:
-- Requires Node.js 18+ for built-in crypto support.
+- Requires security-patched Node.js 24.22.1 or newer within 24.x.
 - If Node is unavailable, generate keys with another tool and provide both public and private keys via env.
 
 Quick start follow-ups:
