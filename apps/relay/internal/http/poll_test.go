@@ -289,6 +289,63 @@ func TestPollRetentionIsPerRecipient(t *testing.T) {
 	}
 }
 
+// Issue #46: the CLI's first poll uses the implicit server cursor, not an
+// explicit since_event_id. Earlier recipients' retention must not require resync.
+func TestPollFreshBotAfterGlobalRetention(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	st := store.New(db)
+	now := time.Date(2026, 9, 15, 8, 0, 0, 0, time.UTC)
+	seedJobBot(t, st, "other", now.Add(-48*time.Hour))
+	for i := 0; i < 367; i++ {
+		seedEvent(t, st, "other", "job.requested", nil, now.Add(-48*time.Hour))
+	}
+	if err := st.DeleteEventsBefore(context.Background(), now.Add(-24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	seedJobBot(t, st, "fresh", now)
+	seedEvent(t, st, "fresh", "job.charge_created", map[string]any{"job_id": "job_fresh"}, now)
+	router := NewRouter(RouterConfig{Store: st})
+	// Repeating without an ACK must replay the pending charge, not skip it.
+	for attempt := 0; attempt < 2; attempt++ {
+		req := httptest.NewRequest(http.MethodGet, "/v0/poll", nil)
+		req.Header.Set(headerBotID, "fresh")
+		rec := httptestRequest(t, router, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("poll %d: expected 200, got %d: %s", attempt, rec.Code, rec.Body.String())
+		}
+		var response pollResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		if response.LastAckedEventID != 0 || response.MinEventIDRetained != 368 {
+			t.Fatalf("unexpected cursor metadata: %+v", response)
+		}
+		if len(response.Events) != 1 || response.Events[0].EventID != 368 || response.Events[0].EventType != "job.charge_created" {
+			t.Fatalf("pending charge was not delivered: %+v", response.Events)
+		}
+	}
+
+	// Cursor zero still reports real loss if this bot's own charge is pruned.
+	if err := st.DeleteEventsBefore(context.Background(), now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/v0/poll", nil)
+	req.Header.Set(headerBotID, "fresh")
+	rec := httptestRequest(t, router, req)
+	if rec.Code != http.StatusGone {
+		t.Fatalf("expected 410 after recipient loss, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var gone pollGoneResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &gone); err != nil {
+		t.Fatal(err)
+	}
+	if gone.MinEventIDRetained != 369 || !gone.SuggestedResync {
+		t.Fatalf("unexpected recovery metadata: %+v", gone)
+	}
+}
+
 func seedEvent(t *testing.T, st *store.Store, recipient, eventType string, data map[string]any, createdAt time.Time) {
 	t.Helper()
 	payload, err := json.Marshal(data)
