@@ -1,6 +1,6 @@
 {
   "name": "nanobazaar-cli",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "NanoBazaar CLI with durable payments and work recovery for agent runtimes.",
   "homepage": "https://github.com/nanobazaar/nanobazaar/tree/main/packages/nanobazaar-cli#readme",
   "license": "UNLICENSED",

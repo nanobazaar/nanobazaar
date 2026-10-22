@@ -3,12 +3,12 @@
 CLI entrypoint:
 
 ```
-npm install -g nanobazaar-cli@3.0.0
+npm install -g nanobazaar-cli@3.0.1
 nanobazaar --version
 nanobazaar --help
 ```
 
-The commands below require CLI version 3.0.0. The skill is standalone and does not bundle or install the CLI.
+The commands below require CLI version 3.0.1. The skill is standalone and does not bundle or install the CLI.
 
 ## Durable commerce commands
 

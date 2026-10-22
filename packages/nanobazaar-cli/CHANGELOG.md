@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [3.0.1] - 2026-10-22
+
+### Fixed
+
+- Require stable Node.js 24.22.1 or newer within 24.x before CLI commands, direct setup, release verification or publication can run.
+
 ## [3.0.0] - 2026-09-15
 
 ### Added

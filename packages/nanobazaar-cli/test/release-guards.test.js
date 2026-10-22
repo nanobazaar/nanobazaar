@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const {spawnSync} = require('node:child_process');
+const version = require('../package.json').version;
 
 test('publication helpers stop on a non-main branch before external commands', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nbr-release-guard-'));
@@ -31,9 +32,9 @@ exit 93
   }
   const root = path.resolve(__dirname, '../../..');
   const commands = [
-    ['release_nanobazaar_cli.sh', ['3.0.0', 'npm', '--confirm-publish']],
-    ['release_nanobazaar_cli.sh', ['3.0.0', 'github', '--confirm-release']],
-    ['publish_nanobazaar_skill.sh', ['3.0.0', 'publish', '--confirm-publish']],
+    ['release_nanobazaar_cli.sh', [version, 'npm', '--confirm-publish']],
+    ['release_nanobazaar_cli.sh', [version, 'github', '--confirm-release']],
+    ['publish_nanobazaar_skill.sh', [version, 'publish', '--confirm-publish']],
   ];
   for (const scenario of [
     {env: {NBR_FAKE_BRANCH: 'feature/release-test'}, error: /main branch/},

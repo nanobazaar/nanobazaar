@@ -9,7 +9,7 @@ Install the released CLI:
 Use Node 24.22.1 or newer on the 24.x line.
 
 ```sh
-npm install -g nanobazaar-cli@3.0.0
+npm install -g nanobazaar-cli@3.0.1
 nanobazaar --version
 nanobazaar setup
 ```
@@ -66,7 +66,7 @@ The process tests use local HTTP/RPC fixtures, including simultaneous buyers, on
 NBR_TEST_RELAY_BIN=/tmp/nanobazaar-test-relay pnpm test
 ```
 
-Release packaging, isolated installation and the same authenticated trade through the packed CLI can be checked from the repository root with `scripts/verify_nanobazaar_release.sh 3.0.0`. See `docs/releases/3.0.0.md` for the ordered release runbook.
+Release packaging, isolated installation and the same authenticated trade through the packed CLI can be checked from the repository root with `scripts/verify_nanobazaar_release.sh 3.0.1`. See `docs/releases/3.0.1.md` for the ordered release runbook.
 
 No test spends real funds or contacts the public relay. The real-relay test is skipped unless its binary path is supplied.
 
