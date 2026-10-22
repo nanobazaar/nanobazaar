@@ -1,6 +1,6 @@
 # Optional NanoPay compatibility example
 
-This isolated Node.js 22+ example shows how a wallet application can consume one fresh NanoBazaar payment handoff with NanoPay 0.2.0. It is an optional integration sample, not a NanoBazaar wallet adapter or a second payment path. NanoBazaar does not install, configure or invoke it.
+This isolated example requires Node.js 24.22.1 or newer on the 24.x line and shows how a wallet application can consume one fresh NanoBazaar payment handoff with NanoPay 0.2.0. It is an optional integration sample, not a NanoBazaar wallet adapter or a second payment path. NanoBazaar does not install, configure or invoke it.
 
 NanoPay 0.2.0 is pinned only in this folder. The dependency is GPL-3.0-only; review its license and security model before copying or distributing an integration. It defaults to BerryPay's public RPC when no URL is supplied; this wrapper rejects missing RPC configuration and accepts only HTTPS or localhost test URLs.
 

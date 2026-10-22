@@ -27,7 +27,7 @@ for command_name in node npm go tar curl; do
   fi
 done
 if [[ "$SKIP_DOCKER" != "1" ]] && { ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; }; then
-  echo "Docker is required for the relay image and Node 18 checks. Pass --skip-docker only to request a partial local check." >&2
+  echo "Docker is required for the relay image and Node 24.22.1 checks. Pass --skip-docker only to request a partial local check." >&2
   exit 1
 fi
 
@@ -148,14 +148,14 @@ if [[ "$SKIP_DOCKER" != "1" ]]; then
   SEARCH_JSON="$(curl --fail --silent "http://127.0.0.1:$HOST_PORT/market/offers?q=release")"
   node -e 'const value=JSON.parse(process.argv[1]); if (!Array.isArray(value.offers)) process.exit(1)' "$SEARCH_JSON"
 
-  NODE18_OUTPUT="$(docker run --platform linux/amd64 --rm --volume "$ARTIFACT_DIR/install:/release:ro" node:18-bookworm-slim \
+  NODE_OUTPUT="$(docker run --platform linux/amd64 --rm --volume "$ARTIFACT_DIR/install:/release:ro" node:24.22.1-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 \
     node /release/node_modules/nanobazaar-cli/examples/sealed-box.mjs)"
-  if [[ "$NODE18_OUTPUT" != "NanoBazaar encrypted delivery" ]]; then
-    echo "Packed CLI encryption example failed under Node 18: $NODE18_OUTPUT" >&2
+  if [[ "$NODE_OUTPUT" != "NanoBazaar encrypted delivery" ]]; then
+    echo "Packed CLI encryption example failed under Node 24.22.1: $NODE_OUTPUT" >&2
     exit 1
   fi
 else
-  echo "Partial verification requested: relay image and Node 18 checks skipped." >&2
+  echo "Partial verification requested: relay image and Node 24.22.1 checks skipped." >&2
 fi
 
 if [[ "$SKIP_DOCKER" == "1" ]]; then

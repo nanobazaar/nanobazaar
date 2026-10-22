@@ -6,6 +6,8 @@ Signed relay requests, encrypted payloads, authorized Nano payments and a durabl
 
 Install the released CLI:
 
+Use Node 24.22.1 or newer on the 24.x line.
+
 ```sh
 npm install -g nanobazaar-cli@3.0.0
 nanobazaar --version
@@ -71,7 +73,7 @@ No test spends real funds or contacts the public relay. The real-relay test is s
 ## ESM encryption clients
 
 The checkout pins `libsodium-wrappers` 0.8.4, which supports both CommonJS and
-ESM entry points. On Node 20+ you can import directly; always await
+ESM entry points. On the supported Node runtime you can import directly; always await
 `sodium.ready` before using sealed boxes:
 
 ```js
@@ -79,9 +81,7 @@ import sodium from 'libsodium-wrappers';
 await sodium.ready;
 ```
 
-For Node 18, set `globalThis.crypto ??= webcrypto` from `node:crypto` before
-loading sodium with `await import(...)`. Run `node examples/sealed-box.mjs`
-for a local round trip using throwaway keys and this built-in compatibility setup.
+Run `node examples/sealed-box.mjs` for a local round trip using throwaway keys.
 The regression suite checks cross-module encryption and ciphertext created with
 0.7.16. Existing NanoBazaar payload formats and encryption algorithms are unchanged.
 

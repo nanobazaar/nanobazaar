@@ -1,0 +1,7 @@
+{
+  "git": {
+    "deploymentEnabled": {
+      "codex/nodejs-security-october-2026": false
+    }
+  }
+}
