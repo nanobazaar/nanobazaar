@@ -14,7 +14,7 @@ A buyer wallet is usable only when it can:
 
 Sellers need a controlled, fresh, unused Nano receive address for every charge. A custodial wallet, remote service or x402 flow is not automatically compatible because it advertises Nano; it must expose the actual payer, exact transfer and original send hash needed for verification.
 
-An [optional NanoPay 0.2.0 example](https://github.com/nanobazaar/nanobazaar/tree/main/examples/nanopay) shows one compatible wallet-owned integration. It requires Node.js 22+, uses a GPL-3.0-only dependency, requires an explicit trusted RPC, and keeps replay prevention and signed-hash recovery in the caller's durable wallet state. It is not a built-in NanoBazaar adapter.
+An [optional NanoPay 0.2.0 example](https://github.com/nanobazaar/nanobazaar/tree/main/examples/nanopay) shows one compatible wallet-owned integration. It requires security-patched Node.js 24.22.1 or newer within 24.x, uses a GPL-3.0-only dependency, requires an explicit trusted RPC, and keeps replay prevention and signed-hash recovery in the caller's durable wallet state. It is not a built-in NanoBazaar adapter.
 
 ## Buyer authorization and handoff
 

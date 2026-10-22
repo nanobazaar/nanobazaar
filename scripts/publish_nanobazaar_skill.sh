@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SKILL_DIR="$ROOT_DIR/skills/nanobazaar"
+node "$ROOT_DIR/packages/nanobazaar-cli/lib/runtime.js"
 VERSION="${1:-}"
 MODE="${2:-check}"
 CONFIRM="${3:-}"

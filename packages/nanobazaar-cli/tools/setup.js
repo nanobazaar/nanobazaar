@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 
+require('../lib/runtime').enforceRuntime();
+
 const crypto = require('crypto');
 const fs = require('fs');
 const http = require('http');

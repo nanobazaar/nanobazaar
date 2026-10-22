@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 
+require('../lib/runtime').enforceRuntime();
+
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -43,7 +45,7 @@ let STATE_LOCK_SLEEP = null;
 
 function requireFetch() {
   if (typeof fetch !== 'function') {
-    throw new Error('Node.js 18+ is required (global fetch is missing).');
+    throw new Error('Global fetch is unavailable in this Node.js runtime.');
   }
 }
 
